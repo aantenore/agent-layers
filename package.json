@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
-    "reinloop": "github:aantenore/reinloop",
+    "reinloop": "github:aantenore/reinloop#feat/layers",
     "typescript": "^7.0.2"
   }
 }
