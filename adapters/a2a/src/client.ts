@@ -146,7 +146,7 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a'): Runt
               if (!read.task) return { runId: ctx.runId, status: 'failed', output: '', reason: 'remote agent sent no task' };
               span.setAttributes({ 'a2a.task.state': read.task.state });
               const s = runStatus(read.task.state);
-              return { runId: ctx.runId, ...s, output: s.status === 'completed' ? read.task.text : '' };
+              return { runId: ctx.runId, ...s, output: s.status === 'completed' ? read.task.text : '', ...read.task.metadata };
             } catch (err) {
               if (ctx.signal?.aborted) return { runId: ctx.runId, status: 'stopped', output: '', reason: 'aborted' };
               // A fixed reason: error text can carry URLs or credentials.

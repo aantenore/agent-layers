@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { ChannelHost, ChannelPort, InboundContext, InboundRoute, RunResult } from '@agent-layers/core';
 import {
   A2A_VERSION, ERRORS, getResult, LEGACY_VERSION, METHODS, partsText, sendResult, streamEvent, TERMINAL,
-  type TaskState, type TaskValue, type WireVersion,
+  runMetadata, type TaskState, type TaskValue, type WireVersion,
 } from './wire.ts';
 
 /** Options of the inbound descriptor. */
@@ -135,6 +135,9 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         }).then((r) => {
           value.state = value.state === 'canceled' ? 'canceled' : stateOfRun(r);
           if (value.state === 'completed') value.answer = r.output;
+          // Usage and cost travel in the task's metadata, so a calling stack can account for this run.
+          const metadata = runMetadata({ usage: r.usage, costUsd: r.costUsd });
+          if (Object.keys(metadata).length) value.metadata = metadata;
           const said = value.state === 'completed' ? r.output : value.state === 'rejected' ? 'The request was refused by a guardrail.' : value.state === 'canceled' ? 'The task was canceled.' : 'The agent run failed.';
           value.status = { messageId: randomUUID(), role: 'agent', text: said, contextId, taskId: id };
         }, () => {

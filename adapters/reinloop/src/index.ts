@@ -60,7 +60,7 @@ export function createReinloopRuntime(options: ReinloopOptions = {}, name = 'rei
           if (step.done) {
             const r = step.value;
             events.push(endEvent(r, false));
-            return { runId: r.runId, status: r.status, output: r.output, usage: r.usage, ...(r.reason ? { reason: r.reason } : {}), events };
+            return { runId: r.runId, status: r.status, output: r.output, usage: r.usage, costUsd: r.costUsd, ...(r.reason ? { reason: r.reason } : {}), events };
           }
           events.push(step.value);
         }

@@ -31,7 +31,7 @@ before(async () => {
     agents: { assistant: { instructions: 'Be brief.', model: 'mock' }, private: { instructions: '', model: 'mock' } },
     layers: {
       model: { adapter: 'mock-model', options: { latencyMs: 100, rules: [{ match: 'ping', reply: 'pong' }] } },
-      runtime: { adapter: 'basic-runtime' },
+      runtime: { adapter: 'basic-runtime', options: { pricing: { mock: { inputPerMTok: 1, outputPerMTok: 2 } } } },
       identity: { adapter: 'static-identity', options: { tokens: { 'dev-token': { subject: 'dev-user' }, 'other-token': { subject: 'other-user' } } } },
       channels: [{ adapter: 'a2a', options: { agents: ['assistant'], descriptions: { assistant: 'Answers in one word.' } } }],
     },
@@ -133,6 +133,9 @@ test('a remote A2A agent is the runtime of another stack, with the caller creden
       const r = await (await client.agent('assistant')).run('ping');
       assert.equal(r.status, 'completed', version);
       assert.equal(r.output, 'pong');
+      // Usage and cost reported by the remote stack in the task metadata.
+      assert.ok(r.usage && r.usage.prompt_tokens > 0, version);
+      assert.ok(typeof r.costUsd === 'number' && r.costUsd > 0, version);
     } finally {
       await client.close();
     }

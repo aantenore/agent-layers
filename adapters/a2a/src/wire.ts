@@ -12,7 +12,9 @@ export type TaskState = 'submitted' | 'working' | 'completed' | 'failed' | 'canc
 export type Role = 'user' | 'agent';
 
 export interface MessageValue { messageId: string; role: Role; text: string; contextId?: string; taskId?: string }
-export interface TaskValue { id: string; contextId: string; state: TaskState; timestamp: string; answer?: string; status?: MessageValue }
+/** Run figures a task may carry in its `metadata`: token usage (ModelPort shape) and cost in US dollars. */
+export interface TaskRunMetadata { usage?: { prompt_tokens: number; completion_tokens: number; total_tokens?: number }; costUsd?: number }
+export interface TaskValue { id: string; contextId: string; state: TaskState; timestamp: string; answer?: string; status?: MessageValue; metadata?: TaskRunMetadata }
 
 /** JSON-RPC method names per version → the operation. */
 export const METHODS: Record<string, { op: 'send' | 'stream' | 'get' | 'cancel'; version: WireVersion }> = {
@@ -85,7 +87,20 @@ export function taskWire(t: TaskValue, v: WireVersion): Record<string, unknown> 
     contextId: t.contextId,
     status: statusWire(t, v),
     ...(t.answer !== undefined ? { artifacts: [artifactWire(t, v)] } : {}),
+    ...(t.metadata && Object.keys(t.metadata).length ? { metadata: t.metadata } : {}),
   };
+}
+
+const count = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+
+/** Usage and cost from a task's `metadata`, when the remote agent reports them; malformed values are ignored. */
+export function runMetadata(raw: unknown): TaskRunMetadata {
+  const m = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const u = m.usage && typeof m.usage === 'object' ? m.usage as Record<string, unknown> : undefined;
+  const usage = u && count(u.prompt_tokens) && count(u.completion_tokens)
+    ? { prompt_tokens: u.prompt_tokens, completion_tokens: u.completion_tokens, total_tokens: count(u.total_tokens) ? u.total_tokens : u.prompt_tokens + u.completion_tokens }
+    : undefined;
+  return { ...(usage ? { usage } : {}), ...(count(m.costUsd) ? { costUsd: m.costUsd } : {}) };
 }
 
 /** Result of a send: 1.0 wraps the task (`{ task }`); 0.3 returns it bare. */
@@ -114,5 +129,6 @@ export function readResult(result: unknown): { task?: TaskValue & { text: string
   if (typeof t?.id !== 'string' || !state) return {};
   const answer = (Array.isArray(t.artifacts) ? t.artifacts : []).map((a: Record<string, unknown>) => partsText(a?.parts)).filter(Boolean).join('\n');
   const statusText = partsText(t.status?.message?.parts);
-  return { task: { id: t.id, contextId: String(t.contextId ?? ''), state, timestamp: String(t.status?.timestamp ?? ''), text: answer || statusText } };
+  const metadata = runMetadata(t.metadata);
+  return { task: { id: t.id, contextId: String(t.contextId ?? ''), state, timestamp: String(t.status?.timestamp ?? ''), text: answer || statusText, ...(Object.keys(metadata).length ? { metadata } : {}) } };
 }

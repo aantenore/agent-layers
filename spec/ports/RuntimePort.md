@@ -1,6 +1,6 @@
 # RuntimePort
 
-Layer: `harness` (L3 Agent runtime) · Version: 0.1.0 · Conformance: `checkRuntime`
+Layer: `harness` (L3 Agent runtime) · Version: 0.2.0 · Conformance: `checkRuntime`
 
 ## Purpose
 
@@ -43,6 +43,7 @@ A `RunnableAgent` has:
 | `output` | String, required | Final text. Empty when there is none. |
 | `reason?` | String | Why the run stopped or failed, for example `guardrail:<guard>:<stage>`. |
 | `usage?` | Usage | Token usage as in [ModelPort](ModelPort.md). |
+| `costUsd?` | Number, >= 0 | What the run cost in US dollars, summed over its model calls. Present when the runtime knows the prices of the models it called, or a remote agent reports it; absent when unknown (not 0). |
 | `events?` | [RunEvent] | `{type: String, ...}`. |
 
 `RunEvent` is runtime-specific; `type` is the only shared field.
@@ -74,4 +75,5 @@ A `RunnableAgent` has:
 
 ## Version history
 
+- 0.2.0 — optional `costUsd` on RunResult
 - 0.1.0 — initial

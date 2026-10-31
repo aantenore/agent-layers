@@ -27,7 +27,10 @@ export async function evaluate(io: Io, args: EvalArgs): Promise<number> {
     for (const c of cases) {
       const run = await agent.run(c.input, callerContext(identity)).catch((err: unknown) => ({ runId: '', status: 'failed', output: '', reason: errorMessage(err) }));
       const scores = (await Promise.all(stack.ports.eval.map((e) => e.score(c, run)))).flat();
-      const result: EvalResult = { id: c.id, runId: run.runId, output: run.output, status: String(run.status), scores };
+      const result: EvalResult = {
+        id: c.id, runId: run.runId, output: run.output, status: String(run.status), scores,
+        ...('usage' in run && run.usage ? { usage: run.usage } : {}), ...('costUsd' in run && run.costUsd !== undefined ? { costUsd: run.costUsd } : {}),
+      };
       lines.push(JSON.stringify(result));
       for (const s of scores) { total++; if (s.value >= 1) passed++; }
       io.err(`  ${scores.every((s) => s.value >= 1) && run.status === 'completed' ? 'pass' : 'FAIL'} ${c.id}${run.status !== 'completed' ? ` (${run.status}${'reason' in run && run.reason ? `: ${run.reason}` : ''})` : ''}`);

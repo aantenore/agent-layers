@@ -124,8 +124,9 @@ test('a rejected token stops dev before any run and is never printed', async () 
 test('eval scores the smoke dataset', async () => {
   const { io, text, errors } = captureIo(dir);
   assert.equal(await main(['eval', 'evals/smoke.jsonl', '--agent', 'assistant', '--profile', 'test', '--min', '1'], io), 0, errors());
-  const lines = text().split('\n').map((l) => JSON.parse(l) as { id: string; scores: { value: number }[] });
+  const lines = text().split('\n').map((l) => JSON.parse(l) as { id: string; scores: { value: number }[]; usage?: { prompt_tokens: number } });
   assert.deepEqual(lines.map((l) => l.id), ['tool-convert', 'knowledge-ferry', 'greeting']);
+  assert.ok(lines.every((l) => (l.usage?.prompt_tokens ?? 0) > 0), 'eval rows carry the run usage');
   assert.match(errors(), /3\/3 scores passed/);
 });
 

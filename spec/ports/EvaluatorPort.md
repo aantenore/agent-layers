@@ -1,6 +1,6 @@
 # EvaluatorPort
 
-Layer: `eval` (L10 Evaluation & improvement) · Version: 0.1.0 · Conformance: `checkEvaluator`
+Layer: `eval` (L10 Evaluation & improvement) · Version: 0.2.0 · Conformance: `checkEvaluator`
 
 ## Purpose
 
@@ -27,7 +27,7 @@ Score how good a run was against a dataset case, and say which layer is to blame
 
 `EvalScore` (defined in [eval-result.json](../schemas/eval-result.json) as `EvalScore`): `metric: String`, `value: Number` (both required), `layer?: Layer id` (the layer the score blames or concerns), `reason?: String`. No other fields.
 
-[EvalResult](../schemas/eval-result.json) (one line of a result file): `id` (the case id), `runId`, `output`, `status`, `scores: [EvalScore]`.
+[EvalResult](../schemas/eval-result.json) (one line of a result file): `id` (the case id), `runId`, `output`, `status`, `scores: [EvalScore]`, and, when the run reports them, `usage?` (token usage as in [ModelPort](ModelPort.md)) and `costUsd?` (as in RunResult).
 
 ## Semantics
 
@@ -58,6 +58,7 @@ Score how good a run was against a dataset case, and say which layer is to blame
 
 ## Version history
 
+- 0.2.0 — optional `usage` and `costUsd` on EvalResult
 - 0.1.0 — initial
 
 Example adapters: `expected-eval` (maps expected answers).

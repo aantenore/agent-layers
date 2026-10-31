@@ -132,6 +132,7 @@ test('pricing gives the run a cost, as a run_end field and an agent.cost.usd met
   const r = await (await s.agent('calc')).run('add 2 and 3');
   const end = r.events?.find((e) => e.type === 'run_end');
   assert.ok(Number(end?.costUsd) > 0);
+  assert.equal(r.costUsd, end?.costUsd, 'the result carries the cost too');
   assert.ok(records.some((x) => x.type === 'metric' && x.name === 'agent.cost.usd' && x.value === end?.costUsd));
   await s.close();
 });

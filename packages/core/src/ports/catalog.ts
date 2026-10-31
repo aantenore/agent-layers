@@ -50,7 +50,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   DeployPort: { port: 'DeployPort', layer: 'infra', version: '0.1.0', description: 'Turn service specs into running endpoints' },
   SecretPort: { port: 'SecretPort', layer: 'infra', version: '0.1.0', description: 'Resolve secret references' },
   ModelPort: { port: 'ModelPort', layer: 'llm', version: '0.1.0', description: 'Chat completions with tool calls, optionally streamed' },
-  RuntimePort: { port: 'RuntimePort', layer: 'harness', version: '0.1.0', description: 'Bind an agent spec to a runnable agent' },
+  RuntimePort: { port: 'RuntimePort', layer: 'harness', version: '0.2.0', description: 'Bind an agent spec to a runnable agent' },
   StatePort: { port: 'StatePort', layer: 'harness', version: '0.1.0', description: 'Session event log' },
   TriggerPort: { port: 'TriggerPort', layer: 'interface', version: '0.2.0', description: 'Start runs from events and schedules' },
   KnowledgePort: { port: 'KnowledgePort', layer: 'knowledge', version: '0.1.0', description: 'Search a knowledge source, answer with passages' },
@@ -65,7 +65,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   CachePort: { port: 'CachePort', layer: 'cache', version: '0.1.0', description: 'Key/value cache for model responses; usable by any layer' },
   RouterPort: { port: 'RouterPort', layer: 'cache', version: '0.1.0', description: 'Pick the model for a request' },
   TelemetryPort: { port: 'TelemetryPort', layer: 'telemetry', version: '0.1.0', description: 'Spans, events and metrics tagged with agent.layer' },
-  EvaluatorPort: { port: 'EvaluatorPort', layer: 'eval', version: '0.1.0', description: 'Score a run of a dataset case' },
+  EvaluatorPort: { port: 'EvaluatorPort', layer: 'eval', version: '0.2.0', description: 'Score a run of a dataset case' },
   FeedbackPort: { port: 'FeedbackPort', layer: 'eval', version: '0.1.0', description: 'User feedback attached to runs, as evaluation data' },
   ChannelPort: { port: 'ChannelPort', layer: 'interface', version: '0.2.0', description: 'Expose agents to people, apps and other agents' },
 });

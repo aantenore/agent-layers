@@ -34,7 +34,7 @@ not duplicated.
 | `interrupted` (caller aborted) | `stopped`, reason `aborted` |
 | `failed` | `failed`, reason from reinloop |
 
-`usage` sums the tokens of every turn. Events are `run_start`, `model_response` (turn, model, finish reason, tool
+`usage` sums the tokens of every turn; `costUsd` on the result is the run's cost from reinloop's price table and `pricing`. Events are `run_start`, `model_response` (turn, model, finish reason, tool
 calls, usage, `costUsd`), `tool_call`, `tool_result` (id, name, `isError`, duration), `tool_args_invalid`,
 `compaction`, and `run_end` (status, reason, usage, turns, `costUsd`; with `output` when streamed). They carry no
 message text, arguments or tool output. `stream` adds `text` events with the answer as it is generated (held back by

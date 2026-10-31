@@ -11,7 +11,7 @@ A port is the contract between the stack and one kind of backend. Every port has
 | Model plane | `llm` (L1) | [ModelPort](ModelPort.md) | 0.1.0 | Chat completions with tool calls, optionally streamed |
 | Model plane | `cache` (L2) | [CachePort](CachePort.md) | 0.1.0 | Key/value cache for model responses; usable by any layer |
 | Model plane | `cache` (L2) | [RouterPort](RouterPort.md) | 0.1.0 | Pick the model for a request |
-| Agent plane | `harness` (L3) | [RuntimePort](RuntimePort.md) | 0.1.0 | Bind an agent spec to a runnable agent |
+| Agent plane | `harness` (L3) | [RuntimePort](RuntimePort.md) | 0.2.0 | Bind an agent spec to a runnable agent |
 | Agent plane | `harness` (L3) | [StatePort](StatePort.md) | 0.1.0 | Session event log |
 | Agent plane | `knowledge` (L4) | [KnowledgePort](KnowledgePort.md) | 0.1.0 | Search a knowledge source, answer with passages |
 | Agent plane | `knowledge` (L4) | [MemoryPort](MemoryPort.md) | 0.1.0 | Long-term memory: remember, recall, forget |
@@ -25,7 +25,7 @@ A port is the contract between the stack and one kind of backend. Every port has
 | Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 0.2.0 | Expose agents to people, apps and other agents |
 | Experience plane | `interface` (L8) | [TriggerPort](TriggerPort.md) | 0.2.0 | Start runs from events and schedules |
 | Insight plane | `telemetry` (L9) | [TelemetryPort](TelemetryPort.md) | 0.1.0 | Spans, events and metrics tagged with `agent.layer` |
-| Insight plane | `eval` (L10) | [EvaluatorPort](EvaluatorPort.md) | 0.1.0 | Score a run of a dataset case |
+| Insight plane | `eval` (L10) | [EvaluatorPort](EvaluatorPort.md) | 0.2.0 | Score a run of a dataset case |
 | Insight plane | `eval` (L10) | [FeedbackPort](FeedbackPort.md) | 0.1.0 | User feedback attached to runs, as evaluation data |
 
 Layer ids (`infra`, `llm`, `cache`, ...) are the stable identifiers. The `L0`-`L10` numbers are for reading only and never appear in identifiers or file names.

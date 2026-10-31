@@ -11,6 +11,7 @@
     "output": { "type": "string" },
     "reason": { "type": "string", "description": "Why the run stopped, e.g. guardrail:<guard>:<stage>." },
     "usage": { "$ref": "chat-response.json#/properties/usage" },
+    "costUsd": { "type": "number", "minimum": 0, "description": "What the run cost in US dollars, when the runtime knows the model prices or the remote agent reports it." },
     "events": { "type": "array", "items": { "type": "object", "required": ["type"], "properties": { "type": { "type": "string" } } } }
   }
 }

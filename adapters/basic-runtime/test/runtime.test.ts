@@ -62,3 +62,17 @@ test('basic-runtime passes RuntimePort conformance', async () => {
   assert.deepEqual(report.failures, []);
   await s.close();
 });
+
+test('costUsd is reported when every model call is priced, and absent otherwise', async () => {
+  const priced = await compose(resolveProfile({ ...config, layers: { ...config.layers, runtime: { adapter: 'basic-runtime', options: { pricing: { mock: { inputPerMTok: 3, outputPerMTok: 15 } } } } } }), {
+    adapters: [mockModel, adapter, { ...functions, create: () => functions.create({ tools: [add] }, { name: 'math', env: {}, cwd: process.cwd(), telemetry: undefined as never }) }],
+  });
+  const r = await (await priced.agent('calc')).run('please add 2 and 3');
+  const expected = (r.usage!.prompt_tokens * 3 + r.usage!.completion_tokens * 15) / 1e6;
+  assert.ok(Math.abs((r.costUsd ?? -1) - expected) < 1e-12, `${r.costUsd} vs ${expected}`);
+  assert.equal(r.events?.at(-1)?.costUsd, r.costUsd);
+  await priced.close();
+  const s = await stack();
+  assert.equal((await (await s.agent('calc')).run('please add 2 and 3')).costUsd, undefined);
+  await s.close();
+});

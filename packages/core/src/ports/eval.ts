@@ -1,12 +1,13 @@
 import type { Layer } from '../layers.ts';
 import type { PortBase } from './base.ts';
+import type { Usage } from './model.ts';
 import type { RunEvent, RunStatus } from './runtime.ts';
 
 /** One dataset line. Schema: spec/schemas/eval-case.json. */
 export interface EvalCase { id: string; input: string; expected?: unknown; tags?: string[]; layer?: Layer }
 export interface EvalScore { metric: string; value: number; layer?: Layer; reason?: string }
 /** One result line. Schema: spec/schemas/eval-result.json. */
-export interface EvalResult { id: string; runId: string; output: string; status: string; scores: EvalScore[] }
+export interface EvalResult { id: string; runId: string; output: string; status: string; scores: EvalScore[]; usage?: Usage; costUsd?: number }
 export interface EvalRun { runId: string; output?: string; status: RunStatus; events?: RunEvent[] }
 
 /** Scores one run of one case. */

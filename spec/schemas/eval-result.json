@@ -10,7 +10,9 @@
     "runId": { "type": "string" },
     "output": { "type": "string" },
     "status": { "type": "string", "description": "Run status as reported by the harness, e.g. completed, failed, stopped." },
-    "scores": { "type": "array", "items": { "$ref": "#/$defs/EvalScore" } }
+    "scores": { "type": "array", "items": { "$ref": "#/$defs/EvalScore" } },
+    "usage": { "$ref": "chat-response.json#/properties/usage" },
+    "costUsd": { "type": "number", "minimum": 0, "description": "Cost of the run in US dollars, as the run reported it." }
   },
   "$defs": {
     "EvalScore": {

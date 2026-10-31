@@ -90,3 +90,7 @@ layer.
 
 The runtime binds the agent spec's name only: instructions, tools and knowledge belong to the remote agent. Use the
 gateway on the remote side to give it the stack's governed model and tools.
+
+Usage and cost: when the remote task carries `metadata.usage` (`prompt_tokens`, `completion_tokens`) or
+`metadata.costUsd`, the run result reports them. The inbound side writes both into the metadata of its tasks, so a
+stack calling another stack accounts for the remote run. Malformed values are ignored.

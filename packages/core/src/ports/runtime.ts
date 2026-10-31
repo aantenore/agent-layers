@@ -28,6 +28,8 @@ export interface RunResult {
   status: RunStatus;
   output: string;
   usage?: Usage;
+  /** Cost of the run in US dollars, when known (model prices, or reported by a remote agent). Absent when unknown. */
+  costUsd?: number;
   /** Why the run stopped or failed, e.g. `guardrail:<guard>:<stage>`. */
   reason?: string;
   events?: RunEvent[];

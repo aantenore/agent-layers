@@ -224,7 +224,7 @@ async function* streamRun(stack: Stack, name: string, input: RunInput, ctx: Part
   }
   const r = await agent.run(input, ctx);
   if (r.output) yield { type: 'text', text: r.output };
-  yield { type: 'run_end', runId: r.runId, status: r.status, output: r.output, ...(r.reason ? { reason: r.reason } : {}), ...(r.usage ? { usage: r.usage } : {}) };
+  yield { type: 'run_end', runId: r.runId, status: r.status, output: r.output, ...(r.reason ? { reason: r.reason } : {}), ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
 }
 
 function missingModel(): ModelPort {

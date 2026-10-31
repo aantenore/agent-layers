@@ -3,9 +3,14 @@ import {
   type Stack, type Usage,
 } from '@agent-layers/core';
 
+/** Price of a model in US dollars per million tokens. */
+export interface ModelPrice { inputPerMTok?: number; outputPerMTok?: number }
+
 export interface LoopOptions {
   /** Model calls per run (default 8). */
   maxTurns?: number;
+  /** Prices by model id, matched on the model the response names, else the agent's model. Runs report `costUsd` when every call is priced. */
+  pricing?: Record<string, ModelPrice>;
 }
 
 const PARAM_KEYS = ['temperature', 'max_tokens', 'stop'] as const;
@@ -19,10 +24,12 @@ export async function* runLoop(stack: Stack, agent: AgentSpec, input: RunInput, 
     ...(typeof input === 'string' ? [{ role: 'user' as const, content: input }] : input.messages),
   ];
   const usage: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+  // Undefined once a call has no price: a partial sum would look like a real total.
+  let costUsd: number | undefined = opts.pricing ? 0 : undefined;
   const params = Object.fromEntries(PARAM_KEYS.filter((k) => agent.params?.[k] !== undefined).map((k) => [k, agent.params![k]]));
   const extra = Object.fromEntries(Object.entries(agent.params ?? {}).filter(([k]) => !(PARAM_KEYS as readonly string[]).includes(k)));
   const end = (status: RunResult['status'], output: string, reason?: string): RunResult =>
-    ({ runId: ctx.runId, status, output, usage, ...(reason ? { reason } : {}) });
+    ({ runId: ctx.runId, status, output, usage, ...(costUsd !== undefined ? { costUsd } : {}), ...(reason ? { reason } : {}) });
 
   yield { type: 'run_start', runId: ctx.runId, agent: agent.name };
   try {
@@ -36,6 +43,10 @@ export async function* runLoop(stack: Stack, agent: AgentSpec, input: RunInput, 
       usage.prompt_tokens += res.usage?.prompt_tokens ?? 0;
       usage.completion_tokens += res.usage?.completion_tokens ?? 0;
       usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+      if (costUsd !== undefined) {
+        const price = opts.pricing?.[res.model] ?? opts.pricing?.[agent.model];
+        costUsd = price ? costUsd + ((res.usage?.prompt_tokens ?? 0) * (price.inputPerMTok ?? 0) + (res.usage?.completion_tokens ?? 0) * (price.outputPerMTok ?? 0)) / 1e6 : undefined;
+      }
       const msg = res.choices[0]?.message ?? { role: 'assistant' as const, content: '' };
       const calls = msg.tool_calls ?? [];
       yield { type: 'model_response', turn, model: res.model, finish_reason: res.choices[0]?.finish_reason ?? null, toolCalls: calls.length };

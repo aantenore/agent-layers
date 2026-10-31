@@ -1,7 +1,7 @@
 import { defineAdapter, PORT_VERSIONS, type RunEvent, type RuntimePort } from '@agent-layers/core';
-import { runLoop, type LoopOptions } from './loop.ts';
+import { runLoop, type LoopOptions, type ModelPrice } from './loop.ts';
 
-export { runLoop, type LoopOptions };
+export { runLoop, type LoopOptions, type ModelPrice };
 
 /** Factory: an in-process loop over the stack's model and tools. */
 export function createBasicRuntime(options: LoopOptions = {}, name = 'basic-runtime'): RuntimePort {
@@ -17,7 +17,7 @@ export function createBasicRuntime(options: LoopOptions = {}, name = 'basic-runt
           for (;;) {
             const step = await it.next();
             if (step.done) {
-              events.push({ type: 'run_end', status: step.value.status, ...(step.value.reason ? { reason: step.value.reason } : {}) });
+              events.push({ type: 'run_end', status: step.value.status, ...(step.value.reason ? { reason: step.value.reason } : {}), ...(step.value.costUsd !== undefined ? { costUsd: step.value.costUsd } : {}) });
               return { ...step.value, events };
             }
             events.push(step.value);
@@ -29,7 +29,7 @@ export function createBasicRuntime(options: LoopOptions = {}, name = 'basic-runt
           for (;;) {
             const step = await it.next();
             if (step.done) {
-              yield { type: 'run_end', status: step.value.status, output: step.value.output, ...(step.value.reason ? { reason: step.value.reason } : {}) };
+              yield { type: 'run_end', status: step.value.status, output: step.value.output, usage: step.value.usage, ...(step.value.costUsd !== undefined ? { costUsd: step.value.costUsd } : {}), ...(step.value.reason ? { reason: step.value.reason } : {}) };
               return;
             }
             yield step.value;
@@ -51,7 +51,17 @@ export const adapter = defineAdapter<'RuntimePort', LoopOptions>({
   description: 'Minimal agent loop: model call, tool calls, final answer. For development, tests and demos.',
   optionsSchema: {
     type: 'object',
-    properties: { maxTurns: { type: 'integer', minimum: 1, maximum: 100 } },
+    properties: {
+      maxTurns: { type: 'integer', minimum: 1, maximum: 100 },
+      pricing: {
+        type: 'object',
+        additionalProperties: {
+          type: 'object',
+          properties: { inputPerMTok: { type: 'number', minimum: 0 }, outputPerMTok: { type: 'number', minimum: 0 } },
+          additionalProperties: false,
+        },
+      },
+    },
     additionalProperties: false,
   },
   create: (options, ctx) => createBasicRuntime(options, ctx.name),
