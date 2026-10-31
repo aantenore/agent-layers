@@ -15,7 +15,10 @@ starts runs from events and schedules. Neither adds agent logic.
 | [ChannelPort](../../spec/ports/ChannelPort.md) | `serve` a stack host to people, apps and agents; the host exposes `agents`, `run`, `stream` and `verify` |
 | [TriggerPort](../../spec/ports/TriggerPort.md) | `start` a handler that receives events and schedules |
 
-Data shape: [trigger.json](../../spec/schemas/trigger.json).
+Data shapes: [trigger.json](../../spec/schemas/trigger.json), [run-result.json](../../spec/schemas/run-result.json). A
+`Trigger` is `{ id, kind, source, at?, agent?, data? }`; an event standard's own id and extra attributes (the
+CloudEvents `id` and `subject`) are kept in `ext`. The channel envelope (`InboundContext`) carries the `caller` and an
+opaque trace context `{ parent, state? }` that the channel copies in and out unchanged.
 
 ### Where it sits
 
@@ -48,8 +51,10 @@ flowchart LR
 
 ## Boundaries
 
-- **Identity.** The channel passes the caller's credential through; [identity](identity.md) verifies it. The interface
-  never invents an identity.
+- **Identity.** The channel passes the caller's credential through; [identity](identity.md) verifies it into a
+  `Caller`. The interface never invents an identity.
+- **Standards stay at the edge.** A channel translates its standard (OpenAI Chat Completions, MCP, A2A) to the SDK
+  language and back; a run status maps to the standard's own state (`waiting` to A2A `input-required`, for example).
 - **Ingress.** Traffic enters through the ingress of [infra](infra.md).
 - **Transparency.** The channel tells users they are talking to an agent; see
   [governance](../cross-cutting/governance-compliance.md).
@@ -58,7 +63,7 @@ flowchart LR
 
 Any chat UI that speaks the OpenAI API replaces another with a base URL change. MCP clients and A2A agents connect to
 the same agents through their own endpoints. Where a channel has no standard, write a channel adapter; the conformance
-suite checks that the run carries the caller's identity, that streamed output reassembles to the final output, and
+suite checks that the run carries the caller, that streamed output reassembles to the final output, and
 that errors surface as channel-native errors.
 
 ## Reference adapters

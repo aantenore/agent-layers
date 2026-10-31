@@ -22,7 +22,7 @@ flowchart LR
 
 Start with the agent file and its evaluation criteria, together.
 
-- **Agent file (`harness`).** A Markdown file: purpose, instructions, tools, model, budget. It is the unit of review and
+- **Agent file (`harness`).** A Markdown file: purpose, instructions, tools, model, `settings` (temperature, output limit, stop), budget. It is the unit of review and
   release.
 - **Eval criteria (`eval`).** A first dataset of `EvalCase` lines: what a good answer is, and which cases must be
   refused. Writing them first makes "done" testable.
@@ -52,7 +52,7 @@ behaviour change has an author and a review.
 
 ## 5. Operate (telemetry)
 
-Traces and metrics for every run, audit events for denials and guard actions, cost per agent. Alerts on error rate,
+Traces and metrics for every run (`agent.*` names), audit events for denials and guard actions, cost per agent. Alerts on error rate,
 latency and spend.
 
 ## 6. Improve (eval, back to harness, knowledge and tool)

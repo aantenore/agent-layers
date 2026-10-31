@@ -61,6 +61,8 @@ described in Why. **Accepted** is the validated range. **Safe range** is what pr
 | `pipeline.knowledge.k` | `4` | 1–∞ | 1–20 | warn outside safe range | Passages injected per model call, and the default k of the knowledge search tools. |
 | `pipeline.knowledge.maxChars` | `4000` chars | 200–∞ | 200–32000 | warn outside safe range | Size of the injected knowledge block, so retrieval cannot crowd out the conversation. |
 | `pipeline.knowledge.maxK` | `20` | 1–1000 | — | — | Largest k a model may ask the knowledge search tools for; larger requests are capped. |
+| `pipeline.knowledge.fusion.rrfK` | `60` | 1–1000 | — | — | Rank constant of reciprocal rank fusion across knowledge sources; a higher value flattens the difference between ranks. |
+| `pipeline.knowledge.fusion.weights.*` | `1` | 0–100 | — | — | Weight of one knowledge source (by source name) in the fusion; 0 keeps its passages out of the ranking, a higher value favours the source. |
 | `pipeline.cacheTtlMs` | — | 0–∞ | — | — | Lifetime of cached model answers; when unset (or 0) the cache adapter's own TTL applies. |
 | `pipeline.approvalTimeoutMs` | `0` ms | 0–∞ | 0–3600000 | warn outside safe range | How long a tool call waits for a human approval; 0 does not wait, so the call is refused while pending. |
 
@@ -71,6 +73,7 @@ described in Why. **Accepted** is the validated range. **Safe range** is what pr
 | `limits.check.timeoutMs` | `30000` ms | 1–∞ | — | — | Time limit of one conformance probe of `agent-layers check`. |
 | `limits.check.deployTimeoutMs` | `300000` ms | 1–∞ | — | — | Time limit of the deploy probes, which start and stop services. |
 | `limits.check.listToolsTimeoutMs` | `5000` ms | 1–∞ | — | — | Time limit of listing tools while looking for an audience for the credentials probe. |
+| `limits.extBytes` | `16384` bytes | 256–1048576 | 256–65536 | warn outside safe range | Largest `ext` bag the core keeps on a shape it passes on; a larger one is dropped and an `agent.ext.dropped` event is emitted, so adapters cannot smuggle bulk data through the extension bags. |
 
 ## Adapters
 

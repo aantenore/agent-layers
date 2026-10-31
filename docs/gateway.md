@@ -41,7 +41,7 @@ standard.
 | `GET /v1/models`, `POST /v1/chat/completions` | OpenAI Chat Completions | [`openai-compatible`](../adapters/openai-compatible) | ModelPort (model aliases); RuntimePort (`agent:<name>`) | input and output guards, cache, router, token usage, traces |
 | `POST /mcp` | Model Context Protocol (streamable HTTP) | [`mcp`](../adapters/mcp) | ToolPort, KnowledgePort as read-only tools | policy, approval, authorization, `tool_args` and `tool_result` guards, credentials for the caller |
 | `GET /.well-known/agent-card.json`, `POST /a2a/<agent>` | Agent2Agent (A2A) 1.0, 0.3 accepted | [`a2a`](../adapters/a2a) | RuntimePort | everything a run goes through |
-| `POST /v1/events` | CloudEvents 1.0 HTTP binding | [`cloudevents`](../adapters/cloudevents) | TriggerPort, then RuntimePort | the trigger's identity; everything a run goes through |
+| `POST /v1/events` | CloudEvents 1.0 HTTP binding | [`cloudevents`](../adapters/cloudevents) | TriggerPort, then RuntimePort | the trigger's caller; everything a run goes through |
 | `GET /healthz`, `GET /readyz` | | gateway | liveness; readiness gate of the profile | |
 
 ```mermaid
@@ -76,8 +76,8 @@ Every request goes through the same steps before any route runs (details in the
    `gateway.allowedOrigins` or from `gateway.cors.origins`: 403 otherwise. Bound to loopback, the gateway answers only
    loopback `Host` names; `gateway.allowedHosts` sets the names elsewhere. This closes cross-site calls and DNS
    rebinding against a local gateway.
-2. **Identity.** `Authorization: Bearer <credential>` is verified through the IdentityPort; the identity is passed to
-   the route and to every model call, tool call and run. A credential that does not verify is a 401 with
+2. **Identity.** `Authorization: Bearer <credential>` is verified through the IdentityPort into a `Caller`; the caller is
+   passed to the route and to every model call, tool call and run. A credential that does not verify is a 401 with
    `WWW-Authenticate`, and the adapter's error text is never returned. A request without a credential is a 401 unless
    `gateway.anonymous: true`. On the production tier the gateway refuses to start without an identity adapter or with
    `anonymous: true`.
@@ -86,14 +86,15 @@ Every request goes through the same steps before any route runs (details in the
    [limits.md](limits.md#gateway). An error inside a route is a 500 without its message.
 4. **Access log.** One `gateway.request` span on the `interface` layer per request: method, path without the query
    string, route, inbound adapter, status, duration, whether the caller was authenticated. Runs and tool calls nest
-   under it. When the request carries a W3C `traceparent` (and `tracestate`), the span joins that trace and the
-   context reaches the route as `ctx.trace`; a malformed header is ignored.
+   under it. When the request carries a W3C `traceparent` (and `tracestate`), the gateway copies them unchanged into
+   `ctx.trace` (`{ parent, state? }`, opaque to the core) and the telemetry adapter joins that trace; a value it cannot
+   parse is ignored and starts a new trace.
 
 Agent cards and the health endpoints are public. Sessions (MCP) and tasks (A2A) belong to the caller that created
 them: another caller presenting their id gets "not found".
 
-Triggers run in the background with the trigger's own identity (a service credential in its options, verified per
-event) or, without one, with the identity of the sender; never anonymously unless `gateway.anonymous: true`.
+Triggers run in the background with the trigger's own caller (a service credential in its options, verified per
+event) or, without one, with the caller that sent the event; never anonymously unless `gateway.anonymous: true`.
 
 ## Configure
 
@@ -126,7 +127,7 @@ terminal), so the same profile works in both.
 ## A runtime in another language
 
 Point the runtime's model client and tool client at the gateway, and give it a credential the identity layer accepts.
-Model calls and tool calls then carry that identity, and the stack enforces everything around them.
+Model calls and tool calls then carry that caller, and the stack enforces everything around them.
 
 ```mermaid
 sequenceDiagram
@@ -139,8 +140,8 @@ sequenceDiagram
   participant R as remote A2A agent
   P->>I: POST /v1/chat/completions, Bearer credential
   I->>D: verify credential
-  I->>M: chat through guards, cache, router
-  M-->>P: completion with tool_calls
+  I->>M: model call through guards, cache, router
+  M-->>P: completion with tool calls
   P->>I: POST /mcp tools/call, Bearer credential
   I->>D: verify, then policy and authorization
   I->>T: callTool with a token for the caller

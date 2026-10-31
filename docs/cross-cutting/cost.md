@@ -17,12 +17,14 @@ runtime. Overview in [stack.md](../stack.md).
 
 [telemetry](../layers/telemetry.md) records what was spent:
 
-- `gen_ai.client.token.usage`: input and output tokens per call.
-- `agent.cost.usd`: cost per run and per model.
+- `agent.model.tokens`: tokens per call, split by `agent.tokens.kind` (`input` or `output`); the `usage` of a reply
+  is `{ inputTokens, outputTokens }`. The `otlp` adapter writes the same numbers as `gen_ai.client.token.usage` for
+  dashboards that expect it.
+- `costUsd` on the run result and its `run.end` event: cost per run.
 - `agent.tool.calls`: tool volume, since tool calls often drive further model calls.
 
 Dashboards and alerts on these metrics tell you which agent, model or tool is expensive. Every run also ends with
-`usage` and `costUsd` in its `run_end` event, so cost is available without a tracing backend.
+`usage` and `costUsd` in its `run.end` event, so cost is available without a tracing backend.
 
 ## Practices
 

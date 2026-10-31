@@ -5,6 +5,10 @@ three runtimes and three profiles. Between cells only `agent-layers.json` change
 so identity, authorization, guardrails and telemetry are enforced outside the runtime. In production, faults are
 injected one at a time, and the recorded telemetry is used to find which layer failed.
 
+The measurements below were recorded before the SDK language 1.0 ([ADR 0001](decisions/0001-sdk-language.md)), so span
+and event names in them are the old ones: `chat` is now `agent.model.call` and `knowledge.error` is
+`agent.knowledge.error`. Rerun the driver to refresh them.
+
 Driver: [`scripts/slice.mjs`](../scripts/slice.mjs) (`node --conditions=source scripts/slice.mjs`). It brings up only
 the reference services each tier needs and takes them down with their volumes at the end. Every wait has a time
 limit. Run of 2026-10-31: under five minutes from the first cell to teardown, everything local, nothing left running.
@@ -163,7 +167,7 @@ sequenceDiagram
   participant K as knowledge (L4)
   participant E as eval (L10)
   D->>I: A2A SendMessage, Bearer bob or alice, traceparent T
-  I->>H: run, identity verified, span parent T
+  I->>H: run, caller verified, span parent T
   H->>P: A2A, on-behalf-of token, traceparent T
   P->>I: /mcp tools/call knowledge__docs, traceparent T
   I->>K: search, Qdrant stopped

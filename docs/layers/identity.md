@@ -11,13 +11,18 @@ user or as its own identity.
 
 | Port | What it does |
 |---|---|
-| [IdentityPort](../../spec/ports/IdentityPort.md) | `verify` an inbound credential into an `Identity` |
+| [IdentityPort](../../spec/ports/IdentityPort.md) | `verify` an inbound credential into a `Caller` |
 | [CredentialPort](../../spec/ports/CredentialPort.md) | `token` for an outbound call, on behalf of the caller or as the agent |
-| [AuthorizationPort](../../spec/ports/AuthorizationPort.md) | `evaluate` an access request into a decision |
+| [AuthorizationPort](../../spec/ports/AuthorizationPort.md) | `evaluate` an `AccessQuestion` into an `AccessDecision` |
 | [ApprovalPort](../../spec/ports/ApprovalPort.md) | Human approval for actions the policy marks `ask` |
 
-Data shapes: [identity.json](../../spec/schemas/identity.json), [access-request.json](../../spec/schemas/access-request.json),
+Data shapes: [caller.json](../../spec/schemas/caller.json), [access-question.json](../../spec/schemas/access-question.json),
 [access-decision.json](../../spec/schemas/access-decision.json), [approval.json](../../spec/schemas/approval.json).
+
+A `Caller` is `{ id, kind, roles, scopes, name?, credential? }` (`kind` is `user` or `agent`); the inbound `credential`
+lives in memory only. An `AccessQuestion` is `{ caller, action, target: { kind, id, layer, risk, agent, attrs? }, args? }`
+and an `AccessDecision` is `{ allowed, reason? }`. An unauthenticated call is the explicit anonymous caller, never the
+agent. Policy engines read these names: an OPA policy sees them as `input.caller` and `input.target`.
 
 ### Where it sits
 
@@ -47,14 +52,17 @@ flowchart LR
 
 ## Standards
 
+Mapped by the adapters, not by the ports:
+
 - OIDC / OAuth 2: JWT access tokens verified through discovery and JWKS.
 - RFC 8693 token exchange: on-behalf-of.
 - Client credentials: the agent's own identity.
-- OpenID AuthZEN for authorization requests.
+- OpenID AuthZEN for authorization requests (the `authzen` adapter translates an `AccessQuestion` to AuthZEN and back).
+- Open Policy Agent: policies are written against the SDK names (`input.caller.roles`, `input.target.risk`).
 
 ## On-behalf-of flow
 
-A user calls, the agent acts with that user's rights. Tools receive a token scoped to them, never the caller's inbound token.
+A user calls, the agent acts with that user's rights. Tools receive a token scoped to them, never the caller's inbound credential.
 
 ```mermaid
 sequenceDiagram
@@ -69,13 +77,13 @@ sequenceDiagram
   I->>ID: IdentityPort.verify(token)
   ID->>X: validate (JWKS)
   X-->>ID: valid
-  ID-->>I: Identity (subject, roles, scopes)
+  ID-->>I: Caller (id, kind, roles, scopes)
   Note over I,ID: no valid credential: rejected as unauthenticated, anonymous only if enabled
-  I->>H: run with the identity
+  I->>H: run with the caller
   H->>H: model asks for a tool, local policy: allow, ask (approval) or deny
-  H->>ID: AuthorizationPort.evaluate(subject, tool, risk)
+  H->>ID: AuthorizationPort.evaluate(AccessQuestion: caller, action, target)
   ID->>X: rules first, then decision point
-  X-->>ID: decision
+  X-->>ID: allowed or denied
   alt anonymous, denied or decision point down
     ID-->>H: deny (fail closed)
     H-->>H: error result "Denied: reason", no token requested
@@ -93,8 +101,12 @@ sequenceDiagram
 - Who may do what is identity; whether the content is acceptable is [guardrail](guardrail.md).
 - Authorization is local rules first (`allow` / `ask` / `deny` by tool, risk and `when: {roles, scopes, kind}`), then
   the external decision point. A local `deny` is final, and a failing decision point denies (fail closed).
-- Tokens never appear in events, logs or traces. Telemetry masks attribute keys that look like secrets.
-- Every policy decision is emitted to [telemetry](telemetry.md) as an audit event.
+- Credentials and tokens never appear in events, logs or traces. Telemetry masks attribute keys that look like secrets.
+- Every access decision is emitted to [telemetry](telemetry.md) as an audit event (`agent.access.check` span,
+  `agent.access.decisions` metric).
+- When a call needs a person (`ask`), the run ends with status `waiting` and reason `needs_input` (layer `identity`,
+  `by` the approval adapter, `detail` the approval id); a later run with the same session resumes. See
+  [harness](harness.md).
 
 ## How to swap
 

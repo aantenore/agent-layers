@@ -84,8 +84,14 @@ flowchart LR
 - **Ports** are owner-defined, thin and versioned (`PORT_VERSIONS`, semver per port, see
   [spec/VERSIONING.md](../spec/VERSIONING.md)). They are designed from what a developer calls, informed by the
   dominant standard where one exists, but they are not that standard.
-- **Escape hatch.** Requests carry `extra` passthrough fields and instances may expose `native()`, so a technology's
-  specific features stay reachable without widening the common interface to the lowest common denominator.
+- **One language.** The data that crosses a port is written in one language owned by this project (shapes such as
+  `ModelRequest`, `ToolResult`, `Caller`, `AccessQuestion`), fixed and minimal at the core and versioned as a whole at
+  1.0. Standards appear only inside adapters, which translate at the edges. See [spec/language.md](../spec/language.md)
+  and [ADR 0001](decisions/0001-sdk-language.md).
+- **Escape hatches.** Data that a shape does not cover goes in `ext`, namespaced keys that adapters declare as
+  `produces` / `reads` and the core copies without reading. Operations that a port does not cover stay reachable
+  through `native()`. Both keep a technology's specific features available without widening the common interface to
+  the lowest common denominator.
 - **Outbound adapters** consume something as a port: an OpenAI-compatible endpoint as ModelPort, Markdown files as
   KnowledgePort, a rule list as AuthorizationPort.
 - **Inbound adapters** expose the stack through something: a terminal, an OpenAI-compatible HTTP API, an MCP
@@ -108,15 +114,16 @@ The core's own logic is glue, independent of any runtime:
 
 `compose()` builds `guardedModel(knowledgeInjector(model))`, so guards see the user's text before any retrieval, a
 cache hit skips retrieval and the model, and output guards run on cached answers too. Blocks on input or output end
-the run with status `stopped` and reason `guardrail:<guard>:<stage>`; denials and blocks on tools are error results
-the model can react to. Authorization and guards fail closed. Identity flows in every `CallContext`; its token is never
+the run with status `stopped` and a structured reason (`{code: "guard_block", layer, by, stage}`); denials and blocks on tools are error results
+the model can react to. Authorization and guards fail closed. The caller flows in every `CallContext`; its credential is never
 written to telemetry, and attribute keys that look like secrets are masked.
 
 Every step is a span with a mandatory `agent.layer` attribute, so each layer can be traced and evaluated on its own.
+The core names its spans, events and metrics `agent.*` only; the `otlp` adapter writes the `gen_ai.*` names for dashboards.
 
 ## Runtimes are adapters
 
-RuntimePort binds an `AgentSpec` (`name`, `instructions`, `model`, tool globs, knowledge sources, `params`) to a
+RuntimePort binds an `AgentSpec` (`name`, `instructions`, `model`, tool globs, knowledge sources, `settings`) to a
 runnable agent that uses the stack's composed model and tools. A runtime adapter can be:
 
 - **in process**: a JavaScript runtime package, or the small `basic-runtime` loop used for prototypes and tests;
@@ -174,17 +181,17 @@ sequenceDiagram
   participant T as tool (L5)
   C->>H: message + credential
   H->>H: IdentityPort.verify
-  H->>R: run(input, ctx{identity})
+  H->>R: run(input, ctx{caller})
   R->>G: input guards
   R->>X: cache lookup, router
   R->>K: search (identity-scoped)
-  R->>M: chat
-  M-->>R: tool call
+  R->>M: model call
+  M-->>R: call part
   R->>A: policy, approval, authorization
   R->>G: tool_args guards
   R->>T: callTool (bound credentials)
   R->>G: tool_result guards
-  R->>M: chat
+  R->>M: model call
   R->>G: output guards
   R-->>C: answer
   Note over H,T: every step is a span with agent.layer (L9 telemetry), and runs feed evaluators (L10 eval)
@@ -195,7 +202,13 @@ sequenceDiagram
 1. A new technology is an adapter plus its conformance test, never a core change.
 2. A core change starts with a spec change: the port page in `spec/ports/`, its schema, and a version bump.
 3. Adapters depend only on `@agent-layers/core` (peer) and test with `@agent-layers/conformance` (dev).
-4. Technology and standard names appear only in adapter packages and reference setups, never in the core.
+4. Technology and standard names appear only in adapter packages and reference setups, never in the core. The core
+   speaks one language; each adapter translates its standard to it and back.
+5. Extra data goes in `ext`, never in a new field: keys are `<adapter>.<name>`, declared in the descriptor
+   (`ext: { produces, reads, safe? }`) and checked by conformance (`checkExt`). The core never reads an adapter key.
+6. What a deployment may tune is configuration at the edges: `vocabularies` (extra values that behave like a core
+   value) and `mappings` (rules that turn a standard's document into a shape and back). Shapes and field names are not
+   configurable. See [stack.md](stack.md).
 
 ## Naming
 

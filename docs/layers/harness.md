@@ -18,7 +18,25 @@ telemetry are already applied to its model and tool calls.
 | [RuntimePort](../../spec/ports/RuntimePort.md) | `bind` an agent spec to a runnable agent that streams run events |
 | [StatePort](../../spec/ports/StatePort.md) | `append` / `read` / `list` / `delete` the event log of a session |
 
-Data shapes: [agent-spec.json](../../spec/schemas/agent-spec.json), [run-result.json](../../spec/schemas/run-result.json).
+Data shapes: [agent-spec.json](../../spec/schemas/agent-spec.json), [run-result.json](../../spec/schemas/run-result.json),
+[run-event.json](../../spec/schemas/run-event.json).
+
+An `AgentSpec` carries `name`, `instructions`, `model`, `tools`, `knowledge`, `settings` (`temperature`,
+`maxOutputTokens`, `stop`) and `ext`; `params` was removed at 1.0. A run ends with a `RunResult`
+(`runId`, `status`, `output`, `reason?`, `usage?`, `costUsd?`, `events?`) and its events have fixed types:
+`run.start`, `model.reply`, `tool.call`, `tool.result`, `text`, `run.end`. Adapter events are `<adapter>.<name>`.
+
+| Status | Meaning |
+|---|---|
+| `completed` | The agent answered. |
+| `failed` | An error ended the run. |
+| `stopped` | Something ended the run on purpose: a guard, a denial, a limit, a cancellation. |
+| `waiting` | The run stopped for a human answer (an approval, input, authentication). A later run with the same session resumes the conversation. |
+
+Whenever the status is not `completed`, `reason` is structured: `{ code, layer?, by?, stage?, detail? }`. Consumers
+branch on `code` only: `guard_block`, `denied`, `aborted`, `timeout`, `limit`, `needs_input`, `needs_auth`, `rejected`,
+`error` (config can add values that behave like one of them); `detail` is internal text and never parsed. A pending
+approval ends the run `waiting` with `{ code: "needs_input", layer: "identity", by: <approval adapter>, detail: <approval id> }`.
 
 ### Where it sits
 
@@ -33,7 +51,7 @@ flowchart LR
   runtime --> state
   runtime -->|"stack.modelFor"| cache["L2 cache"]:::model
   runtime -->|"stack.toolsFor"| tool["L5 tool"]:::agent
-  runtime -.->|"invoke_agent span"| telemetry["L9 telemetry"]:::insight
+  runtime -.->|"agent.run span"| telemetry["L9 telemetry"]:::insight
   classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
   classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
   classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
@@ -51,7 +69,7 @@ flowchart LR
 
 - The runtime owns the loop; the layers around it own everything else. It adds no policy of its own: authorization is
   [identity](identity.md), content checks are [guardrail](guardrail.md).
-- Budgets (tokens, tool calls, spend) are enforced here; see [cost](../cross-cutting/cost.md).
+- Budgets (tokens, tool calls, spend) are enforced here and end the run `stopped` with reason code `limit`; see [cost](../cross-cutting/cost.md).
 - Workers, queues and scheduled triggers start runs through [interface](interface.md) triggers.
 
 ## How to swap
@@ -90,13 +108,13 @@ sequenceDiagram
   participant T as tool (L5)
   C->>I: A2A SendMessage to /a2a/assistant, Bearer credential
   I->>D: verify credential
-  I->>H: run with the caller's identity
+  I->>H: run with the caller
   H->>D: token for agent-gateway, on behalf of the caller
   H->>P: A2A SendMessage, Bearer token
   P->>I: POST /v1/chat/completions, model alias, same token
   I->>D: verify token
   I->>M: chat through guards, cache, router
-  M-->>P: tool_calls
+  M-->>P: call parts
   P->>I: POST /mcp tools/call, same token
   I->>D: verify, then policy and authorization
   I->>T: callTool, tool guards
@@ -130,10 +148,9 @@ sequenceDiagram
 
 **Runtime.** `reinloop` runs the loop and leaves governance to the stack: its model is `stack.modelFor` wrapped as a
 reinloop provider and its tools are `stack.toolsFor`, so guards, cache, routing, knowledge, authorization, approvals,
-credentials and the `chat` and `execute_tool` spans apply as for any runtime. reinloop's own guardrails, identity,
+credentials and the `agent.model.call` and `agent.tool.call` spans apply as for any runtime. reinloop's own guardrails, identity,
 policy and knowledge features are not configured, so nothing runs twice. Budgets end a run `stopped` with reason
-`budget:<limit>`, a guardrail block with `guardrail:<guard>:<stage>`; run cost is a `costUsd` field of `run_end` and an
-`agent.cost.usd` metric. Pydantic AI runs as a remote runtime (see [Runtimes](#runtimes)); LangGraph, the OpenAI
+code `limit`, a guardrail block with `guard_block`; run cost is a `costUsd` field of `run.end` and of the run result. Pydantic AI runs as a remote runtime (see [Runtimes](#runtimes)); LangGraph, the OpenAI
 Agents SDK and Google ADK are candidates.
 
 **State.** When a call carries a `sessionId`, the stack appends the run's events to the state slot. `memory-state`

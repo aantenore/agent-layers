@@ -128,7 +128,7 @@ flowchart LR
     openai["openai-compatible<br/>OpenAI Chat Completions"]:::external
     mcp["mcp<br/>Model Context Protocol"]:::external
     oidc["oidc<br/>OIDC, OAuth 2, RFC 8693"]:::external
-    otlp["otlp<br/>OpenTelemetry GenAI"]:::external
+    otlp["otlp<br/>OpenTelemetry (agent.* to gen_ai.*)"]:::external
   end
   subgraph core["Core: ports"]
     model["ModelPort"]:::model
@@ -164,8 +164,93 @@ flowchart LR
 
 The knowledge layer covers documents, structured data, graphs and ontologies, a curated wiki, long-term memory and
 procedural know-how. Each backend has its own query language (or none), so the port fixes the result instead:
-`KnowledgePort.search` returns `Passage { id, text, source, score, metadata }` whatever the backend. That uniform
-result lets telemetry trace and evaluation score retrieval the same way everywhere.
+`KnowledgePort.search` returns `Passage { id, text, source, title?, url?, score?, attrs?, ext? }` whatever the backend.
+That uniform result lets telemetry trace and evaluation score retrieval the same way everywhere.
+
+## One language, configurable at the edges
+
+The data that crosses a port is written in one language owned by this project: fixed shapes with fixed field names
+(`ModelRequest`, `ToolResult`, `Caller`, `AccessQuestion`, ...). Standards appear only inside adapters. What a stack
+owner can tune is the edge: the vocabularies, the mapping rules and the knowledge fusion below, plus `ext`, the
+namespaced bag that adapters declare in their descriptors and the core never reads. The reference is
+[spec/language.md](../spec/language.md); the reasoning is [ADR 0001](decisions/0001-sdk-language.md).
+
+### Vocabularies and mappings
+
+Both blocks sit at the top level of the config and under `profiles.<name>`.
+
+| Block | What it does |
+|---|---|
+| `vocabularies` | Adds values or aliases to the extensible sets. `{ "risk": { "add": { "admin": { "like": "exec" } } }, "finish": { "aliases": { "pause": "other" } } }`. An added value is `like` a core value: core logic (a policy rule on `risk: ["exec"]`) sees the core value, adapters and telemetry see the added one. Aliases are resolved by adapters at the edge. Closed sets (`effect`, `stage`, `runStatus`, ...) reject changes. |
+| `mappings` | Rules that turn a standard's document into a language shape (`in`) or a shape into a standard's document (`out`), beyond the adapter's built-in translation. |
+
+`mappings` is `{ "<key>": { "in": [rules], "out": [rules] } }`. The key names an adapter instance:
+
+| Slot kind | Key | Example |
+|---|---|---|
+| single | `<slot>` | `identity`, `authorization` |
+| keyed | `<slot>.<instance>` | `tools.crm`, `knowledge.handbook` |
+| list | `<slot>.<name>` | `guardrails.pii` |
+
+Rule fields, run in order (`in`: source is the native document, target is the shape; `out`: source is the shape,
+target is the wire document):
+
+| Field | Meaning |
+|---|---|
+| `from` | JSON Pointer into the source, or a list of pointers (for `join`). Omit for a constant. |
+| `to` | JSON Pointer into the target. |
+| `default` | Used when `from` is missing or null. |
+| `map` | `{ "<source value>": <target value>, "*": <fallback> }`. A value not listed, without `"*"`, is not written. |
+| `join` | `"union"` merges lists without duplicates; another string joins strings with it. |
+| `split` | Separator that turns a string into a list. |
+| `drop` | JSON Pointer removed from the target. |
+| `fn` | `"<module>#<export>"`: `(source, target, ctx) => target`, synchronous and pure, loaded relative to the config file. |
+
+Merging:
+
+| Case | Result |
+|---|---|
+| A list in config | Replaces the adapter's default rules (`mappingDefaults` in its descriptor). |
+| `{ "$merge": "append", "items": [rules] }` | Appends to the adapter's default rules. |
+| Profiles | Override per key and per direction (`in`, `out`); a profile's list replaces the base list for that key and direction. |
+| `null` | Removes the rules of a key or of one direction. |
+
+```json
+"mappings": {
+  "identity": { "in": { "$merge": "append", "items": [
+    { "from": "/tenant", "to": "/ext/oidc.tenant" }
+  ] } },
+  "authorization": { "out": { "$merge": "append", "items": [
+    { "from": "/caller/ext/oidc.tenant", "to": "/subject/properties/tenant" }
+  ] } }
+}
+```
+
+Config loading checks that pointers parse, that `to` and `drop` address a field of the shape (or a declared
+`/ext/<key>` of the adapter), that `map` targets are valid vocabulary values and that `fn` modules load. A mapping
+error in `identity` or `authorization` rejects the credential or denies the call.
+
+### Knowledge fusion
+
+Scores of different sources are not comparable (a keyword score is unbounded, a vector store returns a similarity), so
+passages from two or more sources are merged by reciprocal rank fusion. `pipeline.knowledge.fusion` tunes it:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `method` | `rrf` | `rrf`: sum of `weight / (rrfK + rank)` over sources. `raw`: sort by each source's own `score`, only for sources that share one scorer. |
+| `rrfK` | `60` | Rank constant; a higher value flattens the difference between ranks. |
+| `weights` | `1` per source | `{ "<source>": weight }`. |
+
+After fusion `Passage.score` is the fused score; the source's own score and rank are kept in `ext["sdk.raw_score"]` and
+`ext["sdk.rank"]`. Knowledge exposed as tools (`mode: "tools"`) is not fused. Limits: [limits.md](limits.md).
+
+### Agents and limits
+
+| Key | Meaning |
+|---|---|
+| `agents.<name>.settings` | Model settings: `temperature`, `maxOutputTokens`, `stop`. In a Markdown agent file, a one-line flow map in the front matter: `settings: { temperature: 0 }`. `params` was removed at 1.0; the loader rejects it. |
+| `agents.<name>.ext` | Namespaced, adapter-specific settings (`<adapter>.<name>` keys). |
+| `limits.extBytes` | Largest `ext` bag the core keeps on a shape; a larger one is dropped and an `agent.ext.dropped` event is emitted. |
 
 ## Cross-cutting concerns
 

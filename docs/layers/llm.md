@@ -10,9 +10,14 @@ Generate completions, including tool calls and streamed output. This is the only
 
 | Port | What it does |
 |---|---|
-| [ModelPort](../../spec/ports/ModelPort.md) | `chat` and optional `stream` over a provider-neutral request with tools and usage |
+| [ModelPort](../../spec/ports/ModelPort.md) | `chat` and optional `stream` over a provider-neutral `ModelRequest`, answered with a `ModelReply` (or `ModelDelta` fragments) with tools and usage |
 
-Data shapes: [chat-request.json](../../spec/schemas/chat-request.json), [chat-response.json](../../spec/schemas/chat-response.json).
+Data shapes: [model-request.json](../../spec/schemas/model-request.json), [model-reply.json](../../spec/schemas/model-reply.json), [model-delta.json](../../spec/schemas/model-delta.json), [message.json](../../spec/schemas/message.json).
+
+A message is a role and a list of `parts` (`text`, `media`, `call`, `result`, `reasoning`). A tool call is a `call` part
+with object `args`; the reply's `finish` is `end`, `limit`, `tools`, `refused` or `other`, and `usage` is
+`{ inputTokens, outputTokens }`. Sampling goes in `settings` (`temperature`, `maxOutputTokens`, `stop`); anything else
+a provider offers goes in namespaced `ext` keys.
 
 ### Where it sits
 
@@ -33,7 +38,9 @@ flowchart LR
 
 ## Standards
 
-- OpenAI Chat Completions, the de facto wire format.
+The port is not a standard; adapters translate to and from these:
+
+- OpenAI Chat Completions, the de facto wire format (`openai-compatible`).
 - Anthropic Messages.
 
 Any server that speaks one of them is a drop-in model; the rest is an adapter for the provider's native API.
@@ -41,7 +48,7 @@ Any server that speaks one of them is a drop-in model; the rest is an adapter fo
 ## Boundaries
 
 - Routing, fallback, quotas and caching in front of the model belong to [cache](cache.md), not here.
-- The model never sees tokens or secrets; credentials stay in the adapter.
+- The model never sees credentials or secrets; they stay in the adapter.
 
 ## How to swap
 

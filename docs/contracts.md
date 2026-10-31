@@ -5,10 +5,11 @@ neutral:
 
 | What | Where |
 |---|---|
+| The SDK language: naming rules, shapes, vocabularies, `ext`, mappings (version 1.0) | [`spec/language.md`](../spec/language.md), decided in [ADR 0001](decisions/0001-sdk-language.md) |
 | Data shapes (JSON Schema, draft 2020-12) | [`spec/schemas/`](../spec/schemas) |
 | Ports: operations, semantics, errors, conformance | [`spec/ports/`](../spec/ports/README.md) |
 | Versioning rules (semver per port) | [`spec/VERSIONING.md`](../spec/VERSIONING.md) |
-| Stack configuration schema | [`spec/schemas/stack-config.json`](../spec/schemas/stack-config.json) |
+| Stack configuration schema (adds `vocabularies`, `mappings`, `pipeline.knowledge.fusion`, `limits.extBytes`) | [`spec/schemas/stack-config.json`](../spec/schemas/stack-config.json) |
 
 `packages/core` is the TypeScript binding of the spec. Another language binds the same schemas and port pages.
 

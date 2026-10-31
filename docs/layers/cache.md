@@ -11,8 +11,8 @@ quotas. The agent sees an ordinary [llm](llm.md) endpoint.
 
 | Port | What it does |
 |---|---|
-| [RouterPort](../../spec/ports/RouterPort.md) | `select` picks the model for a request |
-| [CachePort](../../spec/ports/CachePort.md) | `get` / `set` / `delete` with a TTL; usable by any layer (tool results, embeddings, retrieval) |
+| [RouterPort](../../spec/ports/RouterPort.md) | `select` picks the model for a `ModelRequest` |
+| [CachePort](../../spec/ports/CachePort.md) | `get` / `set` / `delete` with a TTL; usable by any layer (tool results, embeddings, retrieval); model-reply keys are computed over the `ModelRequest` |
 
 ### Where it sits
 
@@ -43,11 +43,11 @@ A hit skips the router and the model. Quotas and fallback live in the gateway be
 
 ```mermaid
 flowchart TB
-  req["Chat request<br/>already input-guarded"]:::external --> lookup{"CachePort.get<br/>hit?"}:::model
+  req["ModelRequest<br/>already input-guarded"]:::external --> lookup{"CachePort.get<br/>hit?"}:::model
   lookup -->|"hit"| out["Output guards, then the answer"]:::control
   lookup -->|"miss"| select["RouterPort.select<br/>pick the model id"]:::model
   select --> model["ModelPort.chat<br/>gateway: quotas, fallback group"]:::model
-  model --> store["CachePort.set<br/>raw response, TTL"]:::model
+  model --> store["CachePort.set<br/>raw ModelReply, TTL"]:::model
   store --> out
   classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
   classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
@@ -56,7 +56,7 @@ flowchart TB
 
 ## Boundaries
 
-- Output guards also run on cached answers: the cache stores the raw model response, see [architecture](../architecture.md#composition-pipelines).
+- Output guards also run on cached answers: the cache stores the raw model reply, see [architecture](../architecture.md#composition-pipelines).
 - Semantic caching is deliberately not part of the agent loop; exact-match caching is safe for tests and repeated
   identical requests.
 - Rate and spend limits per key are quotas; see [cost](../cross-cutting/cost.md).

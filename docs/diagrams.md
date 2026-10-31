@@ -73,7 +73,7 @@ The command renders every Mermaid block of a Markdown file and fails on a syntax
 | Hexagonal model, run modes, data flow of one run | [architecture.md](architecture.md) | Core, inbound and outbound adapters; in-process and gateway; one run end to end |
 | Two modes | [gateway.md](gateway.md#two-modes) | In process versus hosted by the gateway |
 | Gateway topology | [gateway.md](gateway.md#what-the-gateway-exposes) | Callers, Origin and Host check, identity, mounted routes, the governed ports behind them |
-| A runtime in another language | [gateway.md](gateway.md#a-runtime-in-another-language) | Model calls at `/v1`, tool calls at `/mcp` with the caller's identity; a remote agent as runtime over A2A |
+| A runtime in another language | [gateway.md](gateway.md#a-runtime-in-another-language) | Model calls at `/v1`, tool calls at `/mcp` with the caller; a remote agent as runtime over A2A |
 | What runs where | [slice.md](slice.md#what-runs-where) | The vertical slice: driver, gateway, three runtimes, the layers per tier, telemetry to eval |
 | Failure injection and attribution | [slice.md](slice.md#failure-injection-and-attribution) | One faulted run across processes, scored from its trace |
 
@@ -92,7 +92,7 @@ Each layer page has a **Where it sits** diagram: its ports, what calls it and wh
 | `identity` (L6) | [identity.md](layers/identity.md#where-it-sits) | [On-behalf-of flow](layers/identity.md#on-behalf-of-flow): sequence from caller token to user-scoped tool token |
 | `guardrail` (L7) | [guardrail.md](layers/guardrail.md#where-it-sits) | [Where guards run](layers/guardrail.md#where-guards-run): the four stages and the block and redact outcomes |
 | `interface` (L8) | [interface.md](layers/interface.md#where-it-sits) | |
-| `telemetry` (L9) | [telemetry.md](layers/telemetry.md#where-it-sits) | [Span tree](layers/telemetry.md#span-tree): `invoke_agent` and its children, each with `agent.layer` |
+| `telemetry` (L9) | [telemetry.md](layers/telemetry.md#where-it-sits) | [Span tree](layers/telemetry.md#span-tree): `agent.run` and its children, each with `agent.layer` |
 | `eval` (L10) | [eval.md](layers/eval.md#where-it-sits) | [Improvement loop](layers/eval.md#improvement-loop): failures attributed to a layer |
 
 ### Cross-cutting

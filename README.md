@@ -18,12 +18,15 @@ an adapter too, so it can be replaced like anything else.
 - **Every limit, its default and safe range:** [docs/limits.md](docs/limits.md)
 - **The vertical slice, results and open gaps:** [docs/slice.md](docs/slice.md)
 - **The language-neutral spec:** [spec/](spec/README.md)
+- **The SDK language (shapes, vocabularies, `ext`, mappings):** [spec/language.md](spec/language.md)
 
 ## Principle
 
 **Product first, standards adapt.** Ports are designed from what a developer building and shipping an agent needs to
-call. Standards and technologies appear only as adapters. A new technology is an adapter plus its conformance test,
-never a core change.
+call. The data that crosses a port is written in one language owned by this project ([spec/language.md](spec/language.md),
+version 1.0); standards and technologies appear only as adapters, which translate to it at the edges. Vocabularies and
+boundary mappings are configurable, shapes are not; extra data goes in namespaced `ext`. A new technology is an
+adapter plus its conformance test, never a core change.
 
 ## The eleven layers
 

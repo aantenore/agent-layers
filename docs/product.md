@@ -28,6 +28,9 @@ which layer failed.
   which layer caused a failure.
 - **Enforcement outside the agent.** In gateway mode, guards, authorization, credentials and telemetry run in the
   gateway, not in the agent's process.
+- **One language, standards at the edges.** The data that crosses a port is written in one language owned by the
+  project, so a model, a tool or a policy adapter never has to know another adapter's standard. Vocabularies and
+  mappings are configuration; see [spec/language.md](../spec/language.md).
 - **Any runtime, any language.** The spec is language neutral (JSON Schemas and port pages). The runtime is an
   adapter; a runtime in another language uses the gateway's standard endpoints or a remote runtime adapter.
 

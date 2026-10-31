@@ -12,11 +12,11 @@ runtime decides how to present them.
 
 | Port | What it does |
 |---|---|
-| [KnowledgePort](../../spec/ports/KnowledgePort.md) | `search` a source and answer with passages |
+| [KnowledgePort](../../spec/ports/KnowledgePort.md) | `search` a source with a `KnowledgeQuery` (`text`, `k?`, `filter?`, `caller?`) and answer with passages |
 | [MemoryPort](../../spec/ports/MemoryPort.md) | `remember` / `recall` / `forget` long-term memory in a scope |
-| [IngestionPort](../../spec/ports/IngestionPort.md) | `ingest` / `delete` documents in a backend |
+| [IngestionPort](../../spec/ports/IngestionPort.md) | `ingest` / `delete` `Document`s in a backend |
 
-Data shapes: [passage.json](../../spec/schemas/passage.json), [knowledge-document.json](../../spec/schemas/knowledge-document.json).
+Data shapes: [passage.json](../../spec/schemas/passage.json), [document.json](../../spec/schemas/document.json).
 
 ### Where it sits
 
@@ -33,7 +33,7 @@ flowchart LR
   kp --> src["Sources<br/>Markdown files, MCP servers,<br/>HTTP search services"]:::external
   mp --> mem["Memory backend"]:::external
   ip --> idx["Index of the backend"]:::external
-  kp -.->|"knowledge.search span"| telemetry["L9 telemetry"]:::insight
+  kp -.->|"agent.knowledge.search span"| telemetry["L9 telemetry"]:::insight
   classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
   classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
   classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
@@ -56,7 +56,7 @@ There is no single standard, because the sources differ:
 what a search returns: every MCP server answers in its own shape. So the layer has two parts:
 
 - **Transport:** MCP, HTTP or a function.
-- **Result contract:** `KnowledgePort.search` returns `Passage { id, text, source, score, metadata }`.
+- **Result contract:** `KnowledgePort.search` returns `Passage { id, text, source, title?, url?, score?, attrs?, ext? }`; `source` is required (the core fills it with the instance name when an adapter does not), and `attrs` holds the filterable attributes.
 
 Adapters translate each backend into `Passage`. The uniform result is what lets [telemetry](telemetry.md) trace and
 [eval](eval.md) score retrieval the same way for every backend.
@@ -78,7 +78,7 @@ flowchart LR
     mdk["markdown-knowledge"]:::agent
   end
   port["KnowledgePort.search"]:::agent
-  passage["Passage<br/>id, text, source, score, metadata"]:::agent
+  passage["Passage<br/>id, text, source, score, attrs"]:::agent
   vdb --> mcp
   vdb --> http
   sql -->|"planned"| mcp
@@ -100,7 +100,14 @@ flowchart LR
 - Read-only context retrieval is knowledge; anything with side effects is a [tool](tool.md).
 - The stack injects the top passages before the model call as a delimited block marked untrusted, so retrieved text is
   data and not instructions (see [security](../cross-cutting/security.md)).
-- The caller's identity reaches every source, so a source can enforce per-user access.
+- The caller (`KnowledgeQuery.caller`, without its credential) reaches every source, so a source can enforce per-user access.
+- **Several sources.** Scores of different sources are not comparable (a keyword score is unbounded, a vector store
+  returns a similarity), so passages from two or more sources are merged by reciprocal rank fusion: each passage scores
+  the sum over sources of `weight / (rrfK + rank)`, with `rrfK = 60` and weight `1` by default. `Passage.score` is then
+  the fused score, and the source's own score and rank stay in `ext["sdk.raw_score"]` and `ext["sdk.rank"]`. The same
+  `source` and `id` appear once, at the best rank. `pipeline.knowledge.fusion.method: "raw"` is the opt-in for sources
+  that share one scorer: it sorts by the raw `score`. Knowledge exposed as tools is not fused. See
+  [stack.md](../stack.md#knowledge-fusion) and [limits.md](../limits.md).
 - **Ingestion.** Converting PDF, DOCX and other formats to Markdown or chunks happens before indexing and is not part
   of the search contract.
 - **Graph retrieval.** Graph-plus-vector systems sit behind an adapter; nothing in the contract changes.

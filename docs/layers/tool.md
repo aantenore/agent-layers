@@ -11,9 +11,12 @@ they are also where [identity](identity.md) and [guardrail](guardrail.md) apply.
 
 | Port | What it does |
 |---|---|
-| [ToolPort](../../spec/ports/ToolPort.md) | `listTools` and `callTool`; results are text plus optional data |
+| [ToolPort](../../spec/ports/ToolPort.md) | `listTools` and `callTool`; a `ToolResult` is `{ ok, text, data?, ext? }`, and errors are results, not exceptions |
 
-Data shapes: [tool-spec.json](../../spec/schemas/tool-spec.json), [tool-outcome.json](../../spec/schemas/tool-outcome.json).
+Data shapes: [tool-spec.json](../../spec/schemas/tool-spec.json), [tool-result.json](../../spec/schemas/tool-result.json).
+
+A `ToolSpec` has `name`, `description`, `params` (JSON Schema of the arguments object), and optionally `risk`, `layer`,
+`audience` and `attrs` (plain attributes a policy may read, such as an owner). Arguments reach the tool as an object.
 
 ### Where it sits
 
@@ -33,6 +36,8 @@ flowchart LR
 ```
 
 ## Standards
+
+Mapped by adapters, not by the port:
 
 - MCP (stdio and streamable HTTP).
 - OpenAPI 3.

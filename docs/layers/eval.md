@@ -84,7 +84,7 @@ evaluators on EvaluatorPort, checked with the conformance suite.
 |---|---|
 | `expected-eval` | Expected answers |
 | `judge-eval` | Model-as-judge |
-| `layer-signals` | Per-layer health scores from run events |
+| `layer-signals` | Per-layer health scores from the core run events, structured stop reasons and `agent.*` telemetry names |
 
 Planned: promptfoo. Full list: [adapters.md](../adapters.md).
 

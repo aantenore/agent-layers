@@ -8,6 +8,8 @@ comments and pull requests.
 |---|---|---|---|
 | [0001](0001-sdk-language.md) | The SDK speaks its own language: fixed core shapes, configurable vocabularies and boundary mappings, standards only in adapters | Accepted | 2026-10-31 |
 
+The migration of 0001 is tracked package by package in [0001-migration-notes.md](0001-migration-notes.md).
+
 ## Writing one
 
 - File name `NNNN-short-title.md`, numbered in order; numbers are never reused.

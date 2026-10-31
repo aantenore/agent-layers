@@ -4,7 +4,7 @@ Layer id `telemetry` (L9), Insight plane. *What happened?*
 
 ## Responsibility
 
-See what agents do: traces for every run, metrics for cost, tokens, tool calls, policy and guardrail activity. It is
+See what agents do: traces for every run, metrics for cost, tokens, tool calls, access and guardrail activity. It is
 also the input of [eval](eval.md).
 
 ## Ports
@@ -30,7 +30,10 @@ flowchart LR
 
 ## Standards
 
-OpenTelemetry OTLP with the GenAI semantic conventions.
+The core emits only `agent.*` names (spans, events, metrics and attributes, listed in
+[TelemetryPort](../../spec/ports/TelemetryPort.md#names)). The `otlp` adapter translates them to OpenTelemetry OTLP
+with the GenAI semantic conventions (`gen_ai.*`), so existing dashboards keep working. `console-telemetry` and
+`jsonl-telemetry` write the `agent.*` names.
 
 ## Span tree
 
@@ -38,17 +41,17 @@ One run, as the stack records it. Every span carries `agent.layer`.
 
 ```mermaid
 flowchart TB
-  run["invoke_agent<br/>agent.layer=harness"]:::agent
-  gin["guard.check, input<br/>agent.layer=guardrail"]:::control
-  lookup["cache.lookup<br/>agent.layer=cache"]:::model
-  route["router.select<br/>agent.layer=cache"]:::model
-  chat["chat<br/>agent.layer=llm"]:::model
-  ks["knowledge.search<br/>agent.layer=knowledge"]:::agent
-  gout["guard.check, output<br/>agent.layer=guardrail"]:::control
-  tool["execute_tool<br/>agent.layer=tool"]:::agent
-  auth["authorize<br/>agent.layer=identity"]:::control
-  gargs["guard.check, tool_args<br/>agent.layer=guardrail"]:::control
-  gres["guard.check, tool_result<br/>agent.layer=guardrail"]:::control
+  run["agent.run<br/>agent.layer=harness"]:::agent
+  gin["agent.guard.check, input<br/>agent.layer=guardrail"]:::control
+  lookup["agent.cache.lookup<br/>agent.layer=cache"]:::model
+  route["agent.router.select<br/>agent.layer=cache"]:::model
+  chat["agent.model.call<br/>agent.layer=llm"]:::model
+  ks["agent.knowledge.search<br/>agent.layer=knowledge"]:::agent
+  gout["agent.guard.check, output<br/>agent.layer=guardrail"]:::control
+  tool["agent.tool.call<br/>agent.layer=tool"]:::agent
+  auth["agent.access.check<br/>agent.layer=identity"]:::control
+  gargs["agent.guard.check, tool_args<br/>agent.layer=guardrail"]:::control
+  gres["agent.guard.check, tool_result<br/>agent.layer=guardrail"]:::control
   run --> gin
   run --> lookup
   run --> route
@@ -68,12 +71,17 @@ flowchart TB
 
 - **`agent.layer` on every span, event and metric**, so any trace can be filtered or attributed by layer. The values are
   the layer ids.
-- Typical spans: `invoke_agent`, `chat`, `execute_tool`. Typical metrics: `gen_ai.client.token.usage`,
-  `gen_ai.client.operation.duration`, `agent.tool.calls`, `agent.cost.usd`, `agent.policy.decisions`,
-  `agent.guardrail.actions`.
+- Spans: `agent.run`, `agent.model.call`, `agent.tool.call`, `agent.access.check`, `agent.guard.check`,
+  `agent.knowledge.search`, `agent.cache.lookup`, `agent.router.select`. Metrics: `agent.model.tokens` (with
+  `agent.tokens.kind`: `input` or `output`), `agent.tool.calls`, `agent.access.decisions`, `agent.guard.actions`.
+  Attributes such as `agent.run.id`, `agent.model.finish`, `agent.tool.outcome` and `agent.guard.action` are listed in
+  the port page. The `otlp` adapter exports `gen_ai.*` names (`gen_ai.client.token.usage`,
+  `gen_ai.client.operation.duration`, `invoke_agent`, `chat`, `execute_tool`) for dashboards; other `agent.*` names go
+  out unchanged.
 - No tokens or secrets in attributes; the stack masks keys that look like secrets before adapters see them.
-- **One trace across processes.** The gateway reads the W3C `traceparent` and `tracestate` of each request and starts
-  its request span under it; the `a2a` runtime, `openai-compatible` models and `mcp` servers over HTTP send the
+- **One trace across processes.** The core treats the trace context (`CallContext.trace`, `{ parent, state? }`) as an
+  opaque value. The gateway copies the W3C `traceparent` and `tracestate` of each request into it and starts its
+  request span under it; the telemetry adapter that wrote the value (`otlp`) owns the format and parses it; the `a2a` runtime, `openai-compatible` models and `mcp` servers over HTTP send the
   context of the active span. A remote runtime that forwards the header it received (the Pydantic AI runtime does) puts
   its model and tool calls back at the gateway into the same trace. `otlp` and `jsonl-telemetry` keep the ids.
 - **Audit.** Denials and guard actions are visible here; see [governance](../cross-cutting/governance-compliance.md).
@@ -89,7 +97,7 @@ OTLP backend; no agent change is needed. A custom adapter is only for destinatio
 |---|---|
 | `console-telemetry` | Terminal output, one line per span |
 | `jsonl-telemetry` | JSON Lines files |
-| `otlp` | OTLP with the GenAI semantic conventions |
+| `otlp` | OTLP; writes `agent.*` as the GenAI semantic conventions (`gen_ai.*`) |
 
 Full list: [adapters.md](../adapters.md).
 

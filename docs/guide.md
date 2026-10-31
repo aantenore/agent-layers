@@ -50,9 +50,9 @@ export function createWordGuard(options: { words: string[] }, name = 'word-guard
   const words = options.words.map((w) => w.toLowerCase());
   return {
     name,
-    async check(input) {
-      const hit = words.find((w) => input.text.toLowerCase().includes(w));
-      return hit ? { action: 'block', reason: `contains "${hit}"` } : { action: 'allow' };
+    async check(check) {
+      const hit = words.find((w) => check.text.toLowerCase().includes(w));
+      return hit ? { action: 'block', labels: ['policy'], reason: `contains "${hit}"` } : { action: 'allow' };
     },
   };
 }
@@ -85,11 +85,69 @@ Rules:
 
 - Name the package after the standard or technology it maps. If it speaks a standard, set `maps.standard`;
   otherwise `maps.technology`.
-- Errors that the model should see are results (`isError`, `block`), not exceptions; authorization fails closed.
+- Translate at the edge. Your standard's names stay inside the adapter; what crosses the port is the SDK language
+  ([spec/language.md](../spec/language.md): `ModelRequest`, `ToolResult`, `Caller`, `GuardCheck`, ...).
+- Errors that the model should see are results (`ok: false`, `block`), not exceptions; authorization fails closed.
 - Never put tokens or secrets in errors, logs or telemetry attributes.
-- Put technology-specific features behind `native()` or the `extra` / `meta` passthrough fields.
+- Put technology-specific data in `ext` (keys `<adapter>.<name>`) and operations behind `native()`.
+- `portVersion` is `1.0.0` for every port.
 - `tiers: ['prototype']` for in-memory, scripted or development-only adapters; `production` when backed by a real
   system that can run in production.
+
+### Declare `ext`, vocabularies and mappings
+
+The descriptor says what the adapter adds to the language and how it translates:
+
+```ts
+export const adapter = defineAdapter<'KnowledgePort', Options>({
+  layer: 'knowledge', port: 'KnowledgePort', name: 'qdrant', direction: 'outbound',
+  maps: { technology: 'Qdrant' }, portVersion: PORT_VERSIONS.KnowledgePort, tiers: ['production'],
+  optionsSchema,
+  ext: { produces: ['qdrant.collection'], reads: [], safe: ['qdrant.collection'] },
+  vocabularies: { guardLabel: { add: { 'pii.health': { like: 'pii' } } } },
+  mappingDefaults: {
+    in: { shape: 'Passage', rules: [{ from: '/payload/title', to: '/title' }] },
+    out: { shape: 'KnowledgeQuery' },
+  },
+  create: (options, ctx) => createQdrant(options, ctx),
+});
+```
+
+| Descriptor field | Meaning |
+|---|---|
+| `ext` | `produces`: the `ext` keys the adapter writes, in its own namespace (the adapter name). `reads`: keys of other namespaces it reads. `safe`: produced keys telemetry may export. The core never reads an adapter key. |
+| `vocabularies` | Values the adapter adds to extensible vocabularies (`risk`, `finish`, `guardLabel`, ...), each `like` a core value. Config wins on conflict. |
+| `mappingDefaults` | `{ in?: { shape, rules? }, out?: { shape, rules? } }`: the shape each direction builds and the adapter's built-in translation as rules, so the effective rules are readable. A direction left out takes no rules from config. |
+
+Where the adapter translates, apply the rules that the stack config may have replaced or extended:
+
+```ts
+create: (options, ctx) => ({
+  async search(query) {
+    const hits = await client.search(ctx.mappings.out(query, { text: query.text }));
+    // The built-in translation builds the shape; the rules then read the native hit and adjust it.
+    return hits.map((hit) => ctx.mappings.in(hit, { id: String(hit.id), text: hit.payload.text, source: ctx.name, score: hit.score }));
+  },
+}),
+```
+
+`ctx.mappings.in(native, shape)` turns a standard's document into a language shape; `ctx.mappings.out(shape, wire)`
+turns a shape into the standard's document. Both are free when no rules apply. Config, not code, changes them
+([stack.md](stack.md#vocabularies-and-mappings)).
+
+Conformance proves the declaration: the suite of the port runs `checkExt` (every `ext` key the adapter writes is
+namespaced, in its namespace and listed in `produces`), and `roundTrip` checks an adapter's own translation:
+
+```ts
+import { checkExt, roundTrip } from '@agent-layers/conformance';
+
+assert.deepEqual(checkExt(adapter, passage), []);
+assert.deepEqual(roundTrip(samples, toLanguage, toStandard, { shape: 'Passage' }), []);   // standard -> language -> standard
+```
+
+Telemetry adapters that keep trace ids pass a `TraceCodec` (`parse` / `format` for the format they speak, for example
+W3C Trace Context) to `recordingTelemetry(write, name, { trace: codec })`. The core treats `CallContext.trace`
+(`{ parent, state? }`) as opaque.
 
 Many technologies need no adapter of their own because they speak a standard: Keycloak, Entra ID or any identity
 provider through OIDC; Ollama, vLLM, LiteLLM or a hosted API through `openai-compatible`; Langfuse, Jaeger or any
@@ -102,7 +160,7 @@ A runtime adapter is a RuntimePort. It receives the composed `Stack` and an `Age
 credentials and telemetry are already applied there.
 
 ```ts
-import { defineAdapter, PORT_VERSIONS, toChatTools, type ChatMessage, type RuntimePort } from '@agent-layers/core';
+import { callsOf, defineAdapter, messageText, PORT_VERSIONS, textMessage, toolInfos, type Message, type RuntimePort } from '@agent-layers/core';
 
 const loop: RuntimePort = {
   bind: (stack, agent) => ({
@@ -112,17 +170,20 @@ const loop: RuntimePort = {
       const model = stack.modelFor(agent);
       const tools = stack.toolsFor(agent);
       const specs = await tools.listTools(ctx);
-      const messages: ChatMessage[] = [{ role: 'system', content: agent.instructions }, { role: 'user', content: String(input) }];
+      const messages: Message[] = [textMessage('system', agent.instructions), textMessage('user', String(input))];
       for (let turn = 0; turn < 8; turn++) {
-        const msg = (await model.chat({ model: agent.model, messages, tools: toChatTools(specs) }, ctx)).choices[0]!.message;
-        messages.push({ role: 'assistant', content: msg.content, ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}) });
-        if (!msg.tool_calls?.length) return { runId: ctx.runId, status: 'completed', output: msg.content ?? '' };
-        for (const call of msg.tool_calls) {
-          const out = await tools.callTool(call.function.name, JSON.parse(call.function.arguments), ctx);
-          messages.push({ role: 'tool', tool_call_id: call.id, content: out.content });
+        const { message } = await model.chat({ model: agent.model, messages, tools: toolInfos(specs), settings: agent.settings }, ctx);
+        messages.push(message);
+        const calls = callsOf(message);
+        if (!calls.length) return { runId: ctx.runId, status: 'completed', output: messageText(message) };
+        const parts = [];
+        for (const call of calls) {
+          const out = await tools.callTool(call.tool, call.args, ctx);
+          parts.push({ type: 'result' as const, callId: call.id, ok: out.ok, text: out.text });
         }
+        messages.push({ role: 'tool', parts });
       }
-      return { runId: ctx.runId, status: 'stopped', output: '', reason: 'max_turns' };
+      return { runId: ctx.runId, status: 'stopped', output: '', reason: { code: 'limit', layer: 'harness', detail: 'max turns' } };
     },
   }),
 };
@@ -133,8 +194,9 @@ export const adapter = defineAdapter({
 });
 ```
 
-The stack wraps every run in an `invoke_agent` span, turns a guardrail block into status `stopped`, and appends the
-returned events to the state slot when the call carries a `sessionId`. A runtime written in another language plugs
+The stack wraps every run in an `agent.run` span, turns a guardrail block into status `stopped` with reason code
+`guard_block`, and appends the returned events (`run.start`, `model.reply`, `tool.call`, `tool.result`, `text`,
+`run.end`) to the state slot when the call carries a `sessionId`. A runtime written in another language plugs
 in as a remote runtime (the `a2a` adapter) or uses the gateway's OpenAI-compatible and MCP endpoints; see
 [gateway.md](gateway.md#a-runtime-in-another-language).
 
@@ -149,13 +211,15 @@ in as a remote runtime (the `a2a` adapter) or uses the gateway's OpenAI-compatib
 | `plugins` | Modules that export adapter descriptors, for adapters outside `@agent-layers/adapter-*` |
 | `profile` | Default profile; `--profile` or `AGENT_LAYERS_PROFILE` override it |
 | `layers` | Base slots shared by all profiles |
-| `profiles.<name>` | `extends`, `tier`, `requires`, `layers` (only what differs), `policy`, `pipeline`, `gateway`, `limits`, `description` |
+| `profiles.<name>` | `extends`, `tier`, `requires`, `layers` (only what differs), `policy`, `pipeline`, `gateway`, `limits`, `vocabularies`, `mappings`, `description` |
 | `policy` | Local authorization rules `{ effect: allow\|ask\|deny, tools?, risk?, when?: { roles, scopes, kind, authenticated } }`, first match wins; `authenticated: true` matches any verified caller, `false` only an anonymous one |
-| `pipeline.knowledge` | `k`, `maxChars`, `maxK`, `mode`: `system` (default), `user`, `tools` (expose sources as tools), `off` |
+| `pipeline.knowledge` | `k`, `maxChars`, `maxK`, `mode`: `system` (default), `user`, `tools` (expose sources as tools), `off`; `fusion` (how several sources merge, see [stack.md](stack.md#knowledge-fusion)) |
 | `pipeline.cacheTtlMs`, `pipeline.approvalTimeoutMs` | Cache lifetime; how long a tool call waits for an approval |
 | `gateway` | Network host: `port`, `host`, `inbound` (channel and trigger names to mount), `anonymous`, `publicOrigin`, `cors`, `allowedOrigins`, `allowedHosts`, and its limits (`maxBodyBytes`, `requestTimeoutMs`, ...); see [gateway.md](gateway.md) |
-| `limits.check` | Time limits of the `check` probes. Every limit, adapters included, with defaults and safe ranges: [limits.md](limits.md) |
-| `agents.<name>` | `file` (Markdown with front matter `model`, `tools`, `knowledge`; body = instructions) or inline `instructions`, `model`, `tools`, `knowledge`, `params` |
+| `vocabularies` | Values and aliases added to extensible vocabularies; see [stack.md](stack.md#vocabularies-and-mappings) |
+| `mappings` | Boundary mapping rules per adapter instance; see [stack.md](stack.md#vocabularies-and-mappings) |
+| `limits.check`, `limits.extBytes` | Time limits of the `check` probes; size of the `ext` bags the core keeps. Every limit, adapters included, with defaults and safe ranges: [limits.md](limits.md) |
+| `agents.<name>` | `file` (Markdown with front matter `model`, `tools`, `knowledge`; body = instructions) or inline `instructions`, `model`, `tools`, `knowledge`, `settings` (`temperature`, `maxOutputTokens`, `stop`), `ext`. `params` was removed at 1.0 |
 
 Slots under `layers`:
 
@@ -232,7 +296,7 @@ corporate model gateway through an OpenAI-compatible URL. Then `agent-layers dep
 `dev`, `eval` and `test` run as an authenticated caller. The credential comes from `--token <t>`, then the
 `AGENT_LAYERS_TOKEN` environment variable, then (prototype-tier profiles only) the first token of the `static-identity`
 adapter in the identity slot. It is verified through the identity slot and passed to every run; a rejected credential
-stops the command with no run, and the token is never printed. Without an identity adapter or a credential the run is
+stops the command with no run, and the credential is never printed. Without an identity adapter or a credential the run is
 anonymous, which rules-based authorization denies.
 
 ## Extension rules
@@ -240,4 +304,6 @@ anonymous, which rules-based authorization denies.
 1. A new technology is an adapter plus its conformance test, never a core change.
 2. A core change starts with the spec: the port page, its schema, a version bump ([VERSIONING](../spec/VERSIONING.md)).
 3. Adapters depend on `@agent-layers/core` as a peer and test with `@agent-layers/conformance`.
-4. Technology names appear in adapters and reference setups only.
+4. Technology and standard names appear in adapters and reference setups only; the core speaks one language
+   ([spec/language.md](../spec/language.md), [ADR 0001](decisions/0001-sdk-language.md)).
+5. Extra data goes in namespaced `ext` keys declared in the descriptor, never in a new field.
