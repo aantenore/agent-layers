@@ -26,7 +26,7 @@ npx agent-layers dev --profile local     # same stack, real model on this machin
 | L5 tool | What can it do? | `functions` from `tools/convert.ts` | same | same |
 | L6 identity | Who is it, on whose behalf, and what is allowed? | `static-identity`, `rules-authorization`, `memory-approval` | same | `oidc`, `opa` |
 | L7 guardrail | Is this content acceptable? | `regex-guard` | same | `presidio`, `llm-guard` |
-| L8 interface | Who talks to it and what starts it? | `terminal-channel` | same | `a2a` |
+| L8 interface | Who talks to it and what starts it? | `terminal-channel`; on the gateway `openai-compatible`, `mcp`, `a2a`, `cloudevents` | same | gateway only: `openai-compatible`, `mcp`, `a2a`, `cloudevents` |
 | L9 telemetry | What happened? | `console-telemetry` | `otlp` | same |
 | L10 eval | Was it good, and if not, which layer failed? | `expected-eval` | same | same |
 
@@ -34,6 +34,11 @@ Every run has a caller. In the prototype profiles `static-identity` holds a dev 
 `npm test` authenticate with it, so the allow rule of `rules-authorization` (scoped with `when.authenticated`) applies.
 An anonymous call is denied in every profile. To run as another caller, pass `--token <t>` or set
 `AGENT_LAYERS_TOKEN`; a token the identity adapter rejects stops the command before any run.
+
+`npx agent-layers gateway` serves the same stack on `http://127.0.0.1:8787` for runtimes and apps in any language:
+an OpenAI-compatible API at `/v1` (model `mock`, or `agent:<name>` to run an agent), the tools at `/mcp`, the agents
+over A2A (`/.well-known/agent-card.json`) and CloudEvents at `/v1/events`. Every request needs
+`Authorization: Bearer dev-token` (the static-identity dev token); see the gateway guide of agent-layers.
 
 The `test` profile is prototype with telemetry written to `.agent-layers/telemetry.jsonl` and no terminal channel.
 The `local` profile is prototype with a real model. Adapters named in pilot and production that are not installed

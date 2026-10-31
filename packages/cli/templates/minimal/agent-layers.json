@@ -13,6 +13,7 @@
   "pipeline": {
     "knowledge": { "k": 3, "maxChars": 3000, "mode": "system" }
   },
+  "gateway": { "port": 8787 },
   "profiles": {
     "prototype": {
       "description": "Runs anywhere: zero-dependency adapters and a scripted model.",
@@ -50,7 +51,15 @@
         "guardrails": [
           { "adapter": "regex-guard", "options": { "piiAction": "redact" } }
         ],
-        "channels": [{ "adapter": "terminal-channel" }],
+        "channels": [
+          { "adapter": "terminal-channel" },
+          { "adapter": "openai-compatible", "options": { "models": { "mock": "mock" } } },
+          { "adapter": "mcp" },
+          { "adapter": "a2a" }
+        ],
+        "triggers": [
+          { "adapter": "cloudevents", "options": { "routes": [{ "type": "*", "agent": "{{agent}}", "input": "Event {{type}} from {{source}}: {{data}}" }] } }
+        ],
         "telemetry": [{ "adapter": "console-telemetry" }],
         "eval": [{ "adapter": "expected-eval" }]
       }
@@ -88,6 +97,7 @@
       "description": "Enterprise systems for identity, authorization, guardrails, state and model access (adapters not installed yet).",
       "extends": "pilot",
       "tier": "production",
+      "gateway": { "host": "0.0.0.0" },
       "layers": {
         "model": {
           "adapter": "openai-compatible",
@@ -108,7 +118,11 @@
           { "adapter": "presidio", "options": { "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}" } },
           { "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL:-http://localhost:8000}" } }
         ],
-        "channels": [{ "adapter": "a2a", "options": { "port": 8700 } }]
+        "channels": [
+          { "adapter": "openai-compatible", "options": { "models": { "default": "default" } } },
+          { "adapter": "mcp" },
+          { "adapter": "a2a" }
+        ]
       }
     }
   }

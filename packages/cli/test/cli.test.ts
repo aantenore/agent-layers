@@ -151,7 +151,9 @@ test('gateway hosts the profile on the network until stopped; production needs t
   assert.equal(code, 0);
   assert.equal(health, 200);
   assert.match(errors(), /tier prototype/);
-  assert.match(errors(), /only \/healthz and \/readyz/);
+  for (const route of ['POST /v1/chat/completions (openai-compatible)', 'POST|GET|DELETE /mcp (mcp)', 'GET /.well-known/agent-card.json (a2a)', 'POST /v1/events (cloudevents)']) {
+    assert.ok(errors().includes(route), route);
+  }
   const prod = captureIo(dir);
   assert.equal(await main(['gateway', '--profile', 'production'], prod.io), 1);
   assert.match(prod.errors(), /not installed/);
