@@ -8,10 +8,10 @@ import { checkCache, checkModel, checkRouter } from './suites/model.ts';
 
 export { Checks, testContext } from './check.ts';
 export { conforms, schema } from './schemas.ts';
-export { sampleAccess } from './suites/control.ts';
+export { NEEDS_CALLER, sampleAccess } from './suites/control.ts';
 export type { ModelFixtures, RouterFixtures, CacheFixtures } from './suites/model.ts';
 export type { KnowledgeFixtures, RuntimeFixtures, ToolFixtures } from './suites/agent.ts';
-export type { AuthorizationFixtures, GuardFixtures, GuardSample, IdentityFixtures } from './suites/control.ts';
+export type { AuthorizationFixtures, CredentialFixtures, GuardFixtures, GuardSample, IdentityFixtures } from './suites/control.ts';
 export { inboundFetch } from './suites/edge.ts';
 export type { ChannelFixtures, DeployFixtures, TriggerFixtures } from './suites/edge.ts';
 export type { EvaluatorFixtures } from './suites/insight.ts';

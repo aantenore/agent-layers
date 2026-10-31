@@ -17,7 +17,7 @@ const HELP = `agent-layers <command> [options]
 
   init [dir]                 scaffold a project (--template minimal|rag, --runtime <adapter>, --name, --agent, --force, --yes)
   dev                        run the agent in the terminal with a trace line per layer (--agent, --message, --no-deploy, --token)
-  check                      validate config, resolve adapters, readiness gate, conformance (--skip-conformance)
+  check                      validate config, resolve adapters, readiness gate, conformance (--skip-conformance, --token)
   test                       conformance plus reference and project tests (--layer <id>, --token)
   eval <dataset.jsonl>       run and score a dataset (--agent, --out <file>, --min <0..1>, --token)
   deploy                     plan and start the services through the deploy slot (--dry-run)
@@ -26,7 +26,7 @@ const HELP = `agent-layers <command> [options]
   layers                     the eleven layers: ports, versions, adapters in use and installed
   gateway                    host the stack on the network: mounted channels and triggers, identity on every request (--port, --host)
 
-Callers: --token <t> or AGENT_LAYERS_TOKEN authenticates dev, eval and test runs (prototype profiles default to the static-identity dev token)
+Callers: --token <t> or AGENT_LAYERS_TOKEN authenticates dev, eval and test runs and the caller probes of check (prototype profiles default to the static-identity dev token)
 Common options: --config <file> (default agent-layers.json), --profile <name> (or AGENT_LAYERS_PROFILE)`;
 
 const OPTIONS = {
@@ -48,7 +48,7 @@ export async function main(argv: string[], io: Io = processIo()): Promise<number
     switch (command) {
       case 'init': return await init(io, { ...(pos[0] ? { dir: pos[0] } : {}), ...pick(v, ['template', 'runtime', 'name', 'agent', 'force', 'yes']) });
       case 'dev': return await dev(io, { ...common, ...pick(v, ['agent', 'message', 'trace', 'token']), ...(v['no-deploy'] ? { noDeploy: true } : {}) });
-      case 'check': return await check(io, { ...common, ...(v.layer ? { layer: v.layer as Layer } : {}), ...(v['skip-conformance'] ? { skipConformance: true } : {}) });
+      case 'check': return await check(io, { ...common, ...(v.layer ? { layer: v.layer as Layer } : {}), ...(v['skip-conformance'] ? { skipConformance: true } : {}), ...pick(v, ['token']) });
       case 'test': return await test(io, { ...common, ...pick(v, ['layer', 'token']) });
       case 'eval': return await evaluate(io, { ...common, ...(pos[0] ? { dataset: pos[0] } : {}), ...pick(v, ['agent', 'out', 'min', 'token']) });
       case 'deploy': case 'up': return await deploy(io, { ...common, ...(v['dry-run'] ? { dryRun: true } : {}) });

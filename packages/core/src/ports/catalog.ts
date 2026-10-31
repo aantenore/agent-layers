@@ -58,7 +58,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   IngestionPort: { port: 'IngestionPort', layer: 'knowledge', version: '0.1.0', description: 'Load, refresh and delete documents in a knowledge backend' },
   ToolPort: { port: 'ToolPort', layer: 'tool', version: '0.1.0', description: 'List and call tools' },
   IdentityPort: { port: 'IdentityPort', layer: 'identity', version: '0.1.0', description: 'Verify inbound credentials into an identity' },
-  CredentialPort: { port: 'CredentialPort', layer: 'identity', version: '0.1.0', description: 'Outbound tokens, on behalf of a user or as the agent' },
+  CredentialPort: { port: 'CredentialPort', layer: 'identity', version: '0.2.0', description: 'Outbound tokens, on behalf of a user or as the agent' },
   AuthorizationPort: { port: 'AuthorizationPort', layer: 'identity', version: '0.2.0', description: 'Decide whether an action is allowed' },
   ApprovalPort: { port: 'ApprovalPort', layer: 'identity', version: '0.2.0', description: 'Human approval for actions the policy marks ask' },
   GuardPort: { port: 'GuardPort', layer: 'guardrail', version: '0.1.1', description: 'Allow, block or redact text at four stages' },

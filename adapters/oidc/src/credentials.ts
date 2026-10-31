@@ -125,6 +125,7 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
 
   return {
     name,
+    requiresCaller: opts.mode === 'on-behalf-of',
     native: () => ({ clear: () => cache.clear() }),
     async close() { cache.clear(); },
     async token(audience, topts = {}) {

@@ -18,6 +18,8 @@ export interface IdentityPort extends PortBase {
 
 /** Outbound credentials: a token for a downstream audience, on behalf of `identity` or as the agent itself. */
 export interface CredentialPort extends PortBase {
+  /** True when tokens are issued only on behalf of a caller: `token` rejects without `identity.token`. */
+  readonly requiresCaller?: boolean;
   token(audience: string, opts?: { identity?: Identity; scopes?: string[]; signal?: AbortSignal }): Promise<string>;
 }
 

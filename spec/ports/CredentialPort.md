@@ -1,6 +1,6 @@
 # CredentialPort
 
-Layer: `identity` (L6 Identity & access) · Version: 0.1.0 · Conformance: `checkCredentials`
+Layer: `identity` (L6 Identity & access) · Version: 0.2.0 · Conformance: `checkCredentials`
 
 ## Purpose
 
@@ -10,6 +10,8 @@ Give tools and remote tool servers the outbound tokens they need to call protect
 
 - `token(audience: String, opts?: {identity?: Identity, scopes?: [String], signal?: Signal}) → String`
   Return a token valid for `audience`. With `identity` the token acts on behalf of that identity; without it the token is the agent's own.
+- `requiresCaller?: Boolean`
+  Optional, read-only. `true` when the adapter issues tokens only on behalf of a caller (for example an RFC 8693 token exchange): `token` then rejects unless `identity` carries the caller's inbound `token`. Tools such as `agent-layers check` read it to know that a probe needs a caller.
 
 ## Data shapes
 
@@ -38,10 +40,12 @@ Give tools and remote tool servers the outbound tokens they need to call protect
 
 `checkCredentials` verifies:
 
-- `token` for an audience (a default one when none is given) resolves to a non-empty string.
+- `token` for an audience (a default one when none is given) resolves to a non-empty string, on behalf of the `identity` fixture when one is given.
+- With `requiresCaller`: `token` without an identity rejects (no fallback to the agent's own identity), and the probe that needs a caller is skipped, not failed, when no identity fixture with a token is given.
 
 ## Version history
 
+- 0.2.0 — optional `requiresCaller`, so a probe can tell an on-behalf-of adapter from a broken one
 - 0.1.0 — initial
 
 Example adapters: `static-identity` (also implements this port, for development only).

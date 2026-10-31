@@ -1,11 +1,15 @@
 import { readiness, type Layer } from '@agent-layers/core';
 import { conformAll } from '../conform.ts';
+import { resolveToken } from '../identity.ts';
 import type { Io } from '../io.ts';
 import { openProject } from '../project.ts';
 
-export interface CheckArgs { config?: string; profile?: string; layer?: Layer; skipConformance?: boolean }
+export interface CheckArgs { config?: string; profile?: string; layer?: Layer; skipConformance?: boolean; token?: string }
 
-/** Validates the config, resolves every adapter, applies the readiness gate and runs conformance. Exit code 0 or 1. */
+/**
+ * Validates the config, resolves every adapter, applies the readiness gate and runs conformance. Exit code 0 or 1.
+ * The caller (`--token`, AGENT_LAYERS_TOKEN, or the prototype dev token) is verified and used by the probes that act for one.
+ */
 export async function check(io: Io, args: CheckArgs): Promise<number> {
   const p = await openProject(io, args);
   const c = p.config;
@@ -18,8 +22,10 @@ export async function check(io: Io, args: CheckArgs): Promise<number> {
   if (args.skipConformance) io.out('conformance: skipped');
   else if (blocking) io.out('conformance: skipped until every adapter is installed');
   else {
-    const { reports, error } = await conformAll(p, { env: p.env, ...(args.layer ? { layer: args.layer } : {}) });
+    const token = resolveToken(p, args.token);
+    const { reports, error, callerError } = await conformAll(p, { env: p.env, ...(args.layer ? { layer: args.layer } : {}), ...(token ? { token } : {}) });
     if (error) { io.out(`  FAIL compose: ${error}`); failed = true; }
+    if (callerError) { io.out(`  FAIL caller: ${callerError}`); failed = true; }
     for (const r of reports) {
       io.out(`  ${r.status === 'ok' ? 'ok  ' : r.status === 'skip' ? 'skip' : 'FAIL'} ${r.entry.slot.padEnd(14)} ${r.entry.key === r.entry.ref.adapter ? r.entry.ref.adapter : `${r.entry.key}=${r.entry.ref.adapter}`} (${r.entry.port})`);
       for (const d of r.detail) io.out(`         ${d}`);

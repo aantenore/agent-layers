@@ -58,6 +58,23 @@ test('check --profile production finds every adapter installed; only secrets and
   assert.match(text(), /check passed/);
 });
 
+test('check skips an on-behalf-of credentials probe without a caller and uses the caller with --token', async () => {
+  const cfg = JSON.parse(readFileSync(join(dir, 'agent-layers.json'), 'utf8'));
+  // An unreachable token endpoint: the probe can only fail by being run.
+  cfg.profiles.obo = { extends: 'prototype', layers: { credentials: { adapter: 'oidc', options: { tokenEndpoint: 'http://127.0.0.1:9/token', clientId: 'agent', clientSecret: 'secret', mode: 'on-behalf-of', timeoutMs: 500 } } } };
+  await writeFile(join(dir, 'obo.json'), JSON.stringify(cfg));
+  const anonymous = captureIo(dir);
+  // The prototype dev token is the default caller; an unknown token string is refused before any probe.
+  assert.equal(await main(['check', '--config', 'obo.json', '--profile', 'obo', '--layer', 'identity', '--token', 'not-a-token'], anonymous.io), 1);
+  assert.match(anonymous.text(), /FAIL caller: the caller token did not verify/);
+  assert.match(anonymous.text(), /skip credentials\s+oidc \(CredentialPort\)\n\s+on behalf of a caller only: needs a caller token \(--token\)/);
+  assert.doesNotMatch(anonymous.text(), /not-a-token/);
+  const withCaller = captureIo(dir);
+  assert.equal(await main(['check', '--config', 'obo.json', '--profile', 'obo', '--layer', 'identity', '--token', 'dev-token'], withCaller.io), 1);
+  assert.match(withCaller.text(), /FAIL credentials\s+oidc \(CredentialPort\)\n\s+token: threw/);
+  assert.match(withCaller.text(), /ok\s+identity\s+static-identity/);
+});
+
 test('a production profile on prototype adapters fails the readiness gate', async () => {
   const cfg = JSON.parse(readFileSync(join(dir, 'agent-layers.json'), 'utf8'));
   cfg.profiles.staging = { extends: 'prototype', tier: 'production' };

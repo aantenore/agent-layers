@@ -204,6 +204,9 @@ Adapters that are named but not installed are reported as "not installed", not a
 **The readiness gate.** Adapters declare `tiers`; profiles declare `tier`. `check` fails when a production-tier
 profile uses a prototype-only adapter, or lacks a required slot. The required set is `requires` on the profile;
 the default for the production tier is identity, authorization, guardrails, telemetry and state.
+Conformance probes run against the live services. A credentials adapter that issues tokens only on behalf of a caller
+(`oidc` in `on-behalf-of` mode) needs one: pass `--token <caller token>` (or `AGENT_LAYERS_TOKEN`); the token is verified
+through the identity adapter and the probe exchanges it. Without a caller the probe is reported as `skip`, not as a failure.
 
 **Promotion is configuration, not code.** Most enterprise moves are standard adapters pointed at systems the
 company already runs: the corporate identity provider through OIDC, corporate observability through OTLP, the
@@ -215,7 +218,7 @@ corporate model gateway through an OpenAI-compatible URL. Then `agent-layers dep
 |---|---|
 | `init [dir]` | Scaffold a project (`--template minimal\|rag`; `tools` and `multi-agent` are planned) |
 | `dev` | Compose the profile, start reference services through the deploy slot if needed, talk to the agent; `--message` runs once |
-| `check` | Validate config, resolve adapters, readiness gate, conformance on every configured adapter |
+| `check [--token t]` | Validate config, resolve adapters, readiness gate, conformance on every configured adapter (as the caller `t` where a probe needs one) |
 | `test [--layer id]` | `check`, then the reference live tests (`reference/<id>/test`) and the project's `tests/` |
 | `eval <dataset> --agent X` | Run and score a JSON Lines dataset (`--out`, `--min`) |
 | `deploy` / `up` / `down` | Plan, start and stop services through the deploy slot (`--dry-run`) |

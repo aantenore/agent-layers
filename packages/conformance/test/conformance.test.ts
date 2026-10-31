@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { defineAdapter, PORT_VERSIONS, type CachePort, type GuardPort, type KnowledgePort, type ToolPort } from '@agent-layers/core';
+import { defineAdapter, PORT_VERSIONS, type CachePort, type CredentialPort, type GuardPort, type KnowledgePort, type ToolPort } from '@agent-layers/core';
 import { checkAdapter, checkDescriptor, conformance } from '../src/index.ts';
 
 const goodCache = (): CachePort => {
@@ -48,4 +48,19 @@ test('checkAdapter checks the descriptor and closes the instance', async () => {
   assert.deepEqual(r.failures, ['optionsSchema is missing']);
   assert.ok(closed);
   assert.deepEqual(checkDescriptor({ ...d, optionsSchema: {} }), []);
+});
+
+test('an on-behalf-of credential adapter needs a caller and never falls back to its own identity', async () => {
+  const obo = (fallback: boolean): CredentialPort => ({
+    requiresCaller: true,
+    token: async (_aud, o) => { if (!o?.identity?.token && !fallback) throw new Error('no caller'); return 'exchanged'; },
+  });
+  const skipped = await conformance('CredentialPort', obo(false));
+  assert.deepEqual(skipped.failures, []);
+  assert.ok(skipped.skipped.some((s) => s.includes('needs a caller token')));
+  const caller = { subject: 'alice', kind: 'user' as const, token: 'caller-token' };
+  const probed = await conformance('CredentialPort', obo(false), { identity: caller, audience: 'tools-api' });
+  assert.deepEqual([probed.failures, probed.skipped], [[], []]);
+  const leaky = await conformance('CredentialPort', obo(true), { identity: caller });
+  assert.ok(leaky.failures.some((f) => f.includes('token without a caller: expected a rejection')));
 });

@@ -1,4 +1,4 @@
-import { GUARD_STAGES, type AccessRequest, type ApprovalPort, type AuthorizationPort, type CredentialPort, type GuardPort, type GuardStage, type IdentityPort } from '@agent-layers/core';
+import { GUARD_STAGES, type AccessRequest, type Identity, type ApprovalPort, type AuthorizationPort, type CredentialPort, type GuardPort, type GuardStage, type IdentityPort } from '@agent-layers/core';
 import { Checks } from '../check.ts';
 import { conforms, schema } from '../schemas.ts';
 import { validate } from '@agent-layers/core';
@@ -17,8 +17,24 @@ export async function checkIdentity(port: IdentityPort, f: IdentityFixtures = {}
   return c;
 }
 
-export async function checkCredentials(port: CredentialPort, f: { audience?: string } = {}, c = new Checks()): Promise<Checks> {
-  const token = await c.attempt('token', () => port.token(f.audience ?? 'conformance'));
+export interface CredentialFixtures {
+  /** Audience to request (default `conformance`); a real provider may only issue tokens for audiences it knows. */
+  audience?: string;
+  /** Caller to act for. Required, with its inbound `token`, to probe an adapter with `requiresCaller`. */
+  identity?: Identity;
+}
+
+/** Why the token probe of an on-behalf-of adapter is skipped without a caller. */
+export const NEEDS_CALLER = 'needs a caller token (--token)';
+
+export async function checkCredentials(port: CredentialPort, f: CredentialFixtures = {}, c = new Checks()): Promise<Checks> {
+  const audience = f.audience ?? 'conformance';
+  if (port.requiresCaller) {
+    // On behalf of a caller only: never a silent fallback to the agent's own identity.
+    await c.rejects('token without a caller', () => port.token(audience));
+    if (!f.identity?.token) { c.skip(`token: ${NEEDS_CALLER}`); return c; }
+  }
+  const token = await c.attempt('token', () => port.token(audience, f.identity ? { identity: f.identity } : {}));
   c.expect(typeof token === 'string' && token.length > 0, 'token: must resolve to a non-empty string');
   return c;
 }
