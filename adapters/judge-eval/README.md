@@ -14,10 +14,12 @@ failure, or when the judge call errors, the evaluator returns a score of 0 on th
 on; the reason names only the kind of failure (`judge gave no usable verdict`, `judge call failed`, `judge call timed
 out`), never error text. Set `onError: "throw"` to reject instead.
 
-**Where the judge model comes from.** An evaluator does not receive the stack's model port, so `backend` names a
-ModelPort adapter that is created in the same way as any other (`openai-compatible`, `mock-model`, ...). Calls go
-straight to that model: the stack's guards, cache, router and cost accounting do not apply to them. The judge call is a
-span on the `eval` layer with the model name and no content. From code, pass any ModelPort, for example the stack's own:
+**Where the judge model comes from.** Inside a composed stack the judge calls the stack's governed model (through
+`ctx.stack()`): the stack's guards, cache, router and token accounting apply, and knowledge is not injected. `backend`
+names a ModelPort adapter, created like any other (`openai-compatible`, `mock-model`, ...), used only as a fallback:
+when the evaluator is created outside a stack, or the stack has no model. Outside a stack, `backend` is required. The
+judge call is a span on the `eval` layer with the model name and no content. From code, pass any ModelPort, for
+example the stack's own:
 
 ```ts
 import { createJudgeEval } from '@agent-layers/adapter-judge-eval';
@@ -28,8 +30,8 @@ const judge = createJudgeEval({ model: 'gpt-4o-mini', criteria: 'Answers in one 
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `model` | string | required | Model id sent to the judge backend |
-| `backend` | `{ adapter, options? }` | required in config | ModelPort adapter that serves the judge |
+| `model` | string | required | Model id of the judge call |
+| `backend` | `{ adapter, options? }` | none | Fallback ModelPort adapter, when there is no stack model; required outside a stack |
 | `criteria` | string | correct, relevant, consistent with the reference | What a good answer is |
 | `metric` | string | `"judge"` | Metric name of the score |
 | `temperature` | number | 0 | Sampling temperature |

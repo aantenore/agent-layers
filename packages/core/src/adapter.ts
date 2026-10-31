@@ -6,6 +6,7 @@ import type { Layer } from './layers.ts';
 import { compatibleVersion, isPortName, PORTS, type PortName, type PortTypes } from './ports/catalog.ts';
 import type { ServiceSpec } from './ports/deploy.ts';
 import type { TelemetryPort } from './ports/telemetry.ts';
+import type { Stack } from './stack.ts';
 import { validate, type JsonSchema } from './schema.ts';
 
 /** Inbound: exposes a stack port through a standard (an HTTP API, a server). outbound: consumes a standard or technology as a port. */
@@ -24,6 +25,12 @@ export interface AdapterContext {
   /** Directory the stack config lives in; relative paths in options resolve against it. */
   cwd: string;
   telemetry: TelemetryPort;
+  /**
+   * The composed stack, so an adapter can use its governed ports (for example `stack().modelFor(...)` for a model call
+   * with guards, cache, router and telemetry). Present only when the adapter is created by `compose`. Call it when the
+   * adapter is used, not inside `create`: it throws until composition has finished.
+   */
+  stack?: () => Stack;
 }
 
 export interface AdapterDescriptor<P extends PortName = PortName, O = any> {

@@ -78,3 +78,24 @@ test('a secret reference without a secrets adapter is an error', async () => {
     adapters: [testAdapter('ModelPort', 'llm', 'fake-model', () => ({}))],
   }), /\[llm\/fake-model\] options reference \$\{secret:\.\.\.\} but no secrets adapter/);
 });
+
+test('ctx.stack() gives adapters the composed stack at use time and throws while composing', async () => {
+  const { model, requests } = fakeModel(() => reply('judged'));
+  let early: unknown;
+  let later: (() => import('../src/index.ts').Stack) | undefined;
+  const probe = testAdapter('EvaluatorPort', 'eval', 'probe', () => ({ async score() { return []; } }));
+  const config: StackConfig = { layers: { model: { adapter: 'fake-model' }, eval: [{ adapter: 'probe' }], guardrails: [{ adapter: 'g' }] } };
+  const s = await compose(resolveProfile(config), {
+    adapters: [
+      testAdapter('ModelPort', 'llm', 'fake-model', () => model),
+      testAdapter('GuardPort', 'guardrail', 'g', () => ({ name: 'g', async check(i: { text: string }) { return i.text.includes('pii') ? { action: 'redact', text: '[x]' } : { action: 'allow' }; } })),
+      { ...probe, create: (_o: unknown, ctx: { stack?: () => import('../src/index.ts').Stack }) => { later = ctx.stack; try { ctx.stack!(); } catch (err) { early = err; } return { async score() { return []; } }; } } as never,
+    ],
+  });
+  assert.match(String(early), /not composed yet/);
+  assert.equal(later!(), s);
+  const governed = later!().modelFor({ name: 'probe', instructions: '', model: 'm', tools: [], knowledge: [] });
+  await governed.chat({ model: 'm', messages: [{ role: 'user', content: 'has pii' }] }, s.context({ agent: 'probe' }));
+  assert.equal(requests[0]!.messages[0]!.content, '[x]', 'the stack model applies the stack guards');
+  await s.close();
+});

@@ -1,6 +1,6 @@
 import { AdapterRegistry, importAdapters, packageLoader, type AnyAdapter } from './adapter.ts';
 import { agentSpec, configuredAdapters, type AdapterRef, type ResolvedConfig } from './config.ts';
-import { AdapterError, errorMessage, GuardrailBlocked, MissingLayerError } from './errors.ts';
+import { AdapterError, AgentLayersError, errorMessage, GuardrailBlocked, MissingLayerError } from './errors.ts';
 import { PORTS } from './ports/catalog.ts';
 import type { CallContext } from './ports/base.ts';
 import type { ChannelHandle } from './ports/channel.ts';
@@ -43,10 +43,15 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
   const created: { close?(): Promise<void> }[] = [];
   const entries = configuredAdapters(config.layers);
   let telemetry = createTelemetry([...(opts.telemetry ?? [])]);
+  let composed: Stack | undefined;
+  const lazyStack = (): Stack => {
+    if (!composed) throw new AgentLayersError('the stack is not composed yet: use ctx.stack() when the adapter is called, not while it is created');
+    return composed;
+  };
 
   const make = async (e: (typeof entries)[number]) => {
     const options = await resolveSecrets(e.ref, ports.secrets, e.layer);
-    const instance = await registry.create(e.port, e.ref.adapter, options, { name: e.key, env, cwd: config.dir, telemetry });
+    const instance = await registry.create(e.port, e.ref.adapter, options, { name: e.key, env, cwd: config.dir, telemetry, stack: lazyStack });
     created.push(instance);
     return instance;
   };
@@ -155,6 +160,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
       await telemetry.close?.();
     },
   };
+  composed = stack;
   return stack;
 }
 

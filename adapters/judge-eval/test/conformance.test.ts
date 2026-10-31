@@ -20,3 +20,27 @@ test('a backend that is not installed is reported at creation', async () => {
   const report = await checkAdapter(adapter, { options: { model: 'm', backend: { adapter: 'no-such-model' } } });
   assert.ok(report.failures.some((f) => f.includes('no-such-model')), report.failures.join('; '));
 });
+
+test('inside a stack the judge uses the governed stack model; backend is only the fallback', async () => {
+  const { compose, recordingTelemetry, resolveProfile } = await import('@agent-layers/core');
+  const { adapter: mockModel } = await import('@agent-layers/adapter-mock-model');
+  const records: { name: string; layer: string }[] = [];
+  const stack = await compose(resolveProfile({
+    layers: {
+      model: { adapter: 'mock-model', options: { rules: [{ match: 'Criteria', reply: '{"score": 1, "reason": "stack model"}' }] } },
+      eval: [{ adapter: 'judge-eval', options: { model: 'judge-1', backend: { adapter: 'mock-model', options: { rules: [{ match: 'Criteria', reply: '{"score": 0, "reason": "backend"}' }] } } } }],
+    },
+  }), { adapters: [mockModel, adapter], telemetry: [recordingTelemetry((r) => records.push(r))] });
+  try {
+    const [score] = await stack.ports.eval[0]!.score({ id: 'a', input: 'q' }, { runId: 'r', output: 'a', status: 'completed' });
+    assert.equal(score!.reason, 'stack model');
+    assert.ok(records.some((r) => r.name === 'chat' && r.layer === 'llm'), 'the judge call is a governed llm span');
+  } finally {
+    await stack.close();
+  }
+});
+
+test('without a stack or a backend the adapter refuses to start', async () => {
+  const report = await checkAdapter(adapter, { options: { model: 'm' } });
+  assert.ok(report.failures.some((f) => f.includes('backend is required')), report.failures.join('; '));
+});

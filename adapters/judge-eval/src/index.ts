@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   AdapterRegistry, defineAdapter, noopTelemetry, packageLoader, PORT_VERSIONS,
-  type CallContext, type ChatRequest, type EvalScore, type EvaluatorPort, type ModelPort, type TelemetryPort,
+  type AdapterContext, type CallContext, type ChatRequest, type EvalScore, type EvaluatorPort, type ModelPort, type TelemetryPort,
 } from '@agent-layers/core';
 
 /** The model that judges, as a ModelPort adapter resolved like any other adapter of the stack. */
@@ -15,7 +15,10 @@ export interface JudgeBackend {
 export interface JudgeEvalOptions {
   /** Model id sent to the judge backend. */
   model: string;
-  /** Where the judge model comes from when the adapter is created from config. Not used when a model is passed in code. */
+  /**
+   * Fallback judge model, as a ModelPort adapter: used when the evaluator runs outside a composed stack or the stack has
+   * no model. Inside a stack the judge uses the stack's governed model. Not used when a model is passed in code.
+   */
   backend?: JudgeBackend;
   /** What a good answer is. Default: correct, relevant, and consistent with the reference answer when there is one. */
   criteria?: string;
@@ -148,17 +151,43 @@ export const adapter = defineAdapter<'EvaluatorPort', JudgeEvalOptions>({
       extra: { type: 'object' },
       onError: { enum: ['score', 'throw'] },
     },
-    required: ['model', 'backend'],
+    required: ['model'],
     additionalProperties: false,
   },
   async create(options, ctx) {
-    // An evaluator does not receive the stack's model, so the judge is a ModelPort adapter of its own, created the same way.
-    const registry = new AdapterRegistry({ loader: packageLoader(ctx.cwd) });
-    const model = await registry.create('ModelPort', options.backend!.adapter, options.backend!.options ?? {}, {
-      name: `${ctx.name}-model`, env: ctx.env, cwd: ctx.cwd, telemetry: ctx.telemetry,
-    });
-    return createJudgeEval(options, { model, telemetry: ctx.telemetry, name: ctx.name });
+    const fallback = options.backend ? await backendModel(options.backend, ctx) : undefined;
+    if (!fallback && !ctx.stack) throw new Error('backend is required outside a composed stack');
+    return createJudgeEval(options, { model: judgeModel(options.model, ctx, fallback), telemetry: ctx.telemetry, name: ctx.name });
   },
 });
+
+/** The fallback judge: a ModelPort adapter created like any other adapter of the stack. */
+function backendModel(backend: JudgeBackend, ctx: AdapterContext): Promise<ModelPort> {
+  const registry = new AdapterRegistry({ loader: packageLoader(ctx.cwd) });
+  return registry.create('ModelPort', backend.adapter, backend.options ?? {}, {
+    name: `${ctx.name}-model`, env: ctx.env, cwd: ctx.cwd, telemetry: ctx.telemetry,
+  });
+}
+
+/**
+ * The model the judge calls: the stack's governed model (guards, cache, router, telemetry, no knowledge injection)
+ * when the evaluator belongs to a composed stack that has a model, otherwise the fallback backend.
+ */
+function judgeModel(model: string, ctx: AdapterContext, fallback: ModelPort | undefined): ModelPort {
+  let governed: ModelPort | undefined;
+  const pick = (): ModelPort => {
+    if (governed) return governed;
+    const stack = ctx.stack?.();
+    if (stack?.ports.model) return (governed = stack.modelFor({ name: ctx.name, instructions: '', model, tools: [], knowledge: [] }));
+    if (fallback) return fallback;
+    throw new Error('no judge model: the stack has no model and no backend is configured');
+  };
+  return {
+    name: `${ctx.name}-model`,
+    chat: (req, c) => pick().chat(req, c),
+    native: () => pick(),
+    async close() { await fallback?.close?.(); },
+  };
+}
 
 export const adapters = [adapter];
