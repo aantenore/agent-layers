@@ -40,7 +40,7 @@ export function createComposeDeploy(
   const root = resolve(cwd, options.root ?? '.');
   const project = options.projectName ?? 'agent-layers';
   const command = options.command ?? ['docker', 'compose'];
-  const searchDirs = options.searchDirs ?? ['reference', 'layers'];
+  const searchDirs = options.searchDirs ?? ['reference'];
   const wait = options.wait ?? true;
 
   /** One Compose invocation per file: relative paths inside a reference file keep resolving against its own folder. */

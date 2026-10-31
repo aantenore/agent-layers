@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { referenceTests } from '../src/commands/test.ts';
 import { main } from '../src/main.ts';
 import { captureIo, linkModules, tempProject } from './helpers.ts';
 
@@ -130,4 +131,11 @@ test('usage errors exit 1 with a message', async () => {
   assert.equal(await main(['frobnicate'], io), 1);
   assert.match(errors(), /unknown command "frobnicate"/);
   assert.equal(await main(['gateway'], captureIo(dir).io), 1);
+});
+
+test('reference tests live only in reference/<layer id>/test', async () => {
+  await mkdir(join(root, 'reference', 'tool', 'test'), { recursive: true });
+  await mkdir(join(root, 'layers', 'l4-tools', 'test'), { recursive: true });
+  assert.deepEqual(referenceTests(root, 'tool'), [join(root, 'reference', 'tool', 'test')]);
+  assert.deepEqual(referenceTests(root, 'guardrail'), []);
 });

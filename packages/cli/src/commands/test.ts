@@ -1,27 +1,16 @@
 import { isLayer, LAYERS, type Layer } from '@agent-layers/core';
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { UsageError, type Io } from '../io.ts';
 import { TOKEN_ENV } from '../identity.ts';
 import { configPath } from '../project.ts';
 import { check } from './check.ts';
 
-const LEGACY: Partial<Record<Layer, string>> = { tool: 'tools', guardrail: 'guardrails', cache: 'cache-router' };
-
-/** Test folders of the reference setup of a layer: reference/<id>/test, or a legacy layers/l<n>-<name>/test. */
+/** Test folder of the reference setup of a layer: reference/<layer id>/test. */
 export function referenceTests(root: string, layer: Layer): string[] {
-  const out: string[] = [];
-  const direct = join(root, 'reference', layer, 'test');
-  if (existsSync(direct)) out.push(direct);
-  const legacy = join(root, 'layers');
-  if (existsSync(legacy)) {
-    for (const d of readdirSync(legacy)) {
-      const base = d.replace(/^l\d+-/, '');
-      if ((base === layer || base === LEGACY[layer]) && existsSync(join(legacy, d, 'test'))) out.push(join(legacy, d, 'test'));
-    }
-  }
-  return out;
+  const dir = join(root, 'reference', layer, 'test');
+  return existsSync(dir) ? [dir] : [];
 }
 
 /** Conformance for the configured adapters, then the reference live tests and the project's own tests. */

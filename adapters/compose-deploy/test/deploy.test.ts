@@ -33,8 +33,8 @@ test('plan: layer files, generated file and missing layers, with no side effects
     assert.deepEqual(plan.steps, [
       '# no compose file for layer eval',
       'docker compose -p agent-layers -f reference/llm/compose.yml up -d --wait',
-      'docker compose -p agent-layers -f layers/l3-knowledge/compose.yml up -d --wait',
-      'docker compose -p agent-layers -f layers/l4-tools/compose.yml up -d --wait',
+      'docker compose -p agent-layers -f reference/knowledge/compose.yml up -d --wait',
+      'docker compose -p agent-layers -f reference/tool/compose.yml up -d --wait',
       `docker compose -p agent-layers -f ${GENERATED_FILE} up -d --wait`,
     ]);
     assert.deepEqual(plan.artifacts.map((a) => a.path), [GENERATED_FILE]);
@@ -64,9 +64,8 @@ test('plan: no artifact without image services; env file, project, command and w
   }
 });
 
-test('layer lookup: reference wins over legacy folders; aliases map old names', async () => {
+test('layer lookup: only reference/<layer id>; numbered layers/l<n>-* folders are not read', async () => {
   const { root, cleanup } = await tempProject({
-    'reference/knowledge/compose.yml': 'services: {}\n',
     'layers/l6-guardrails/compose.yml': 'services: {}\n',
     'layers/l7-cache-router/compose.yml': 'services: {}\n',
   });
@@ -74,8 +73,10 @@ test('layer lookup: reference wins over legacy folders; aliases map old names', 
     const plan = await createComposeDeploy({}, { cwd: root, run: fakeRun().run }).plan([
       { name: 'a', layer: 'knowledge' }, { name: 'b', layer: 'guardrail' }, { name: 'c', layer: 'cache' },
     ]);
-    assert.deepEqual(plan.steps.map((s) => s.split(' -f ')[1]!.split(' ')[0]), [
-      'reference/knowledge/compose.yml', 'layers/l6-guardrails/compose.yml', 'layers/l7-cache-router/compose.yml',
+    assert.deepEqual(plan.steps, [
+      '# no compose file for layer guardrail',
+      '# no compose file for layer cache',
+      'docker compose -p agent-layers -f reference/knowledge/compose.yml up -d --wait',
     ]);
   } finally {
     await cleanup();

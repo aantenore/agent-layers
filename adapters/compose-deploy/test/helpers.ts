@@ -3,13 +3,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Run, RunResult } from '../src/index.ts';
 
-/** Temp project: reference/llm, legacy layers/l3-knowledge and layers/l4-tools. */
+/** Temp project: reference/llm, reference/knowledge and reference/tool. */
 export async function tempProject(extra: Record<string, string> = {}): Promise<{ root: string; cleanup: () => Promise<void> }> {
   const root = await mkdtemp(join(tmpdir(), 'compose-deploy-'));
   const files: Record<string, string> = {
     'reference/llm/compose.yml': 'services:\n  ollama:\n    image: ollama/ollama\n',
-    'layers/l3-knowledge/compose.yml': 'services:\n  qdrant:\n    image: qdrant/qdrant\n',
-    'layers/l4-tools/compose.yml': 'services:\n  bridge:\n    image: bridge\n',
+    'reference/knowledge/compose.yml': 'services:\n  qdrant:\n    image: qdrant/qdrant\n',
+    'reference/tool/compose.yml': 'services:\n  bridge:\n    image: bridge\n',
     ...extra,
   };
   for (const [rel, text] of Object.entries(files)) {
