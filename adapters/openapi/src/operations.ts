@@ -1,6 +1,6 @@
 import { matchesAny, type JsonSchema, type ToolRisk } from '@agent-layers/core';
 import { baseUrlOf, deref, type OpenApiDocument } from './spec.ts';
-import { defaultRisk, type HttpMethod, type RequestSpec } from './request.ts';
+import { checkRequestSpec, defaultRisk, type HttpMethod, type RequestSpec } from './request.ts';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head'] as const;
 /** Headers OpenAPI defines as handled by the transport, not as parameters. */
@@ -88,23 +88,25 @@ export function operationsOf(spec: OpenApiDocument, specUrl: string | undefined,
       for (let n = 2; used.has(name); n++) name = `${safeName(operationId)}_${n}`;
       used.add(name);
       const upper = method.toUpperCase() as HttpMethod;
+      const request: RequestSpec & { method: HttpMethod } = {
+        method: upper,
+        url: `${base}${path}`,
+        query,
+        headerArgs,
+        ...(opts.headers ? { headers: opts.headers } : {}),
+        body: hasBody ? 'json' : 'none',
+        ...(bodyArg ? { bodyArg } : {}),
+        ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+        ...(opts.maxResultChars ? { maxResultChars: opts.maxResultChars } : {}),
+        ...(opts.auth ? { auth: opts.auth } : {}),
+      };
+      checkRequestSpec(name, request);
       out.push({
         name,
         description: truncate([op.summary, op.description].filter(Boolean).join(': ') || `${upper} ${path}`, MAX_DESCRIPTION_CHARS),
         inputSchema: { type: 'object', properties, required, additionalProperties: false },
         risk: opts.risk?.[upper] ?? defaultRisk(upper),
-        request: {
-          method: upper,
-          url: `${base}${path}`,
-          query,
-          headerArgs,
-          ...(opts.headers ? { headers: opts.headers } : {}),
-          body: hasBody ? 'json' : 'none',
-          ...(bodyArg ? { bodyArg } : {}),
-          ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
-          ...(opts.maxResultChars ? { maxResultChars: opts.maxResultChars } : {}),
-          ...(opts.auth ? { auth: opts.auth } : {}),
-        },
+        request,
       });
     }
   }

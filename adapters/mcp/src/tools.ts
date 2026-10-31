@@ -1,6 +1,7 @@
 import { matchesAny, type BoundCredentials, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec } from '@agent-layers/core';
 import { bearer, McpSession, type McpToolInfo } from './client.ts';
 import { interpolate } from './env.ts';
+import { redact, redactStructured, secretForms, staticSecrets } from './redact.ts';
 import { McpRpcError, type McpServerOptions } from './transport.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
@@ -45,6 +46,7 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
   const session = new McpSession(cfg, { env, ...(deps.credentials ? { credentials: deps.credentials } : {}) });
   const ttl = cfg.toolsTtlMs ?? DEFAULT_TOOLS_TTL_MS;
   const { auth } = cfg;
+  const staticForms = secretForms(staticSecrets(cfg.headers));
   let cache: { at: number; tools: Map<string, Entry> } | undefined;
 
   async function load(credentials: BoundCredentials | undefined): Promise<Map<string, Entry>> {
@@ -93,13 +95,20 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
         }
         headers = bearer(token);
       }
+      // A server may echo request headers back; the token and static header secrets must not reach the model.
+      const forms = token ? secretForms([token, ...staticSecrets(cfg.headers)]) : staticForms;
       try {
         const res = await session.run((c) => c.callTool(entry.mcpName, args, ctx.signal, headers), ctx.credentials);
-        // A server may echo request headers back; the token must not reach the model.
-        const content = token ? res.content.split(token).join('[redacted]') : res.content;
-        return { content, ...(res.isError ? { isError: true } : {}), ...(res.structured !== undefined ? { data: res.structured } : {}) };
+        let content = redact(res.content, forms);
+        let data: unknown;
+        if (res.structured !== undefined) {
+          const clean = redactStructured(res.structured, forms);
+          if (clean.dropped) content += '\n[structured content dropped: it contained a secret]';
+          else data = clean.value;
+        }
+        return { content, ...(res.isError ? { isError: true } : {}), ...(data !== undefined ? { data } : {}) };
       } catch (err) {
-        if (err instanceof McpRpcError) return failure(err.message);
+        if (err instanceof McpRpcError) return failure(redact(err.message, forms));
         throw err;
       }
     },

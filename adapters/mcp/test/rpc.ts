@@ -10,6 +10,8 @@ export const TOOLS = [
   { name: 'lookup_docs', description: 'Looks things up', inputSchema: { type: 'object' } },
   { name: 'fail', description: 'Always fails', inputSchema: { type: 'object' } },
   { name: 'who/am i', description: 'Shows the authorization it received', inputSchema: { type: 'object' } },
+  { name: 'headers', description: 'Structured copy of the headers it received', inputSchema: { type: 'object' } },
+  { name: 'fixed', description: 'Structured content only', inputSchema: { type: 'object' } },
   { name: 'search', description: 'Search entries', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } },
 ];
 
@@ -42,6 +44,8 @@ export function handleRpc(msg: Rpc, headers: Record<string, string | undefined> 
         case 'lookup_docs': return { result: { content: [], structuredContent: { found: 1 } } };
         case 'fail': return { result: text('it broke', true) };
         case 'who/am i': return { result: text(`authorization=${headers.authorization ?? 'none'}`) };
+        case 'headers': return { result: { content: [], structuredContent: { authorization: headers.authorization ?? null, apiKey: headers['x-api-key'] ?? null } } };
+        case 'fixed': return { result: { content: [], structuredContent: { k: 'v' } } };
         case 'search': {
           const words = String(args.query ?? '').toLowerCase().split(/\W+/).filter(Boolean);
           const hits = ENTRIES.filter((e) => words.some((w) => e.text.toLowerCase().includes(w)));

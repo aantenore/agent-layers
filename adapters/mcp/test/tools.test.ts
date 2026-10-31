@@ -14,9 +14,9 @@ test('lists tools over HTTP across pages, with risk from annotations, readOnly g
   const tools = createMcpTools({ url: mock.url, readOnly: ['lookup_*'] });
   try {
     const specs = await tools.listTools(ctx());
-    assert.deepEqual(specs.map((s) => s.name), ['echo', 'remove', 'wipe', 'lookup_docs', 'fail', 'who_am_i', 'search']);
+    assert.deepEqual(specs.map((s) => s.name), ['echo', 'remove', 'wipe', 'lookup_docs', 'fail', 'who_am_i', 'headers', 'fixed', 'search']);
     const risk = Object.fromEntries(specs.map((s) => [s.name, s.risk]));
-    assert.deepEqual(risk, { echo: 'read', remove: 'write', wipe: 'exec', lookup_docs: 'read', fail: 'exec', who_am_i: 'exec', search: 'exec' });
+    assert.deepEqual(risk, { echo: 'read', remove: 'write', wipe: 'exec', lookup_docs: 'read', fail: 'exec', who_am_i: 'exec', headers: 'exec', fixed: 'exec', search: 'exec' });
     assert.equal(specs[0]!.inputSchema.type, 'object');
     assert.equal((specs.find((s) => s.name === 'who_am_i')!.meta as { mcp: { name: string } }).mcp.name, 'who/am i');
   } finally {
@@ -161,7 +161,7 @@ test('stdio: lists and calls tools, ignores non-protocol output, and closes the 
   const tools = createMcpTools(stdio);
   try {
     const specs = await tools.listTools(ctx());
-    assert.equal(specs.length, 7);
+    assert.equal(specs.length, 9);
     assert.equal((await tools.callTool('echo', { text: 'pipe' }, ctx())).content, 'echo: pipe');
     assert.equal((await tools.callTool('fail', {}, ctx())).isError, true);
   } finally {
@@ -174,7 +174,7 @@ test('stdio: reconnects after the server exits', async () => {
   try {
     await assert.rejects(session.run((c) => c.callTool('crash', {})), /exited with code 3/);
     const tools = await session.run((c) => c.listTools());
-    assert.equal(tools.length, 7);
+    assert.equal(tools.length, 9);
   } finally {
     await session.close();
   }
@@ -198,6 +198,48 @@ test('${env:X} in url and headers resolves from the context env', async () => {
   try {
     await tools.listTools(ctx());
     assert.equal(mock.requests[0]!.headers.authorization, 'Bearer dev');
+  } finally {
+    await tools.close?.();
+    await mock.close();
+  }
+});
+
+test('the token and static header secrets are redacted from structured content as well as text', async () => {
+  const mock = await startMcpMock();
+  const tools = createMcpTools({ url: mock.url, auth: { audience: 'a' }, headers: { 'x-api-key': 'key-from-env-123' } });
+  try {
+    const out = await tools.callTool('headers', {}, ctx({ credentials: { token: async () => 'tok-xyz-789' } }));
+    assert.deepEqual(out.data, { authorization: 'Bearer [redacted]', apiKey: '[redacted]' });
+    const everything = JSON.stringify(out);
+    for (const secret of ['tok-xyz-789', 'key-from-env-123']) assert.equal(everything.includes(secret), false, secret);
+  } finally {
+    await tools.close?.();
+    await mock.close();
+  }
+});
+
+test('static header secrets are redacted even without a per-call token', async () => {
+  const mock = await startMcpMock();
+  const tools = createMcpTools({ url: mock.url, headers: { 'x-api-key': 'key-from-env-123' } });
+  try {
+    const out = await tools.callTool('headers', {}, ctx());
+    assert.deepEqual(out.data, { authorization: null, apiKey: '[redacted]' });
+    assert.equal(JSON.stringify(out).includes('key-from-env-123'), false);
+  } finally {
+    await tools.close?.();
+    await mock.close();
+  }
+});
+
+test('structured content that cannot be redacted into valid JSON is dropped, with a note', async () => {
+  const mock = await startMcpMock();
+  const tools = createMcpTools({ url: mock.url, auth: { audience: 'a' } });
+  try {
+    // The structured result is {"k":"v"}; a token that is a slice of that text breaks it when masked.
+    const out = await tools.callTool('fixed', {}, ctx({ credentials: { token: async () => 'k":"v' } }));
+    assert.equal(out.data, undefined);
+    assert.match(out.content, /structured content dropped/);
+    assert.equal(out.content.includes('k":"v'), false);
   } finally {
     await tools.close?.();
     await mock.close();

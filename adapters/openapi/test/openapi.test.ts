@@ -116,3 +116,27 @@ test('a parameter declared in two locations is rejected', async () => {
 test('descriptor metadata', () => {
   assert.deepEqual([adapter.port, adapter.direction, adapter.maps], ['ToolPort', 'outbound', { standard: 'OpenAPI 3' }]);
 });
+
+test('path parameters made only of dots are rejected and nothing is sent', () => withApi(async (url, api) => {
+  const tools = await createOpenApiTools({ spec: sampleSpec(`${url}/v1`) });
+  for (const bad of ['..', '.', '....']) {
+    const out = await tools.callTool('get_text_value', { value: bad }, ctx());
+    assert.equal(out.isError, true);
+    assert.match(out.content, /Invalid path parameter\(s\): value/);
+  }
+  assert.equal(api.requests.length, 0);
+  assert.equal((await tools.callTool('get_text_value', { value: 'a/../b' }, ctx())).isError, undefined);
+  assert.equal(api.requests[0]!.path, '/v1/text/a%2F..%2Fb');
+}));
+
+test('a placeholder cannot reach the host through the server URL', async () => {
+  await assert.rejects(createOpenApiTools({ spec: { openapi: '3.0.0', servers: [{ url: 'http://{host}' }], paths: { '/a': { get: {} } } } }), /not in the scheme or host|absolute/);
+});
+
+test('static header values and the token are redacted from content and data', () => withApi(async (url) => {
+  const tools = await createOpenApiTools({ spec: sampleSpec(url), headers: { 'x-api-key': '${env:KEY}', 'x-team': 'blue-team' }, auth: { audience: 'a' } }, { env: { KEY: 'key-from-env-123' } });
+  const out = await tools.callTool('echoQuery', { message: 'x', 'x-trace': 'trace-secret-9' }, ctx({ credentials: { token: async () => 'tok-xyz-789' } }));
+  const everything = JSON.stringify(out);
+  for (const secret of ['key-from-env-123', 'blue-team', 'trace-secret-9', 'tok-xyz-789']) assert.equal(everything.includes(secret), false, secret);
+  assert.equal((out.data as { headers: Record<string, string> }).headers['x-api-key'], '[redacted]');
+}));

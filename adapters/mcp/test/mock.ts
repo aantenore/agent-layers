@@ -27,7 +27,7 @@ export async function startMcpMock(opts: { sse?: boolean; requireAuth?: string }
     const sid = req.headers['mcp-session-id'] as string | undefined;
     if (sid && expired.has(sid)) { res.writeHead(404).end('unknown session'); return; }
     if (msg.method === 'notifications/initialized') { res.writeHead(202).end(); return; }
-    const out = handleRpc(msg, { authorization: req.headers.authorization });
+    const out = handleRpc(msg, { authorization: req.headers.authorization, 'x-api-key': req.headers['x-api-key'] as string | undefined });
     const payload = JSON.stringify({ jsonrpc: '2.0', id: msg.id, ...out });
     const headers: Record<string, string> = msg.method === 'initialize' ? { 'mcp-session-id': `s${++session}` } : {};
     if (opts.sse) {

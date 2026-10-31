@@ -65,6 +65,8 @@ export async function readSpec(source: string, baseDir: string = process.cwd(), 
 export function baseUrlOf(spec: OpenApiDocument, option: string | undefined, specUrl: string | undefined): string {
   const url = option ?? serverUrl(spec);
   const absolute = url && /^https?:\/\//i.test(url) ? url : url !== undefined && specUrl ? new URL(url, specUrl).href : undefined;
-  if (!absolute) throw new Error('OpenAPI: set an absolute "baseUrl" (the spec has no usable absolute "servers" entry)');
+  let host = '';
+  try { host = absolute ? new URL(absolute).hostname : ''; } catch { /* reported below */ }
+  if (!absolute || !host) throw new Error('OpenAPI: set an absolute "baseUrl" (the spec has no usable absolute "servers" entry)');
   return absolute.replace(/\/+$/, '');
 }

@@ -39,6 +39,7 @@ export function checkRequestSpec(name: string, spec: RequestSpec): HttpMethod {
   if (spec.body === 'json' && (method === 'GET' || method === 'HEAD')) throw new Error(`tool "${name}": ${method} cannot have a body`);
   if (spec.bodyArg && spec.body !== 'json') throw new Error(`tool "${name}": bodyArg needs body "json"`);
   if (!/^https?:\/\//i.test(spec.url)) throw new Error(`tool "${name}": url must be absolute http(s)`);
+  try { templateGuard(spec.url); } catch (err) { throw new Error(`tool "${name}": ${err instanceof Error ? err.message : String(err)}`); }
   return method;
 }
 
@@ -50,11 +51,39 @@ const truncate = (text: string, max: number): string => (text.length <= max ? te
 const failure = (content: string): ToolOutcome => ({ content, isError: true });
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** The secret part of a static Authorization header, so an echoing server cannot hand it to the model. */
+/** Secrets shorter than this are not worth masking and would mangle ordinary text. */
+const MIN_SECRET_CHARS = 4;
+const REDACTED = '[redacted]';
+
+/** Every form a secret may take when a server echoes it: raw, JSON-escaped, URL-encoded; longest first. */
+function secretForms(values: Iterable<string>): string[] {
+  const forms = new Set<string>();
+  for (const v of values) {
+    if (v.length < MIN_SECRET_CHARS) continue;
+    forms.add(v);
+    forms.add(JSON.stringify(v).slice(1, -1));
+    forms.add(encodeURIComponent(v));
+  }
+  return [...forms].filter((f) => f.length >= MIN_SECRET_CHARS).sort((x, y) => y.length - x.length);
+}
+
+const redact = (text: string, forms: readonly string[]): string => forms.reduce((t, f) => t.split(f).join(REDACTED), text);
+
+/** Values of every static header, plus the credential part of an Authorization value ("Bearer abc" also yields "abc"). */
 function staticSecrets(headers: Record<string, string> | undefined): string[] {
-  const auth = Object.entries(headers ?? {}).find(([k]) => k.toLowerCase() === 'authorization')?.[1];
-  const secret = auth?.replace(/^\s*\w+\s+/, '').trim();
-  return secret && secret.length >= 4 ? [secret] : [];
+  return Object.entries(headers ?? {}).flatMap(([k, v]) => (k.toLowerCase() === 'authorization' ? [v, v.replace(/^\s*\w+\s+/, '').trim()] : [v]));
+}
+
+/** Fixed part of a URL template: its origin and the path up to the first placeholder. */
+function templateGuard(url: string): { origin: string; prefix: string } {
+  const at = url.indexOf('{');
+  const head = at < 0 ? url : url.slice(0, at);
+  let parsed: URL;
+  try { parsed = new URL(head); } catch { throw new Error('placeholders are allowed in the path and query only, not in the scheme or host'); }
+  if (at >= 0 && /^https?:\/\/[^/?#]*$/i.test(head)) {
+    throw new Error('placeholders are allowed in the path and query only, not in the scheme or host');
+  }
+  return { origin: parsed.origin, prefix: parsed.pathname };
 }
 
 /** Sends one request built from `args`. Non-2xx answers are error results; network failures reject. */
@@ -67,11 +96,21 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
   for (const h of headerArgs) if (args[h] !== undefined && args[h] !== null) headers.set(h, plain(args[h]));
 
   const missing: string[] = [];
-  const target = new URL(spec.url.replace(PLACEHOLDER, (_, key: string) => {
+  const dotted: string[] = [];
+  const guard = templateGuard(spec.url);
+  const filled = spec.url.replace(PLACEHOLDER, (_, key: string) => {
     if (args[key] === undefined || args[key] === null) missing.push(key);
-    return encodeURIComponent(plain(args[key] ?? ''));
-  }));
+    const value = plain(args[key] ?? '');
+    // encodeURIComponent keeps dots, and "." / ".." would climb the path once the URL is normalized.
+    if (/^\.+$/.test(value)) dotted.push(key);
+    return encodeURIComponent(value);
+  });
   if (missing.length) return failure(`Missing path parameter(s): ${missing.join(', ')}`);
+  if (dotted.length) return failure(`Invalid path parameter(s): ${dotted.join(', ')} (a value made only of dots is not allowed); the request was not sent`);
+  const target = new URL(filled);
+  if (target.origin !== guard.origin || !target.pathname.startsWith(guard.prefix)) {
+    return failure('The arguments change where the request goes; the request was not sent');
+  }
   for (const key of queryArgs) {
     const value = args[key];
     if (value === undefined || value === null) continue;
@@ -88,7 +127,7 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
   }
   if (!headers.has('accept')) headers.set('accept', 'application/json, text/plain;q=0.9, */*;q=0.5');
 
-  const secrets = staticSecrets(spec.headers);
+  const secrets = [...staticSecrets(spec.headers), ...headerArgs.flatMap((h) => (args[h] !== undefined && args[h] !== null ? [plain(args[h])] : []))];
   if (spec.auth) {
     if (!ctx.credentials) return failure(`${name} needs credentials for audience "${spec.auth.audience}" and this run has none; the request was not sent`);
     let token: string;
@@ -108,8 +147,8 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
     return { content: `HTTP ${res.status}: ${(await res.arrayBuffer()).byteLength} bytes of ${type.split(';')[0]} (not shown)` };
   }
   let text = await res.text();
-  // A server may echo request headers back; secrets must not reach the model.
-  for (const secret of secrets) text = text.split(secret).join('[redacted]');
+  // A server may echo request headers back; secrets must not reach the model, in the text or in `data`.
+  text = redact(text, secretForms(secrets));
   if (!res.ok) return failure(`HTTP ${res.status} ${res.statusText}`.trim() + (text ? `: ${truncate(text, ERROR_BODY_CHARS)}` : ''));
   let data: unknown;
   if (/json/i.test(type) && text) {
