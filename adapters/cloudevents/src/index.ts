@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
-  defineAdapter, globToRegExp, InboundRejected, PORT_VERSIONS,
-  type InboundContext, type InboundRejection, type Identity, type TriggerPort, type TriggerSink,
+  ATTR, defineAdapter, globToRegExp, InboundRejected, noMappings, noopTelemetry, PORT_VERSIONS,
+  type Caller, type InboundContext, type InboundRejection, type Mappings, type TelemetryPort, type Trigger, type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
 
 export interface CloudEventsRoute {
@@ -23,6 +23,9 @@ export interface CloudEventsOptions {
   credential?: string;
 }
 
+/** Extension attribute values CloudEvents allows in JSON. */
+type ExtensionValue = string | number | boolean;
+
 /** The CloudEvent attributes the adapter reads. */
 interface CloudEvent {
   id: string;
@@ -30,6 +33,10 @@ interface CloudEvent {
   type: string;
   time?: string;
   subject?: string;
+  datacontenttype?: string;
+  dataschema?: string;
+  /** Extension attributes (names of 1 to 20 lower-case letters and digits, scalar values). */
+  extensions: Record<string, ExtensionValue>;
   data?: unknown;
 }
 
@@ -57,6 +64,9 @@ function rejection(kind: InboundRejection, message: string): Response {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isJsonType = (t: string) => t === 'application/json' || t.endsWith('+json');
+/** Attributes that are not extensions. */
+const CONTEXT_ATTRIBUTES = new Set(['specversion', 'id', 'source', 'type', 'time', 'subject', 'datacontenttype', 'dataschema', 'data', 'data_base64']);
+const EXTENSION_NAME = /^[a-z0-9]{1,20}$/;
 const RFC3339 = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
 
 function attribute(value: unknown, name: string): string {
@@ -70,13 +80,22 @@ function optionalString(value: unknown, name: string): string | undefined {
   return value;
 }
 
-function checked(get: (name: string) => unknown, data: unknown): CloudEvent {
+function checked(get: (name: string) => unknown, names: Iterable<string>, data: unknown): CloudEvent {
   if (get('specversion') !== '1.0') throw new InvalidEvent('unsupported or missing specversion (only "1.0" is accepted)');
-  const event: CloudEvent = { id: attribute(get('id'), 'id'), source: attribute(get('source'), 'source'), type: attribute(get('type'), 'type') };
+  const event: CloudEvent = { id: attribute(get('id'), 'id'), source: attribute(get('source'), 'source'), type: attribute(get('type'), 'type'), extensions: {} };
   const time = optionalString(get('time'), 'time');
   if (time && RFC3339.test(time) && !Number.isNaN(Date.parse(time))) event.time = time;
   const subject = optionalString(get('subject'), 'subject');
   if (subject) event.subject = subject;
+  const datacontenttype = optionalString(get('datacontenttype'), 'datacontenttype');
+  if (datacontenttype) event.datacontenttype = datacontenttype;
+  const dataschema = optionalString(get('dataschema'), 'dataschema');
+  if (dataschema) event.dataschema = dataschema;
+  for (const name of names) {
+    if (CONTEXT_ATTRIBUTES.has(name) || !EXTENSION_NAME.test(name)) continue;
+    const value = get(name);
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') event.extensions[name] = value;
+  }
   if (data !== undefined) event.data = data;
   return event;
 }
@@ -91,13 +110,17 @@ async function structuredEvent(req: Request): Promise<CloudEvent> {
   if (!isRecord(body)) throw new InvalidEvent('the body must be a JSON object');
   if (body.data !== undefined && body.data_base64 !== undefined) throw new InvalidEvent('"data" and "data_base64" are mutually exclusive');
   if (body.data_base64 !== undefined && typeof body.data_base64 !== 'string') throw new InvalidEvent('"data_base64" must be a string');
-  return checked((name) => body[name], body.data ?? body.data_base64);
+  return checked((name) => body[name], Object.keys(body), body.data ?? body.data_base64);
 }
 
 async function binaryEvent(req: Request, contentType: string): Promise<CloudEvent> {
   const header = (name: string) => req.headers.get(`ce-${name}`) ?? undefined;
+  const names = [...req.headers.keys()].filter((h) => h.startsWith('ce-')).map((h) => h.slice(3));
   // Validate the attributes before reading the body.
-  const event = checked(header, undefined);
+  const event = checked(header, names, undefined);
+  // In binary mode the Content-Type header is the data content type.
+  const declared = req.headers.get('content-type')?.trim();
+  if (declared) event.datacontenttype = declared;
   const buf = Buffer.from(await req.arrayBuffer());
   if (buf.length === 0) return event;
   if (isJsonType(contentType)) {
@@ -136,8 +159,31 @@ export function renderInput(template: string, event: CloudEvent): string {
   });
 }
 
+/** The event as a flat document, the way structured mode writes it: what `mappings.in` rules read. */
+function nativeOf(event: CloudEvent): Record<string, unknown> {
+  const { extensions, data, ...attributes } = event;
+  return { specversion: '1.0', ...attributes, ...extensions, ...(data !== undefined ? { data } : {}) };
+}
+
+/**
+ * The `ext` of the trigger: the upstream event id (kept, to deduplicate redeliveries), the subject, the data content
+ * type and schema, and the extension attributes as one object.
+ */
+function extOf(event: CloudEvent): Record<string, unknown> {
+  return {
+    'cloudevents.id': event.id,
+    ...(event.subject ? { 'cloudevents.subject': event.subject } : {}),
+    ...(event.datacontenttype ? { 'cloudevents.datacontenttype': event.datacontenttype } : {}),
+    ...(event.dataschema ? { 'cloudevents.dataschema': event.dataschema } : {}),
+    ...(Object.keys(event.extensions).length ? { 'cloudevents.extensions': event.extensions } : {}),
+  };
+}
+
+/** Collaborators the registry hands the adapter; absent when it is used directly from code. */
+export interface CloudEventsContext { mappings?: Mappings; telemetry?: TelemetryPort }
+
 /** Factory: usable directly from code, without the registry. */
-export function createCloudEventsTrigger(options: CloudEventsOptions, name = 'cloudevents'): TriggerPort {
+export function createCloudEventsTrigger(options: CloudEventsOptions, name = 'cloudevents', { mappings = noMappings(name), telemetry = noopTelemetry }: CloudEventsContext = {}): TriggerPort {
   const path = options.path ?? DEFAULT_PATH;
   const routes = options.routes.map((r) => ({
     type: globToRegExp(r.type),
@@ -146,12 +192,12 @@ export function createCloudEventsTrigger(options: CloudEventsOptions, name = 'cl
     input: r.input ?? '{{data}}',
   }));
 
-  async function identityFor(sink: TriggerSink, ctx: InboundContext): Promise<{ identity?: Identity } | Response> {
-    if (options.credential === undefined) return ctx.identity ? { identity: ctx.identity } : {};
-    // The configured credential is the run identity: no fallback to the caller or to anonymous.
+  async function callerFor(sink: TriggerSink, ctx: InboundContext): Promise<{ caller?: Caller } | Response> {
+    if (options.credential === undefined) return ctx.caller ? { caller: ctx.caller } : {};
+    // The configured credential is the run caller: no fallback to the HTTP caller or to anonymous.
     try {
       if (!sink.verify) throw new Error('no identity layer');
-      return { identity: await sink.verify(options.credential) };
+      return { caller: await sink.verify(options.credential) };
     } catch {
       return rejection('unauthenticated', 'the service credential of this trigger was not accepted');
     }
@@ -179,17 +225,21 @@ export function createCloudEventsTrigger(options: CloudEventsOptions, name = 'cl
             const route = routes.find((r) => r.type.test(event.type) && (!r.source || r.source.test(event.source)));
             if (!route) return errorResponse(404, `no route for event type "${event.type}"`, 'not_found_error');
 
-            const who = await identityFor(sink, ctx);
+            const who = await callerFor(sink, ctx);
             if (who instanceof Response) return who;
             try {
-              const { runId } = await sink.accept({
+              // The SDK id is unique per delivery (the reference host uses it as the run id); redeliveries of one
+              // upstream event share `ext["cloudevents.id"]` and `source`.
+              const trigger = mappings.in<Trigger>(nativeOf(event), {
                 id: randomUUID(),
-                type: event.type,
+                kind: event.type,
                 source: event.source,
-                ...(event.time ? { time: event.time } : {}),
+                ...(event.time ? { at: event.time } : {}),
                 agent: route.agent,
                 data: renderInput(route.input, event),
-              }, who);
+                ext: extOf(event),
+              });
+              const { runId } = await telemetry.span('cloudevents.receive', { [ATTR.layer]: 'interface', [ATTR.triggerKind]: trigger.kind, [ATTR.name]: route.agent }, () => sink.accept(trigger, who));
               return Response.json({ runId, agent: route.agent, eventId: event.id }, { status: 202 });
             } catch (err) {
               if (err instanceof InboundRejected) return rejection(err.kind, err.message);
@@ -236,7 +286,11 @@ export const adapter = defineAdapter<'TriggerPort', CloudEventsOptions>({
     required: ['routes'],
     additionalProperties: false,
   },
-  create: (options, ctx) => createCloudEventsTrigger(options, ctx.name),
+  ext: {
+    produces: ['cloudevents.id', 'cloudevents.subject', 'cloudevents.datacontenttype', 'cloudevents.dataschema', 'cloudevents.extensions'],
+  },
+  mappingDefaults: { in: { shape: 'Trigger' } },
+  create: (options, ctx) => createCloudEventsTrigger(options, ctx.name, { mappings: ctx.mappings, telemetry: ctx.telemetry }),
 });
 
 export const adapters = [adapter];

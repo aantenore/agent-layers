@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   compose, defineAdapter, PORT_VERSIONS, resolveProfile,
-  type Identity, type RuntimePort, type StackConfig,
+  type Caller, type RuntimePort, type StackConfig,
 } from '@agent-layers/core';
 import { adapter as basicRuntime, createBasicRuntime } from '@agent-layers/adapter-basic-runtime';
 import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
@@ -10,7 +10,7 @@ import { identityAdapter } from '@agent-layers/adapter-static-identity';
 import { serveStack } from '@agent-layers/gateway';
 import { adapter as cloudevents } from '../src/index.ts';
 
-interface Seen { runId: string; input: string; identity?: Identity }
+interface Seen { runId: string; input: string; caller?: Caller }
 
 /** Delegates to the basic runtime and records what each run received. */
 function recordingRuntime(seen: Seen[]) {
@@ -26,7 +26,7 @@ function recordingRuntime(seen: Seen[]) {
           return {
             name: bound.name,
             run(input, ctx) {
-              seen.push({ runId: ctx?.runId ?? '', input: typeof input === 'string' ? input : JSON.stringify(input), ...(ctx?.identity ? { identity: ctx.identity } : {}) });
+              seen.push({ runId: ctx?.runId ?? '', input: typeof input === 'string' ? input : JSON.stringify(input), ...(ctx?.caller ? { caller: ctx.caller } : {}) });
               return bound.run(input, ctx);
             },
           };
@@ -73,7 +73,7 @@ const bearer = { authorization: 'Bearer dev-token' };
 const structured = { ...bearer, 'content-type': 'application/cloudevents+json; charset=utf-8' };
 const event = { specversion: '1.0', id: 'evt-1', source: '/orders', type: 'com.example.order.created', data: { customer: { name: 'Ada' }, total: 12 } };
 
-test('structured mode: 202, rendered template, caller identity', async () => {
+test('structured mode: 202, rendered template, caller', async () => {
   const t = await setup({ routes });
   try {
     const res = await fetch(t.url, { method: 'POST', headers: structured, body: JSON.stringify(event) });
@@ -85,7 +85,7 @@ test('structured mode: 202, rendered template, caller identity', async () => {
     assert.equal(t.seen[0]!.runId, body.runId);
     assert.notEqual(body.runId, 'evt-1');
     assert.equal(t.seen[0]!.input, 'Order evt-1 from /orders: Ada (12) {"customer":{"name":"Ada"},"total":12}');
-    assert.equal(t.seen[0]!.identity?.subject, 'dev-user');
+    assert.equal(t.seen[0]!.caller?.id, 'dev-user');
   } finally {
     await t.close();
   }
@@ -111,14 +111,14 @@ test('binary mode: JSON data, text data, default template', async () => {
   }
 });
 
-test('a configured credential is the run identity, not the caller', async () => {
+test('a configured credential is the run caller, not the HTTP caller', async () => {
   const t = await setup({ routes, credential: 'svc-token' });
   try {
     const res = await fetch(t.url, { method: 'POST', headers: structured, body: JSON.stringify(event) });
     assert.equal(res.status, 202);
     await waitFor(t.seen);
-    assert.equal(t.seen[0]!.identity?.subject, 'events-svc');
-    assert.equal(t.seen[0]!.identity?.kind, 'agent');
+    assert.equal(t.seen[0]!.caller?.id, 'events-svc');
+    assert.equal(t.seen[0]!.caller?.kind, 'agent');
   } finally {
     await t.close();
   }
