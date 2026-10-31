@@ -57,10 +57,11 @@ Policy (`agents.rego`), over `input.caller.kind`, `input.caller.roles` and `inpu
 |---|---|---|
 | `IdentityVerifier.verify(token)` → `Identity` | `oidcVerifier` | `registry.verifiers` |
 | `CredentialFactory(identity)` → `CredentialProvider.token(audience, { scopes })` | `oidcCredentials` (`on-behalf-of`, `self`) | `registry.credentials` |
-| `Authorizer.evaluate(AccessRequest)` → `{ decision, reason? }` | `opaAuthorizer`, `authzenAuthorizer` | `registry.authorizers` (Cedar, OpenFGA, Cerbos...) |
+| `Authorizer.evaluate(AccessQuestion)` → `{ decision, reason? }` | `opaAuthorizer`, `authzenAuthorizer` | `registry.authorizers` (Cedar, OpenFGA, Cerbos...) |
 
-reinloop's `opaAuthorizer` sends its own AuthZEN-shaped `AccessRequest` (`subject`, `resource`); `agents.rego` reads
-the SDK's `AccessQuestion` (`caller`, `target`) that the `opa` adapter sends, so it denies reinloop's requests.
+reinloop's `opaAuthorizer` sends the SDK's `AccessQuestion` (`caller`, `action`, `target`), the same input the `opa`
+adapter sends, so `agents.rego` decides both alike. A run without a caller is the anonymous caller; the credential
+is never sent; `args` only with `includeArgs`.
 
 Local policy rules run first and take `when: { roles, scopes, kind }` (roles and scopes any-of). A local `deny` is
 final; for `allow`/`ask` the PDP is consulted; a PDP `deny` denies (reason `pdp: ...`); a PDP failure applies
