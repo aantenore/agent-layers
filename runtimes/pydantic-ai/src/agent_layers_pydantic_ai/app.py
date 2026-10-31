@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 import httpx2
 from fasta2a import FastA2A
 from fasta2a.schema import SecurityRequirement, SecurityScheme, Skill
-from fasta2a.storage import InMemoryStorage
 from pydantic_ai import Agent
 from starlette.middleware import Middleware
 from starlette.requests import Request
@@ -17,6 +16,7 @@ from starlette.routing import Route
 
 from .agent import build_agent, model_http_client
 from .caller import CallerBroker, CallerMiddleware, CallerWorker
+from .owners import OwnedStorage, OwnedTaskManager
 from .settings import Settings
 from .spec import AgentSpec
 
@@ -39,7 +39,7 @@ def create_app(
     """The ASGI app. `agent` and `http_client` replace the gateway-backed ones (tests)."""
     client = http_client or model_http_client(settings)
     the_agent = agent or build_agent(spec, settings, client)
-    storage = InMemoryStorage()
+    storage = OwnedStorage(settings.max_tasks)
     broker = CallerBroker()
     worker = CallerWorker(
         agent=the_agent,
@@ -59,7 +59,7 @@ def create_app(
                 await client.aclose()
 
     description = spec.description or f'Agent {spec.name}'
-    return FastA2A(
+    app = FastA2A(
         storage=storage,
         broker=broker,
         name=spec.name,
@@ -82,3 +82,6 @@ def create_app(
         ],
         lifespan=lifespan,
     )
+    # FastA2A builds its own task manager; this one answers only the owner of a task or conversation.
+    app.task_manager = OwnedTaskManager(broker=broker, storage=storage, cancel_run=worker.cancel_run)
+    return app

@@ -26,6 +26,8 @@ class Settings:
     public_url: str
     """URL of the JSON-RPC endpoint written in the agent card."""
     max_concurrent_runs: int
+    max_tasks: int
+    """Tasks (and conversations) kept in memory; the oldest finished ones are dropped beyond it."""
     shutdown_grace_s: float
     model_timeout_s: float
     log_level: str
@@ -79,6 +81,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         port=port,
         public_url=env.get('A2A_PUBLIC_URL', '').strip() or f'http://{shown}:{port}/',
         max_concurrent_runs=_int(env, 'MAX_CONCURRENT_RUNS', 8),
+        max_tasks=_int(env, 'MAX_TASKS', 1000),
         shutdown_grace_s=_float(env, 'SHUTDOWN_GRACE_S', 10.0),
         model_timeout_s=_float(env, 'MODEL_TIMEOUT_S', 120.0),
         log_level=env.get('LOG_LEVEL', 'info').strip().lower() or 'info',

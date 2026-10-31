@@ -91,6 +91,26 @@ In the `polyglot` profile the static credentials table hands out the dev token f
 which stands in for an on-behalf-of exchange; in production use the `oidc` credentials adapter in `on-behalf-of`
 mode with the audience the gateway's identity layer accepts.
 
+## Task ownership
+
+Each task and each `contextId` belongs to the caller that created it (a new `contextId` to its first caller). `GetTask`,
+`CancelTask`, `SubscribeToTask`, and a `SendMessage` or `SendStreamingMessage` that names a `contextId` or `taskId` of
+someone else are answered like an unknown id (`TaskNotFoundError`, code -32001), so ids cannot be probed. The one
+difference left: a `contextId` nobody has used is accepted and claimed by its caller.
+
+The owner key is `sha256(bearer token)`, kept in memory beside the task; the token itself is not stored. This is
+weaker than a verified subject, because the agent does not verify the token (the gateway does) and the gateway has no
+introspection endpoint:
+
+- A caller that presents a different token loses its earlier tasks and conversations. On-behalf-of tokens are re-minted
+  when they expire, so a long conversation (the gateway sends the session id as `contextId`) can outlive its token.
+- Callers that share one credential share tasks. The static dev credentials of the `polyglot` profile hand every caller
+  the same token.
+
+At most `MAX_TASKS` tasks are kept, with their owners: the oldest finished ones are dropped beyond it (a running task is
+never dropped). Conversations are capped at the same number; the least recently used one is dropped with its history,
+and its `contextId` is then free for the next caller.
+
 Also refused: requests with an `Origin` header (the agent is called server to server) and, when bound to loopback,
 `Host` names that are not loopback ones. The agent card and `/healthz` are public.
 
@@ -106,6 +126,7 @@ Also refused: requests with an `Origin` header (the agent is called server to se
 | `A2A_PORT` | `9100` | Port of the A2A server |
 | `A2A_PUBLIC_URL` | `http://localhost:<port>/` | JSON-RPC URL written in the agent card |
 | `MAX_CONCURRENT_RUNS` | `8` | Runs in parallel |
+| `MAX_TASKS` | `1000` | Tasks, and conversations, kept in memory; the oldest finished ones are dropped beyond it |
 | `SHUTDOWN_GRACE_S` | `10` | On SIGTERM or SIGINT, how long runs in flight may finish before they are cancelled |
 | `MODEL_TIMEOUT_S` | `120` | Time limit of one model request |
 | `LOG_LEVEL` | `info` | Log level |
@@ -129,9 +150,14 @@ when the model is not served.
 ## Limits
 
 - Tasks, conversation history and pending credentials are in memory: one process, lost on restart.
-- Tasks are not scoped per caller here; the gateway scopes them for its callers. Keep this agent reachable only by
-  the gateway (loopback or a private network).
-- `CancelTask` does not stop a run in progress (FastA2A's Pydantic AI worker does not implement it).
+- Tasks are scoped per caller by a hash of the bearer token, not by a verified subject (see Task ownership). Keep this
+  agent reachable only by the gateway (loopback or a private network).
+- `CancelTask`: FastA2A's Pydantic AI worker does nothing on cancel, so a cancelled task would stay `working` and
+  finish as `completed`, its run still calling the model and tools. Here `CallerWorker.cancel_run` marks a task that has
+  not ended (`submitted` or `working`) as `canceled`, stops its run at the next await (the in-flight model or tool
+  request is dropped, no further call is made, no result or artifact is written) and ends its stream with `canceled`;
+  the reply to `CancelTask` already shows `canceled`. A task that already ended is returned unchanged. Work the gateway
+  has already accepted (a tool call executing there) is not undone.
 - Spans of the gateway and of this process are not joined into one trace: the A2A call carries no trace context.
 - Each run opens its own MCP session. The MCP client first tries the stateless 2026-07-28 revision, which the
   gateway answers with 400, then falls back to the initialize handshake: one extra request per run.

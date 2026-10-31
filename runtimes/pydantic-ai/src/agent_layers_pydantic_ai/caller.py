@@ -137,15 +137,35 @@ class CallerWorker(AgentWorker[Any, Any]):
     shutdown_grace_s: float = 10.0
     _active: int = field(default=0, init=False, repr=False)
     _idle: anyio.Event | None = field(default=None, init=False, repr=False)
+    _scopes: dict[str, anyio.CancelScope] = field(default_factory=dict, init=False, repr=False)
 
     async def run_task(self, params: TaskSendParams) -> None:
+        task_id = params['id']
         broker = self.broker
-        token = broker.take_token(params['id']) if isinstance(broker, CallerBroker) else None
+        token = broker.take_token(task_id) if isinstance(broker, CallerBroker) else None
+        task = await self.storage.load_task(task_id)
+        if task is not None and task['status']['state'] == 'canceled':
+            return  # canceled before it started
         reset = CALLER_TOKEN.set(token)
         try:
-            await super().run_task(params)
+            with anyio.CancelScope() as scope:
+                self._scopes[task_id] = scope
+                try:
+                    await super().run_task(params)
+                finally:
+                    self._scopes.pop(task_id, None)
         finally:
             CALLER_TOKEN.reset(reset)
+
+    async def cancel_run(self, task_id: str) -> None:
+        """Mark a task that has not ended as canceled and stop its run: no further model or tool call is made."""
+        task = await self.storage.load_task(task_id)
+        if task is None or task['status']['state'] not in ('submitted', 'working'):
+            return
+        await self.storage.update_task(task_id, state='canceled')
+        scope = self._scopes.get(task_id)
+        if scope is not None:
+            scope.cancel()
 
     @asynccontextmanager
     async def run(self) -> AsyncIterator[None]:
