@@ -1,9 +1,10 @@
 # @agent-layers/adapter-mcp
 
-Maps **Model Context Protocol** → **ToolPort** (layer `tool`) and **KnowledgePort** (layer `knowledge`). Direction:
-outbound. Tier: prototype, production. Maturity: experimental.
+Maps **Model Context Protocol** → **ToolPort** (layer `tool`) and **KnowledgePort** (layer `knowledge`), outbound,
+and exposes **ChannelPort** through **Model Context Protocol** (layer `interface`), inbound. Tier: prototype,
+production. Maturity: experimental.
 
-One package, two descriptors, both named `mcp`. Each instance talks to one MCP server, over stdio (a child process) or
+One package, three descriptors, all named `mcp`. Each outbound instance talks to one MCP server, over stdio (a child process) or
 streamable HTTP (JSON or SSE responses, `Mcp-Session-Id`). A lost HTTP session (404) is reopened once; a stdio server
 that exited is restarted on the next call.
 
@@ -93,6 +94,35 @@ script:
     }
   }
 }
+```
+
+## Server (`channels` slot): exposes ChannelPort through Model Context Protocol
+
+Mounted by the gateway at `/mcp` (streamable HTTP), so any MCP client, in any language, uses the stack's tools with
+the enforcement of the stack: policy, approval, authorization, `tool_args` and `tool_result` guards, credentials bound
+to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge__<source>` with a `query` argument.
+
+- The gateway authenticates every request (`Authorization: Bearer ...`); the MCP session belongs to that caller, and
+  a session id presented by another caller is answered like an unknown one (404).
+- Methods: `initialize` (returns `Mcp-Session-Id`; protocol versions 2025-06-18, 2025-03-26, 2024-11-05), `ping`,
+  `tools/list`, `tools/call`, `notifications/cancelled` (aborts the call in flight). Other methods answer `-32601`;
+  batches are refused. `DELETE /mcp` ends a session; `GET /mcp` (server-initiated streams) is not offered (405).
+- Answers are JSON, or a one-event SSE stream when the client accepts only `text/event-stream` (or `sse: true`).
+- Tool names are the stack's `<source>__<tool>`; the risk becomes `readOnlyHint` and `destructiveHint`. A denied or
+  blocked call is a tool result with `isError: true`, so the client's model can react; an unknown tool is `-32602`.
+  Errors outside the protocol answer `internal error`, never the error text.
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `path` | string | `/mcp` | Endpoint path |
+| `include` / `exclude` | string[] | all / none | Globs of tool names to expose or hide |
+| `serverName` | string | `agent-layers` | `serverInfo.name` |
+| `sse` | boolean | `false` | Always answer with an SSE stream |
+| `sessionTtlMs` | integer | `1800000` | Idle time before a session is forgotten |
+| `maxSessions` | integer | `1000` | Sessions kept; the least recently used goes first |
+
+```json
+{ "layers": { "channels": [{ "adapter": "mcp", "options": { "exclude": ["admin__*"] } }] } }
 ```
 
 ## Tests

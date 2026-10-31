@@ -1,9 +1,10 @@
 import { defineAdapter, PORT_VERSIONS, type JsonSchema } from '@agent-layers/core';
 import { serverProblem } from './client.ts';
 import { createMcpKnowledge, type McpKnowledgeOptions } from './knowledge.ts';
+import { createMcpServerChannel, type McpServerChannelOptions } from './server.ts';
 import { createMcpTools, type McpToolsOptions } from './tools.ts';
 
-export { createMcpKnowledge, createMcpTools, type McpKnowledgeOptions, type McpToolsOptions };
+export { createMcpKnowledge, createMcpServerChannel, createMcpTools, type McpKnowledgeOptions, type McpServerChannelOptions, type McpToolsOptions };
 export { McpClient, McpSession, MCP_PROTOCOL_VERSION, type McpCallResult, type McpToolInfo } from './client.ts';
 export { hashId, matchesFilter, parseMcpResult, toPassage } from './parse.ts';
 export { riskOf } from './tools.ts';
@@ -86,4 +87,30 @@ export const knowledgeAdapter = defineAdapter<'KnowledgePort', McpKnowledgeOptio
   create: (options, ctx) => createMcpKnowledge(checked(options), { name: ctx.name, env: ctx.env }),
 });
 
-export const adapters = [toolAdapter, knowledgeAdapter];
+/** Inbound: the stack's governed tools and knowledge sources served as an MCP server, mounted by the gateway. */
+export const channelAdapter = defineAdapter<'ChannelPort', McpServerChannelOptions>({
+  layer: 'interface',
+  port: 'ChannelPort',
+  name: 'mcp',
+  direction: 'inbound',
+  maps: { standard: 'Model Context Protocol' },
+  portVersion: PORT_VERSIONS.ChannelPort,
+  tiers: ['prototype', 'production'],
+  description: 'Serves the governed tools and knowledge sources as an MCP server over streamable HTTP at /mcp.',
+  optionsSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', pattern: '^/' },
+      include: strings,
+      exclude: strings,
+      serverName: { type: 'string', minLength: 1 },
+      sse: { type: 'boolean' },
+      sessionTtlMs: { type: 'integer', minimum: 1000 },
+      maxSessions: { type: 'integer', minimum: 1 },
+    },
+    additionalProperties: false,
+  },
+  create: (options, ctx) => createMcpServerChannel(options, ctx.name),
+});
+
+export const adapters = [toolAdapter, knowledgeAdapter, channelAdapter];
