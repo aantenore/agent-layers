@@ -88,6 +88,7 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | `options.healthTimeoutS` | `3` s | 1–3600 | 1–30 | warn outside safe range | Bounds one health check of a generated service. |
 | `options.healthRetries` | `12` | 1–1000 | 1–60 | warn outside safe range | Sets how many failed checks mark a generated service as unhealthy. |
 | `options.errorOutputChars` | `500` chars | 0–100000 | 0–2000 | warn outside safe range | Limits how much Compose output ends up in the error message. |
+| `options.commandTimeoutMs` | `600000` ms | 1000–∞ or unbounded | 1000–3600000 | warn if unbounded; warn outside safe range | Bounds one Compose command (`up`, `down`), so a stuck pull or start cannot hang the deploy. |
 
 ### `mock-model` · ModelPort
 
@@ -103,6 +104,7 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | `options.timeoutMs` | `120000` ms | 1–∞ or unbounded | 1–600000 | fail if unbounded; warn outside safe range | Bounds one request, streams included, so a slow backend cannot hold a run. |
 | `options.errorBodyChars` | `300` chars | 0–100000 | 0–2000 | warn outside safe range | Limits how much of an upstream error body ends up in logs and errors. |
 | `options.streamEventChars` | `100` chars | 0–100000 | 0–2000 | warn outside safe range | Limits how much of a malformed stream event ends up in the error. |
+| `options.maxEventChars` | `1048576` chars | 1–∞ or unbounded | 1–16777216 | fail if unbounded; warn outside safe range | Bounds one stream event, and a line still waiting for its end, so a backend cannot grow the stream buffer without bound. |
 
 ### `memory-cache` · CachePort
 
@@ -142,6 +144,13 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | `options.tools.concurrency` | `8` | 1–∞ | 1–64 | warn outside safe range | Limits how many tool calls of one batch run at the same time. |
 | `options.tools.timeoutMs` | `unbounded` | 1–∞ or unbounded | 1–300000 | warn if unbounded; warn outside safe range | Bounds one tool call, so a stuck tool cannot hold the run. |
 | `options.tools.maxResultChars` | `32000` chars | 1–∞ or unbounded | 1–200000 | fail if unbounded; warn outside safe range | Truncates a large tool result before the model sees it. |
+
+### `memory-state` · StatePort
+
+| Setting | Default | Accepted | Safe range | On production | Why |
+|---|---|---|---|---|---|
+| `options.maxSessions` | `1000` | 1–∞ or unbounded | 1–100000 | warn if unbounded; warn outside safe range | Caps the sessions held in memory; the least recently appended one is evicted first. |
+| `options.maxEventsPerSession` | `10000` | 1–∞ or unbounded | 1–1000000 | warn if unbounded; warn outside safe range | Keeps only the most recent events of a session, so a long conversation cannot fill the process memory. |
 
 ### `sqlite-state` · StatePort
 
@@ -194,6 +203,7 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | `options.minSecretChars` | `4` chars | 1–64 | 1–8 | warn outside safe range | Very short header values are left alone, because masking them would mangle ordinary text. |
 | `options.stderrChars` | `2000` chars | 0–1000000 | 0–20000 | warn outside safe range | Keeps the tail of a stdio server's stderr for error messages without growing without bound. |
 | `options.toolsTtlMs` | `60000` ms | 0–∞ | 0–3600000 | warn outside safe range | Decides how soon a change in the server's tool list is noticed; 0 reads it on every call. |
+| `options.maxToolPages` | `100` | 1–∞ or unbounded | 1–1000 | fail if unbounded; warn outside safe range | Stops reading `tools/list` after this many pages, so a server that keeps returning a cursor cannot loop forever. |
 
 ### `openapi` · ToolPort
 
@@ -292,6 +302,13 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | `options.maxSessions` | `1000` | 1–∞ or unbounded | 1–100000 | fail if unbounded; warn outside safe range | Caps the memory held by open sessions. |
 | `options.maxSessionsPerCaller` | `10` | 1–∞ or unbounded | 1–1000 | fail if unbounded; warn outside safe range | Stops one caller from taking all the sessions. |
 
+### `jsonl-telemetry` · TelemetryPort
+
+| Setting | Default | Accepted | Safe range | On production | Why |
+|---|---|---|---|---|---|
+| `options.maxFileBytes` | `104857600` bytes | 1024–∞ or unbounded | 1024–1073741824 | warn if unbounded; warn outside safe range | Rotates the file at this size, so telemetry cannot fill the disk. |
+| `options.maxFiles` | `5` | 1–100 | — | — | Rotated files kept; older ones are deleted. |
+
 ### `otlp` · TelemetryPort
 
 | Setting | Default | Accepted | Safe range | On production | Why |
@@ -319,8 +336,7 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 
 | Setting | Default | Accepted | Safe range | On production | Why |
 |---|---|---|---|---|---|
-| `options.reasonChars` | `160` chars | 1–100000 | 1–1000 | warn outside safe range | Limits how much of a run reason is kept in the llm and harness scores. |
-| `options.guardReasonChars` | `80` chars | 1–100000 | 1–1000 | warn outside safe range | Limits how much of a run reason is kept in the guardrail score. |
+| `options.reasonChars` | `160` chars | 1–100000 | 1–1000 | warn outside safe range | Limits how much of a stop reason's detail is kept in the llm and harness score reasons; the guardrail score reads the structured reason and needs no limit. |
 | `options.previewItems` | `3` | 1–1000 | 1–20 | warn outside safe range | Limits how many guard or tool names a score reason lists. |
 
 ## Runtimes
