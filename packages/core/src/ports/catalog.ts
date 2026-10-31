@@ -52,7 +52,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   ModelPort: { port: 'ModelPort', layer: 'llm', version: '0.1.0', description: 'Chat completions with tool calls, optionally streamed' },
   RuntimePort: { port: 'RuntimePort', layer: 'harness', version: '0.1.0', description: 'Bind an agent spec to a runnable agent' },
   StatePort: { port: 'StatePort', layer: 'harness', version: '0.1.0', description: 'Session event log' },
-  TriggerPort: { port: 'TriggerPort', layer: 'interface', version: '0.1.0', description: 'Start runs from events and schedules' },
+  TriggerPort: { port: 'TriggerPort', layer: 'interface', version: '0.2.0', description: 'Start runs from events and schedules' },
   KnowledgePort: { port: 'KnowledgePort', layer: 'knowledge', version: '0.1.0', description: 'Search a knowledge source, answer with passages' },
   MemoryPort: { port: 'MemoryPort', layer: 'knowledge', version: '0.1.0', description: 'Long-term memory: remember, recall, forget' },
   IngestionPort: { port: 'IngestionPort', layer: 'knowledge', version: '0.1.0', description: 'Load, refresh and delete documents in a knowledge backend' },
@@ -67,7 +67,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   TelemetryPort: { port: 'TelemetryPort', layer: 'telemetry', version: '0.1.0', description: 'Spans, events and metrics tagged with agent.layer' },
   EvaluatorPort: { port: 'EvaluatorPort', layer: 'eval', version: '0.1.0', description: 'Score a run of a dataset case' },
   FeedbackPort: { port: 'FeedbackPort', layer: 'eval', version: '0.1.0', description: 'User feedback attached to runs, as evaluation data' },
-  ChannelPort: { port: 'ChannelPort', layer: 'interface', version: '0.1.0', description: 'Expose agents to people, apps and other agents' },
+  ChannelPort: { port: 'ChannelPort', layer: 'interface', version: '0.2.0', description: 'Expose agents to people, apps and other agents' },
 });
 
 /** Semver per port. */

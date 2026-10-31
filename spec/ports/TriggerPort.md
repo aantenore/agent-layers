@@ -1,6 +1,6 @@
 # TriggerPort
 
-Layer: `interface` (L8 Interfaces, channels & triggers) · Version: 0.1.0 · Conformance: `checkTrigger`
+Layer: `interface` (L8 Interfaces, channels & triggers) · Version: 0.2.0 · Conformance: `checkTrigger`
 
 ## Purpose
 
@@ -8,8 +8,21 @@ Start runs without a person asking: on a schedule, on an event from another syst
 
 ## Operations
 
-- `start(handler: (trigger: Trigger) → ()) → TriggerHandle`
+A trigger implements `start` (it pulls or schedules by itself), `mount` (it receives events on a host server), or both.
+
+- `start?(handler: (trigger: Trigger) → ()) → TriggerHandle`
   Begin delivering triggers to `handler`. Returns once the source is armed.
+- `mount?(sink: TriggerSink) → InboundMount`
+  Return the routes that receive events on a host server; see [ChannelPort](ChannelPort.md) for `InboundMount`.
+
+`TriggerSink`, provided by the host:
+
+- `agents() → [String]` — the agents a trigger may name.
+- `accept(trigger: Trigger, ctx?: {identity?: Identity}) → {runId: String}` — accept the trigger and start its run in
+  the background. Rejects when it cannot be accepted: an unknown agent, or no identity where the host requires one
+  (a production-tier host never runs a trigger anonymously).
+- `verify?(credential: String) → Identity` — verify the trigger's own credential (a service credential from its
+  configuration) through the identity port.
 - `TriggerHandle.close() → ()`
   Stop delivering and release the source.
 
@@ -47,10 +60,12 @@ Start runs without a person asking: on a schedule, on an event from another syst
 
 `checkTrigger` verifies:
 
-- `start` resolves to a handle.
-- When a fire fixture is given: after firing, the handler was called, and every delivered trigger validates against `trigger.json`. Otherwise this part is skipped.
-- `close` completes.
+- The trigger has `start` or `mount`.
+- `start`, when present, resolves to a handle and `close` completes.
+- `mount`, when present, resolves to at least one well-formed route.
+- When a fire fixture is given (for `start` or for `mount`): the trigger was delivered, and every delivered trigger validates against `trigger.json`. Otherwise this part is skipped.
 
 ## Version history
 
 - 0.1.0 — initial
+- 0.2.0 — `start` is optional; `mount` receives events on a host server through a `TriggerSink`; the reference host runs triggers with the identity it was started with

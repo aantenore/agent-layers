@@ -22,8 +22,8 @@ A port is the contract between the stack and one kind of backend. Every port has
 | Control plane | `identity` (L6) | [AuthorizationPort](AuthorizationPort.md) | 0.2.0 | Decide whether an action is allowed |
 | Control plane | `identity` (L6) | [ApprovalPort](ApprovalPort.md) | 0.2.0 | Human approval for actions the policy marks ask |
 | Control plane | `guardrail` (L7) | [GuardPort](GuardPort.md) | 0.1.1 | Allow, block or redact text at four stages |
-| Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 0.1.0 | Expose agents to people, apps and other agents |
-| Experience plane | `interface` (L8) | [TriggerPort](TriggerPort.md) | 0.1.0 | Start runs from events and schedules |
+| Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 0.2.0 | Expose agents to people, apps and other agents |
+| Experience plane | `interface` (L8) | [TriggerPort](TriggerPort.md) | 0.2.0 | Start runs from events and schedules |
 | Insight plane | `telemetry` (L9) | [TelemetryPort](TelemetryPort.md) | 0.1.0 | Spans, events and metrics tagged with `agent.layer` |
 | Insight plane | `eval` (L10) | [EvaluatorPort](EvaluatorPort.md) | 0.1.0 | Score a run of a dataset case |
 | Insight plane | `eval` (L10) | [FeedbackPort](FeedbackPort.md) | 0.1.0 | User feedback attached to runs, as evaluation data |

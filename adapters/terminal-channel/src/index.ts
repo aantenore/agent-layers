@@ -20,7 +20,7 @@ export interface TerminalStreams {
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** Channel that serves the stack's agents on a terminal: one line in, one answer out, in order. */
-export function createTerminalChannel(options: TerminalChannelOptions = {}, streams: TerminalStreams = {}, name = 'terminal-channel'): ChannelPort {
+export function createTerminalChannel(options: TerminalChannelOptions = {}, streams: TerminalStreams = {}, name = 'terminal-channel'): ChannelPort & Required<Pick<ChannelPort, 'serve'>> {
   const input = streams.input ?? process.stdin;
   const output = streams.output ?? process.stdout;
   const prompt = options.prompt ?? '> ';

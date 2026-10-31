@@ -12,7 +12,8 @@ export { sampleAccess } from './suites/control.ts';
 export type { ModelFixtures, RouterFixtures, CacheFixtures } from './suites/model.ts';
 export type { KnowledgeFixtures, RuntimeFixtures, ToolFixtures } from './suites/agent.ts';
 export type { AuthorizationFixtures, GuardFixtures, GuardSample, IdentityFixtures } from './suites/control.ts';
-export type { ChannelFixtures, DeployFixtures } from './suites/edge.ts';
+export { inboundFetch } from './suites/edge.ts';
+export type { ChannelFixtures, DeployFixtures, TriggerFixtures } from './suites/edge.ts';
 export type { EvaluatorFixtures } from './suites/insight.ts';
 
 type Suite = (impl: any, fixtures: any, c: Checks) => Promise<Checks>;

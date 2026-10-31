@@ -129,3 +129,48 @@ test('start({ identity }): channel and trigger runs carry it unless the call bri
   assert.deepEqual(seen, [undefined], 'without start options no identity is invented');
   await s.close();
 });
+
+test('host for mounted channels: stream fallback, governed model without injection, tools with knowledge; start skips mount-only', async () => {
+  const { model, requests } = fakeModel(() => reply('hi there'));
+  let mounted = 0;
+  const s = await compose(resolveProfile({
+    agents: { a: { model: 'm' } },
+    layers: {
+      model: { adapter: 'fake-model' }, runtime: { adapter: 'echo' }, knowledge: { wiki: { adapter: 'kb' } },
+      channels: [{ adapter: 'http-only' }],
+    },
+    policy: [{ effect: 'allow', risk: ['read'] }],
+  }), {
+    adapters: [
+      testAdapter('ModelPort', 'llm', 'fake-model', () => model),
+      testAdapter('RuntimePort', 'harness', 'echo', () => echoRuntime),
+      testAdapter('KnowledgePort', 'knowledge', 'kb', () => ({ async search() { return [{ id: 'p1', text: 'the ferry leaves at noon' }]; } })),
+      testAdapter('ChannelPort', 'interface', 'http-only', () => ({ mount() { mounted++; return { routes: [] }; } })),
+    ],
+  });
+  const host = s.host();
+  const events = [];
+  for await (const e of host.stream!('a', 'hello', { runId: 'run-9' })) events.push(e);
+  assert.deepEqual(events.map((e) => e.type), ['text', 'run_end']);
+  assert.equal(events[1]!.status, 'completed');
+  await host.model!().chat({ model: 'm', messages: [{ role: 'user', content: 'q' }] }, s.context({ agent: 'gateway' }));
+  assert.ok(!JSON.stringify(requests.at(-1)).includes('ferry'), 'the hosted model does not inject knowledge');
+  const tools = await host.tools!().listTools(s.context({ agent: 'gateway' }));
+  assert.deepEqual(tools.map((t) => t.name), ['knowledge__wiki']);
+  const out = await host.tools!().callTool('knowledge__wiki', { query: 'ferry' }, s.context({ agent: 'gateway' }));
+  assert.match(out.content, /noon/);
+  const handle = await s.start();
+  assert.equal(mounted, 0, 'start() leaves mount-only channels to a host server');
+  await handle.close();
+  await s.close();
+});
+
+test('findRoute: exact before prefix, longest prefix first, 405 methods', async () => {
+  const { findRoute } = await import('../src/index.ts');
+  const routes = [{ path: '/v1/*', methods: ['POST'] }, { path: '/v1/models', methods: ['GET'] }, { path: '/mcp' }];
+  assert.equal(findRoute(routes, 'GET', '/v1/models').route, routes[1]);
+  assert.equal(findRoute(routes, 'POST', '/v1/chat/completions').route, routes[0]);
+  assert.deepEqual(findRoute(routes, 'DELETE', '/v1/models'), { allowed: ['GET', 'POST'] });
+  assert.equal(findRoute(routes, 'DELETE', '/mcp').route, routes[2]);
+  assert.deepEqual(findRoute(routes, 'GET', '/v10'), { allowed: [] });
+});

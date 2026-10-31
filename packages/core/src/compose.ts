@@ -6,7 +6,7 @@ import type { CallContext } from './ports/base.ts';
 import type { ChannelHandle } from './ports/channel.ts';
 import type { GuardPort } from './ports/guard.ts';
 import type { ModelPort } from './ports/model.ts';
-import type { AgentSpec, RunInput, RunnableAgent, RunResult } from './ports/runtime.ts';
+import type { AgentSpec, RunEvent, RunInput, RunnableAgent, RunResult } from './ports/runtime.ts';
 import type { TelemetryPort } from './ports/telemetry.ts';
 import type { ToolPort } from './ports/tool.ts';
 import { governedTools } from './pipeline/governed-tools.ts';
@@ -106,6 +106,23 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
     return m;
   };
 
+  // Tools for hosted channels: the governed tools plus the knowledge sources as read-only tools.
+  let hostedTools: ToolPort | undefined;
+  const toolsForHost = (): ToolPort => {
+    if (hostedTools) return hostedTools;
+    const knowledgeAsTools = mode !== 'tools' && Object.keys(ports.knowledge).length && !ports.tools.knowledge;
+    hostedTools = knowledgeAsTools
+      ? governedTools({ ...ports.tools, knowledge: knowledgeTools(ports.knowledge) }, {
+        policy: config.policy, guards: ports.guardrails, telemetry,
+        ...(ports.authorization ? { authorization: ports.authorization } : {}),
+        ...(ports.approval ? { approval: ports.approval } : {}),
+        ...(ports.credentials ? { credentials: ports.credentials } : {}),
+        ...(config.pipeline.approvalTimeoutMs ? { approvalTimeoutMs: config.pipeline.approvalTimeoutMs } : {}),
+      })
+      : tools;
+    return hostedTools;
+  };
+
   const bound = new Map<string, Promise<RunnableAgent>>();
   const context = (init: Partial<CallContext> & { agent: string }): CallContext => ({ runId: newRunId(), telemetry, ...init });
 
@@ -135,14 +152,19 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
       return {
         agents: () => stack.agents(),
         run: async (agent, input, ctx) => (await stack.agent(agent)).run(input, as(ctx)),
+        stream: (agent, input, ctx) => streamRun(stack, agent, input, as(ctx)),
         ...(ports.identity ? { verify: (c: string) => stack.verify(c) } : {}),
+        ...(ports.model ? { model: () => modelWith([]) } : {}),
+        tools: toolsForHost,
       };
     },
     async start(opts = {}) {
       const host = stack.host(opts);
       const handles: ChannelHandle[] = [];
-      for (const c of ports.channels) handles.push(await c.serve(host));
+      // Channels and triggers that only mount on a host server are started by that server (the gateway).
+      for (const c of ports.channels) if (c.serve) handles.push(await c.serve(host));
       for (const t of ports.triggers) {
+        if (!t.start) continue;
         handles.push(await t.start(async (trigger) => {
           const agent = trigger.agent ?? stack.agents()[0];
           if (!agent) throw new MissingLayerError('harness', 'agent for trigger');
@@ -191,6 +213,18 @@ async function bindAgent(stack: Stack, name: string, context: Stack['context']):
     },
     ...(inner.stream ? { stream: (input: RunInput, init = {}) => inner.stream!(input, context({ ...init, agent: name })) } : {}),
   };
+}
+
+/** Streams a run; for a runtime without streaming, the result becomes a text event and a `run_end` event. */
+async function* streamRun(stack: Stack, name: string, input: RunInput, ctx: Partial<CallContext> | undefined): AsyncGenerator<RunEvent> {
+  const agent = await stack.agent(name);
+  if (agent.stream) {
+    yield* agent.stream(input, ctx);
+    return;
+  }
+  const r = await agent.run(input, ctx);
+  if (r.output) yield { type: 'text', text: r.output };
+  yield { type: 'run_end', runId: r.runId, status: r.status, output: r.output, ...(r.reason ? { reason: r.reason } : {}), ...(r.usage ? { usage: r.usage } : {}) };
 }
 
 function missingModel(): ModelPort {

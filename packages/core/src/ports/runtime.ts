@@ -1,5 +1,7 @@
 import type { Stack } from '../stack.ts';
 import type { CallContext, PortBase } from './base.ts';
+import type { InboundMount } from './channel.ts';
+import type { Identity } from './identity.ts';
 import type { ChatMessage, Usage } from './model.ts';
 
 /** Agent definition, runtime-neutral. Schema: spec/schemas/agent-spec.json. */
@@ -63,7 +65,20 @@ export interface Trigger {
 
 export interface TriggerHandle { close(): Promise<void> }
 
-/** Delivers triggers to a handler until closed. */
+/** Where a mounted trigger hands its triggers: the host accepts them and runs them in the background. */
+export interface TriggerSink {
+  agents(): string[];
+  /**
+   * Accepts a trigger and starts its run without waiting for it; resolves to the run id. Rejects when the trigger
+   * cannot be accepted: unknown agent, or no identity where the host requires one.
+   */
+  accept(trigger: Trigger, ctx?: { identity?: Identity }): Promise<{ runId: string }>;
+  /** Verifies a credential (for example the trigger's configured service credential); absent without an identity layer. */
+  verify?(credential: string): Promise<Identity>;
+}
+
+/** Delivers triggers to a handler until closed (`start`), or receives them on a host server (`mount`). */
 export interface TriggerPort extends PortBase {
-  start(handler: (trigger: Trigger) => Promise<void>): Promise<TriggerHandle>;
+  start?(handler: (trigger: Trigger) => Promise<void>): Promise<TriggerHandle>;
+  mount?(sink: TriggerSink): InboundMount | Promise<InboundMount>;
 }

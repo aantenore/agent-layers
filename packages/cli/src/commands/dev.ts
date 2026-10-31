@@ -31,7 +31,7 @@ export async function dev(io: Io, args: DevArgs): Promise<number> {
     if (!agent) throw new UsageError('no agents configured');
     const identity = await authenticate(stack, p, args.token);
     if (args.message !== undefined) return await once(stack, agent, args.message, io, identity);
-    if (stack.ports.channels.length && !args.agent) {
+    if (stack.ports.channels.some((c) => c.serve) && !args.agent) {
       const handle = await stack.start(identity ? { identity } : {});
       await (handle.done ?? new Promise<void>((r) => process.once('SIGINT', () => r())));
       await handle.close();
