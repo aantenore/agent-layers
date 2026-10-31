@@ -1,28 +1,21 @@
-# OpenTofu skeleton
+# OpenTofu
 
-Reference module layout for provisioning the platform on any cloud. It contains placeholders only: no provider is
-configured, and nothing here is applied by the tests.
+Provisioning for the compose and k8s targets. Nothing here is applied by the tests; `make tofu-validate` runs
+`tofu fmt -check` and `tofu validate` (init with `-backend=false`) in a pinned container.
 
-Licenses: OpenTofu is MPL-2.0. Terraform-compatible tooling (Terraform itself is BUSL-1.1, not OSI-approved) is
-not required.
-
-## Layout
-
-`main.tf` declares one module call per platform concern. Replace each `source` with a module for your target
-(Kubernetes, a cloud VM, a managed service), and add the provider block in your own root configuration.
-
-| Module | Provisions |
+| Path | Purpose |
 |---|---|
-| `network` | private network, ingress for L2 (8700) and the identity provider |
-| `data` | volumes or managed services for Qdrant (L3), Valkey (L7), Langfuse storage (L8) |
-| `runtime` | compute for the L2 harness and the gateway |
-| `secrets` | secret store and access policies, see [../secrets](../secrets/README.md) |
-
-## Usage
+| `modules/docker-host` | Takes an SSH address, installs Docker, runs the compose target (`make infra-up`, `make up LAYER=...`). Output: `endpoint`. Does not create the machine. |
+| `modules/k8s-cluster` | Interface only: `name`, `node_count`, `node_size`, `region`, `kubernetes_version` in; `endpoint`, `kubeconfig`, `ingress_address` out. Add your provider in `main.tf`. |
+| `examples/hetzner-docker-host` | Example only: a Hetzner Cloud VM plus `docker-host`. Replace the `hcloud_*` resources with your provider's. |
 
 ```bash
+cd examples/hetzner-docker-host
 tofu init
-tofu plan -var-file=env.tfvars     # env.tfvars is git-ignored
+tofu plan -var hcloud_token=... -var ssh_public_key="$(cat ~/.ssh/id_ed25519.pub)"
 ```
 
-Pass the same names as `.env.example` as module inputs so the layers see identical configuration everywhere.
+Keep `*.tfvars` out of git (already ignored). Pass the `.env` for the host as `env_file`, rendered from OpenBao with
+`scripts/env-from-openbao.sh`. State: configure a remote backend in your own root module; the examples use local state.
+
+OpenTofu is MPL-2.0. Terraform (BUSL-1.1) is not required.

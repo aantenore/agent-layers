@@ -1,0 +1,8 @@
+# Renders every layer. Used by `make helm-template`.
+layers:
+  l1-llm: { enabled: true }
+  l3-knowledge: { enabled: true }
+  l4-tools: { enabled: true }
+  l6-guardrails: { enabled: true }
+  l7-cache-router: { enabled: true }
+  l8-telemetry: { enabled: true }

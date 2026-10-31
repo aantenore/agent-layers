@@ -1,0 +1,32 @@
+# GitOps entry point for the k8s target: Argo CD renders the Helm chart straight from this repository.
+# Apply once (`make infra-up TARGET=k8s`); every later change is a commit. Point repoURL at your fork.
+# Enable layers by overriding values below (or ship a values file next to the chart).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-layers
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/aantenore/agent-layers
+    targetRevision: main
+    path: layers/l0-infra/helm/agent-layers
+    helm:
+      valuesObject:
+        global:
+          domain: agents.example.com
+        layers:
+          l3-knowledge:
+            enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agent-layers
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

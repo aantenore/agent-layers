@@ -1,0 +1,89 @@
+# Per-layer switches and image pins. Every service renders from the same helper (templates/_service.tpl).
+#
+# Service fields:
+#   image.repository, image.tag   OCI image; the tag is required and "latest" is rejected
+#   port                          container and Service port
+#   health                        HTTP path for liveness/readiness; omit to probe the TCP port
+#   env                           plain environment variables (map)
+#   secretRefs                    names of keys in global.secretName, exposed as env vars of the same name
+#   args                          container args
+#   replicas                      default 1
+#   ingress                       true to publish at <service>.<global.domain>
+#   persistence.mountPath/size    optional PVC (forces a single replica with the Recreate strategy)
+#   resources                     standard Kubernetes resources block
+global:
+  domain: localhost
+  imagePullPolicy: IfNotPresent
+  # Secret that holds the platform secrets (OIDC_CLIENT_SECRET, GATEWAY_KEY, ...). Not created here: populate it
+  # from OpenBao (External Secrets Operator, CSI provider) or any other secret store.
+  secretName: agent-layers-secrets
+  ingress:
+    enabled: true
+    className: traefik
+    annotations: {}
+
+# Tags mirror the layers/<id>/compose.yml files, which stay the source of truth.
+layers:
+  l1-llm:
+    enabled: false
+    services:
+      ollama:
+        image: { repository: ollama/ollama, tag: "0.40.13" }
+        port: 11434
+        health: /api/version
+        persistence: { mountPath: /root/.ollama, size: 20Gi }
+
+  l3-knowledge:
+    enabled: false
+    services:
+      qdrant:
+        image: { repository: qdrant/qdrant, tag: v1.20.0 }
+        port: 6333
+        health: /readyz
+        ingress: true
+        persistence: { mountPath: /qdrant/storage, size: 5Gi }
+
+  l4-tools:
+    enabled: false
+    services:
+      httpbin:
+        image: { repository: mccutchen/go-httpbin, tag: "2.26.0" }
+        port: 8080
+        ingress: true
+
+  l6-guardrails:
+    enabled: false
+    services:
+      presidio-analyzer:
+        image: { repository: mcr.microsoft.com/presidio-analyzer, tag: "2.2.362" }
+        port: 3000
+        health: /health
+        ingress: true
+      presidio-anonymizer:
+        image: { repository: mcr.microsoft.com/presidio-anonymizer, tag: "2.2.362" }
+        port: 3000
+        health: /health
+        ingress: true
+      llm-guard:
+        image: { repository: laiyer/llm-guard-api, tag: "0.3.16" }
+        port: 8000
+        health: /healthz
+        env: { LOG_JSON: "false", LAZY_LOAD: "false" }
+        secretRefs: [LLM_GUARD_TOKEN]
+        ingress: true
+
+  l7-cache-router:
+    enabled: false
+    services:
+      valkey:
+        image: { repository: valkey/valkey, tag: 8.1.11-alpine }
+        port: 6379
+        args: [valkey-server, --save, "", --appendonly, "no"]
+
+  l8-telemetry:
+    enabled: false
+    services:
+      jaeger:
+        image: { repository: jaegertracing/jaeger, tag: "2.22.0" }
+        port: 16686
+        ingress: true

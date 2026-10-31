@@ -1,0 +1,7 @@
+{{- range $layerId, $layer := .Values.layers }}
+{{- if $layer.enabled }}
+{{- range $name, $svc := $layer.services }}
+{{ include "agent-layers.service" (dict "root" $ "layer" $layerId "name" $name "svc" $svc) }}
+{{- end }}
+{{- end }}
+{{- end }}

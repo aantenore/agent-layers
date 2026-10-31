@@ -1,0 +1,6 @@
+apiVersion: v2
+name: agent-layers
+description: Umbrella chart for the agent-layers platform. Each layer is a values block; each service in it renders a Deployment, a Service and, optionally, an Ingress.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

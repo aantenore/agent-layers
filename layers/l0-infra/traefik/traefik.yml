@@ -1,0 +1,25 @@
+# Static configuration. Routes live in ./dynamic and are reloaded on change.
+entryPoints:
+  web:
+    address: ":80"
+  traefik:
+    address: ":8080"
+
+# Dashboard and /ping. The "traefik" entry point is published on 127.0.0.1 only (see compose.yml).
+api:
+  dashboard: true
+  insecure: true
+ping: {}
+
+providers:
+  # Routes for the other layers, so their compose files stay untouched.
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+  # Opt-in alternative: mount the Docker socket and uncomment to route by container labels instead.
+  # docker:
+  #   exposedByDefault: false
+
+log:
+  level: INFO
+accessLog: {}

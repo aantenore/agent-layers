@@ -1,0 +1,102 @@
+# Manual pipeline: nothing runs on push or pull request. Trigger it from the Actions tab or with
+#   gh workflow run ci.yml -f layers='["l3-knowledge"]'
+name: ci
+
+on:
+  workflow_dispatch:
+    inputs:
+      layers:
+        description: JSON array of layer ids for the per-layer tests
+        type: string
+        default: '["l1-llm","l3-knowledge","l4-tools","l6-guardrails","l7-cache-router","l8-telemetry"]'
+      run_layer_tests:
+        description: Run the per-layer live tests (starts containers)
+        type: boolean
+        default: true
+      release:
+        description: Run the release job (image promotion is documented, nothing is built yet)
+        type: boolean
+        default: false
+      promote_to:
+        description: Target environment for the release job
+        type: choice
+        options: [staging, prod]
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check (node --check)
+        run: |
+          set -e
+          find . -path ./node_modules -prune -o \( -name '*.mjs' -o -name '*.js' \) -print0 | xargs -0 -n1 node --check
+      - name: Parse JSON files
+        run: |
+          set -e
+          for f in contracts/*.json layers/*/openapi.json; do
+            [ -f "$f" ] || continue
+            node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$f"
+            echo "ok $f"
+          done
+      - name: Helm lint and template (pinned container image)
+        run: make helm-template
+      - name: OpenTofu fmt and validate (pinned container image)
+        run: make tofu-validate
+
+  layer-tests:
+    if: ${{ inputs.run_layer_tests }}
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        layer: ${{ fromJSON(inputs.layers) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Prepare .env
+        run: cp .env.example .env
+      # Layers that need Ollama on the host (L2, L7 model calls) skip their live tests when it is unreachable.
+      - name: Up
+        run: make up LAYER=${{ matrix.layer }}
+      - name: Test
+        run: make test LAYER=${{ matrix.layer }}
+      - name: Down
+        if: ${{ always() }}
+        run: make down LAYER=${{ matrix.layer }}
+
+  # Image promotion, dev -> staging -> prod. The repository builds no images yet (layers use upstream images pinned
+  # in layers/<id>/compose.yml), so this job only states the flow and gates it on a GitHub environment.
+  #
+  #   1. dev      Tags in layers/<id>/compose.yml and helm/agent-layers/values.yaml move together in one commit.
+  #               The live layer tests above are the gate.
+  #   2. staging  Same commit, same digests: re-tag the image (or copy it with `crane copy`), never rebuild.
+  #               Argo CD syncs the staging Application from that commit.
+  #   3. prod     Approval on the `prod` environment, then the same digest is promoted and the prod
+  #               Application is synced. Rollback is a revert of the commit.
+  release:
+    if: ${{ inputs.release }}
+    needs: lint
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.promote_to }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Promotion plan
+        run: |
+          echo "Promote to ${{ inputs.promote_to }} from ${GITHUB_SHA}"
+          grep -rhoE 'image: [^ ]+' layers/*/compose.yml | sort -u
+          echo "No images are built or pushed yet; see the comment above this job for the promotion flow."

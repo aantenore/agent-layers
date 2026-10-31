@@ -1,0 +1,129 @@
+# Hostname routes for the HTTP services of the other layers: http://<name>.localhost:8088
+#
+# Ports are the defaults from docs/contracts.md. If you change a port in .env, change it here too.
+# Targets use host.docker.internal because every layer publishes its port on the host. On Linux the host gateway
+# cannot reach ports bound to 127.0.0.1; publish those layers on 0.0.0.0, or use the docker provider instead.
+# A route to a layer that is not running answers 502, which is harmless.
+http:
+  routers:
+    openbao:
+      rule: Host(`openbao.localhost`)
+      entryPoints: [web]
+      service: openbao
+    ollama:
+      rule: Host(`ollama.localhost`)
+      entryPoints: [web]
+      service: ollama
+    harness:
+      rule: Host(`harness.localhost`)
+      entryPoints: [web]
+      service: harness
+    qdrant:
+      rule: Host(`qdrant.localhost`)
+      entryPoints: [web]
+      service: qdrant
+    httpbin:
+      rule: Host(`httpbin.localhost`)
+      entryPoints: [web]
+      service: httpbin
+    openapi-mcp:
+      rule: Host(`openapi-mcp.localhost`)
+      entryPoints: [web]
+      service: openapi-mcp
+    keycloak:
+      rule: Host(`keycloak.localhost`)
+      entryPoints: [web]
+      service: keycloak
+    opa:
+      rule: Host(`opa.localhost`)
+      entryPoints: [web]
+      service: opa
+    presidio-analyzer:
+      rule: Host(`presidio-analyzer.localhost`)
+      entryPoints: [web]
+      service: presidio-analyzer
+    presidio-anonymizer:
+      rule: Host(`presidio-anonymizer.localhost`)
+      entryPoints: [web]
+      service: presidio-anonymizer
+    llm-guard:
+      rule: Host(`llm-guard.localhost`)
+      entryPoints: [web]
+      service: llm-guard
+    gateway:
+      rule: Host(`gateway.localhost`)
+      entryPoints: [web]
+      service: gateway
+    otlp:
+      rule: Host(`otlp.localhost`)
+      entryPoints: [web]
+      service: otlp
+    langfuse:
+      rule: Host(`langfuse.localhost`)
+      entryPoints: [web]
+      service: langfuse
+    jaeger:
+      rule: Host(`jaeger.localhost`)
+      entryPoints: [web]
+      service: jaeger
+  services:
+    openbao:
+      loadBalancer:
+        servers:
+          - url: http://openbao:8200
+    ollama:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:11434
+    harness:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8700
+    qdrant:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:6333
+    httpbin:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8085
+    openapi-mcp:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8090
+    keycloak:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8080
+    opa:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8181
+    presidio-analyzer:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:5002
+    presidio-anonymizer:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:5001
+    llm-guard:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:8000
+    gateway:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:4000
+    otlp:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:4318
+    langfuse:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:3000
+    jaeger:
+      loadBalancer:
+        servers:
+          - url: http://host.docker.internal:16686
