@@ -7,7 +7,8 @@ const ctx = { name: 'x', env: {}, cwd: process.cwd(), telemetry: noopTelemetry }
 
 test('PORT_VERSIONS covers every port and each port names its layer', () => {
   assert.equal(Object.keys(PORT_VERSIONS).length, 21);
-  for (const p of Object.values(PORTS)) assert.equal(PORT_VERSIONS[p.port], '1.0.0', p.port);
+  const bumped: Record<string, string> = { ApprovalPort: '1.1.0' };
+  for (const p of Object.values(PORTS)) assert.equal(PORT_VERSIONS[p.port], bumped[p.port] ?? '1.0.0', p.port);
   assert.equal(PORTS.TriggerPort.layer, 'interface');
   assert.equal(PORTS.ApprovalPort.layer, 'identity');
 });
