@@ -3,7 +3,8 @@ import { LAYERS } from './layers.ts';
 import { limitSchema } from './limits.ts';
 import type { JsonSchema } from './schema.ts';
 import { SLOTS } from './slots.ts';
-import { CHECK_LIMITS, GATEWAY_LIMITS, PIPELINE_LIMITS } from './stack-limits.ts';
+import { CHECK_LIMITS, GATEWAY_LIMITS, LANGUAGE_LIMITS, PIPELINE_LIMITS } from './stack-limits.ts';
+import { VOCAB_NAME, VOCABULARIES } from './vocab.ts';
 
 /** Schema of a stack-config limit: a number, `"unbounded"` where allowed, or a `${env:NAME}` reference. */
 const lim = (spec: Parameters<typeof limitSchema>[0], description: string) => limitSchema(spec, { env: true, description });
@@ -54,7 +55,7 @@ const policyRule: JsonSchema = {
   properties: {
     effect: { enum: ['allow', 'ask', 'deny'] },
     tools: { type: 'array', items: { type: 'string' } },
-    risk: { type: 'array', items: { enum: ['read', 'write', 'exec'] } },
+    risk: { type: 'array', items: { type: 'string', pattern: VOCAB_NAME.source }, description: 'Risk values; a core value (read, write, exec) also matches the values added like it.' },
     when: {
       type: 'object',
       properties: {
@@ -79,6 +80,16 @@ const pipeline: JsonSchema = {
         maxChars: lim(PIPELINE_LIMITS.maxChars, 'Size of the injected knowledge block'),
         maxK: lim(PIPELINE_LIMITS.maxK, 'Largest k a model may ask the knowledge search tools for'),
         mode: { enum: ['system', 'user', 'tools', 'off'], description: 'system/user: inject before model calls; tools: expose as tools; off.' },
+        fusion: {
+          type: 'object',
+          description: 'How passages from several sources are merged before injection.',
+          properties: {
+            method: { enum: ['rrf', 'raw'], description: 'rrf (default): reciprocal rank fusion; raw: sort by the sources\' own scores (only for sources that share one scorer).' },
+            rrfK: lim(PIPELINE_LIMITS.rrfK, 'Rank constant of reciprocal rank fusion'),
+            weights: { type: 'object', additionalProperties: lim(PIPELINE_LIMITS.fusionWeight, 'Weight of a source in the fusion'), description: 'Weight per knowledge source name (default 1).' },
+          },
+          additionalProperties: false,
+        },
       },
       additionalProperties: false,
     },
@@ -130,6 +141,21 @@ const limits: JsonSchema = {
       },
       additionalProperties: false,
     },
+    extBytes: lim(LANGUAGE_LIMITS.extBytes, 'Largest ext bag kept on a shape the core passes on; larger ones are dropped with an event'),
+  },
+  additionalProperties: false,
+};
+
+const EXT_KEY = '^[a-z][a-z0-9-]*\\.[A-Za-z0-9_.-]+$';
+const ext: JsonSchema = { type: 'object', propertyNames: { pattern: EXT_KEY }, description: 'Extension bag: <namespace>.<name> keys, JSON values.' };
+
+const agentSettings: JsonSchema = {
+  type: 'object',
+  description: 'Model settings of the agent.',
+  properties: {
+    temperature: { type: 'number', minimum: 0 },
+    maxOutputTokens: { type: 'integer', minimum: 1 },
+    stop: { type: 'array', items: { type: 'string' } },
   },
   additionalProperties: false,
 };
@@ -137,14 +163,61 @@ const limits: JsonSchema = {
 const agent: JsonSchema = {
   type: 'object',
   properties: {
-    file: { type: 'string', description: 'Markdown agent file: front matter (model, tools, knowledge) and instructions as body.' },
+    file: { type: 'string', description: 'Markdown agent file: front matter (model, tools, knowledge, settings) and instructions as body.' },
     instructions: { type: 'string' },
     model: { type: 'string' },
     tools: { type: 'array', items: { type: 'string' } },
     knowledge: { type: 'array', items: { type: 'string' } },
-    params: { type: 'object' },
+    settings: { $ref: '#/$defs/agentSettings' },
+    ext: { $ref: '#/$defs/ext' },
   },
   additionalProperties: false,
+};
+
+const name: JsonSchema = { type: 'string', pattern: VOCAB_NAME.source };
+const vocabularies: JsonSchema = {
+  type: 'object',
+  description: 'Values added to extensible vocabularies: { "<vocabulary>": { "add": { "<value>": { "like": "<core value>" } }, "aliases": { "<name>": "<value>" } } }.',
+  properties: Object.fromEntries(Object.entries(VOCABULARIES).map(([v, info]) => [v, {
+    type: 'object',
+    description: `${info.usedBy}. Core values: ${info.core.join(', ')}. Extensible: ${info.extensible}.`,
+    properties: {
+      add: { type: 'object', propertyNames: name, additionalProperties: { type: 'object', required: ['like'], properties: { like: { enum: [...info.core] } }, additionalProperties: false } },
+      aliases: { type: 'object', propertyNames: name, additionalProperties: { type: 'string' } },
+    },
+    additionalProperties: false,
+  }])),
+  additionalProperties: false,
+};
+
+const pointer: JsonSchema = { type: 'string', pattern: '^(/.*)?$' };
+const mappingRule: JsonSchema = {
+  type: 'object',
+  description: 'One boundary mapping rule; rules run in order.',
+  properties: {
+    from: { anyOf: [pointer, { type: 'array', items: pointer, minItems: 1 }], description: 'JSON Pointer into the source, or a list (for join).' },
+    to: { ...pointer, description: 'JSON Pointer into the target.' },
+    default: { description: 'Value when from is missing or null.' },
+    map: { type: 'object', description: 'Value table; "*" is the fallback.' },
+    join: { type: 'string', description: '"union" concatenates lists without duplicates; any other string joins strings.' },
+    split: { type: 'string', description: 'Separator that turns a string into a list.' },
+    drop: { ...pointer, description: 'JSON Pointer removed from the target.' },
+    fn: { type: 'string', pattern: '^[^#]+#[A-Za-z_$][\\w$]*$', description: '"<module path>#<export>": (source, target, ctx) => target.' },
+  },
+  additionalProperties: false,
+};
+const ruleList: JsonSchema = {
+  anyOf: [
+    { type: 'array', items: { $ref: '#/$defs/mappingRule' } },
+    { type: 'object', required: ['$merge', 'items'], properties: { $merge: { const: 'append' }, items: { type: 'array', items: { $ref: '#/$defs/mappingRule' } } }, additionalProperties: false },
+    { type: 'null' },
+  ],
+};
+const mappings: JsonSchema = {
+  type: 'object',
+  description: 'Boundary mapping rules per adapter instance: <slot> or <slot>.<instance>. A list replaces the adapter\'s default rules, { "$merge": "append" } adds to them, null removes.',
+  propertyNames: { pattern: '^[a-z]+(\\.[A-Za-z0-9_-]+)?$' },
+  additionalProperties: { anyOf: [{ type: 'object', properties: { in: ruleList, out: ruleList }, additionalProperties: false }, { type: 'null' }] },
 };
 
 const profile: JsonSchema = {
@@ -159,6 +232,8 @@ const profile: JsonSchema = {
     pipeline: { $ref: '#/$defs/pipeline' },
     gateway: { $ref: '#/$defs/gateway' },
     limits: { $ref: '#/$defs/limits' },
+    vocabularies: { $ref: '#/$defs/vocabularies' },
+    mappings: { $ref: '#/$defs/mappings' },
   },
   additionalProperties: false,
 };
@@ -180,9 +255,14 @@ export const configSchema: JsonSchema = {
     pipeline: { $ref: '#/$defs/pipeline' },
     gateway: { $ref: '#/$defs/gateway' },
     limits: { $ref: '#/$defs/limits' },
+    vocabularies: { $ref: '#/$defs/vocabularies' },
+    mappings: { $ref: '#/$defs/mappings' },
     profiles: { type: 'object', additionalProperties: { $ref: '#/$defs/profile' } },
     agents: { type: 'object', additionalProperties: { $ref: '#/$defs/agent' } },
   },
   additionalProperties: false,
-  $defs: { adapterRef: ref, adapterRefOverlay: refOverlay, append, layers, layersOverlay, policyRule, pipeline, gateway, limits, agent, profile },
+  $defs: {
+    adapterRef: ref, adapterRefOverlay: refOverlay, append, layers, layersOverlay, policyRule, pipeline, gateway, limits,
+    ext, agentSettings, agent, vocabularies, mappingRule, mappings, profile,
+  },
 };

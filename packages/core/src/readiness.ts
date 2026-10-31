@@ -1,4 +1,5 @@
 import type { AdapterRegistry } from './adapter.ts';
+import { languageCheck } from './compose.ts';
 import { configuredAdapters, PRODUCTION_REQUIRES, type ResolvedConfig } from './config.ts';
 import { errorMessage } from './errors.ts';
 import { limitFindings, type LimitFinding } from './limits.ts';
@@ -6,8 +7,9 @@ import { slotInfo, type SlotName } from './slots.ts';
 import { STACK_LIMITS } from './stack-limits.ts';
 
 export interface ReadinessProblem {
-  kind: 'not-installed' | 'prototype-only' | 'missing-layer' | 'load-failed';
-  slot: SlotName;
+  kind: 'not-installed' | 'prototype-only' | 'missing-layer' | 'load-failed' | 'language';
+  /** Absent for language problems that belong to no slot (mappings, vocabularies, policy). */
+  slot?: SlotName;
   adapter?: string;
   message: string;
 }
@@ -19,12 +21,15 @@ export interface Readiness {
   problems: ReadinessProblem[];
   /** Unsafe limit values on the production tier; those with severity `fail` make `ok` false. See docs/limits.md. */
   limits: LimitFinding[];
+  /** Language warnings: ext keys an adapter reads that nothing in the profile produces. */
+  warnings: string[];
 }
 
 /**
  * Readiness gate for a resolved profile: every adapter is installed; on the production tier, no adapter is
  * prototype-only, every required slot is configured (default: identity, authorization, guardrails, telemetry, state),
- * and no limit is unbounded where that is unsafe (values outside the safe range are warnings).
+ * and no limit is unbounded where that is unsafe (values outside the safe range are warnings). Any tier: the language
+ * checks compose would refuse (mapping rules, vocabulary values, ext keys read but not produced).
  */
 export async function readiness(config: ResolvedConfig, registry: AdapterRegistry): Promise<Readiness> {
   const problems: ReadinessProblem[] = [];
@@ -47,11 +52,13 @@ export async function readiness(config: ResolvedConfig, registry: AdapterRegistr
       limits.push(...limitFindings(Object.values(found.limits), { options: a.ref.options ?? {} }, config.tier, where));
     }
   }
+  const language = await languageCheck(config, registry);
+  for (const message of language.errors) problems.push({ kind: 'language', message });
   const requires = config.requires ?? (config.tier === 'production' ? [...PRODUCTION_REQUIRES] : []);
   for (const slot of requires) {
     const v = (config.layers as Record<string, unknown>)[slot];
     const empty = v == null || (Array.isArray(v) && v.length === 0) || (slotInfo(slot)?.shape === 'map' && Object.keys(v as object).length === 0);
     if (empty) problems.push({ kind: 'missing-layer', slot, message: `${slot}: required by profile ${config.profile ?? '(base)'} but not configured` });
   }
-  return { ok: problems.length === 0 && !limits.some((l) => l.severity === 'fail'), tier: config.tier, requires, problems, limits };
+  return { ok: problems.length === 0 && !limits.some((l) => l.severity === 'fail'), tier: config.tier, requires, problems, limits, warnings: language.warnings };
 }

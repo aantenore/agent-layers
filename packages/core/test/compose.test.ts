@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compose, GuardrailBlocked, MissingLayerError, resolveProfile, type RunEvent, type RuntimePort, type StackConfig } from '../src/index.ts';
-import { fakeModel, recorder, reply, testAdapter } from './helpers.ts';
+import { compose, GuardrailBlocked, messageText, MissingLayerError, resolveProfile, type RunEvent, type RuntimePort, type StackConfig } from '../src/index.ts';
+import { fakeModel, recorder, reply, testAdapter, textAt } from './helpers.ts';
 
 const echoRuntime: RuntimePort = {
   bind: (stack, agent) => ({
     name: agent.name,
     async run(input, c) {
-      const res = await stack.modelFor(agent).chat({ model: agent.model, messages: [{ role: 'user', content: String(input) }] }, stack.context({ ...c, agent: agent.name }));
-      return { runId: c?.runId ?? 'r', status: 'completed', output: res.choices[0]!.message.content ?? '', events: [{ type: 'done' }] };
+      const res = await stack.modelFor(agent).chat({ model: agent.model, messages: [{ role: 'user', parts: [{ type: 'text', text: String(input) }] }] }, stack.context({ ...c, agent: agent.name }));
+      return { runId: c?.runId ?? 'r', status: 'completed', output: messageText(res.message), events: [{ type: 'test.done' }] };
     },
   }),
 };
@@ -29,7 +29,7 @@ test('errors name the layer and the adapter', async () => {
 
 test('composes ports into pipelines; guard blocks become stopped runs; events go to state', async () => {
   const { records, telemetry } = recorder();
-  const { model, requests } = fakeModel((req) => reply(`echo ${String(req.messages.at(-1)!.content)}`));
+  const { model, requests } = fakeModel((req) => reply(`echo ${messageText(req.messages.at(-1))}`));
   const appended: [string, RunEvent[]][] = [];
   const config: StackConfig = {
     layers: {
@@ -61,15 +61,16 @@ test('composes ports into pipelines; guard blocks become stopped runs; events go
   const ok = await helper.run('hello', { sessionId: 'sess-1' });
   assert.equal(ok.output, 'echo hello');
   assert.equal(requests[0]!.messages.length, 1, 'agent with knowledge: [] gets no injection');
-  assert.deepEqual(appended, [['sess-1', [{ type: 'done' }]]]);
+  assert.deepEqual(appended, [['sess-1', [{ type: 'test.done' }]]]);
 
   await (await s.agent('reader')).run('question');
-  assert.match(String(requests[1]!.messages[0]!.content), /Fact from the wiki/, 'default: all sources injected');
+  assert.match(textAt(requests[1]!, 0), /Fact from the wiki/, 'default: all sources injected');
 
   const stopped = await helper.run('this is forbidden');
   assert.equal(stopped.status, 'stopped');
-  assert.equal(stopped.reason, new GuardrailBlocked('block-word', 'input').message);
-  assert.ok(records.some((r) => r.type === 'span' && r.name === 'invoke_agent' && r.layer === 'harness' && r.attrs['run.status'] === 'stopped'));
+  assert.deepEqual(stopped.reason, new GuardrailBlocked('block-word', 'input').stopReason);
+  assert.deepEqual(stopped.reason, { code: 'guard_block', layer: 'guardrail', by: 'block-word', stage: 'input' });
+  assert.ok(records.some((r) => r.type === 'span' && r.name === 'agent.run' && r.layer === 'harness' && r.attrs['agent.run.status'] === 'stopped' && r.attrs['agent.run.reason'] === 'guard_block'));
   await s.close();
 });
 
@@ -95,15 +96,15 @@ test('ctx.stack() gives adapters the composed stack at use time and throws while
   assert.match(String(early), /not composed yet/);
   assert.equal(later!(), s);
   const governed = later!().modelFor({ name: 'probe', instructions: '', model: 'm', tools: [], knowledge: [] });
-  await governed.chat({ model: 'm', messages: [{ role: 'user', content: 'has pii' }] }, s.context({ agent: 'probe' }));
-  assert.equal(requests[0]!.messages[0]!.content, '[x]', 'the stack model applies the stack guards');
+  await governed.chat({ model: 'm', messages: [{ role: 'user', parts: [{ type: 'text', text: 'has pii' }] }] }, s.context({ agent: 'probe' }));
+  assert.equal(textAt(requests[0]!, 0), '[x]', 'the stack model applies the stack guards');
   await s.close();
 });
 
-test('start({ identity }): channel and trigger runs carry it unless the call brings its own', async () => {
+test('start({ caller }): channel and trigger runs carry it unless the call brings its own', async () => {
   const seen: (string | undefined)[] = [];
-  const runtime: RuntimePort = { bind: (_s, agent) => ({ name: agent.name, async run(_i, c) { seen.push(c?.identity?.subject); return { runId: c?.runId ?? 'r', status: 'completed', output: '' }; } }) };
-  let fire: ((t: { id: string; type: string; source: string }) => Promise<void>) | undefined;
+  const runtime: RuntimePort = { bind: (_s, agent) => ({ name: agent.name, async run(_i, c) { seen.push(c?.caller?.id); return { runId: c?.runId ?? 'r', status: 'completed', output: '' }; } }) };
+  let fire: ((t: { id: string; kind: string; source: string }) => Promise<void>) | undefined;
   const s = await compose(resolveProfile({
     agents: { a: { model: 'm' } },
     layers: { runtime: { adapter: 'rt' }, channels: [{ adapter: 'ch' }], triggers: [{ adapter: 'tr' }] },
@@ -113,20 +114,20 @@ test('start({ identity }): channel and trigger runs carry it unless the call bri
       testAdapter('ChannelPort', 'interface', 'ch', () => ({
         async serve(host: import('../src/index.ts').ChannelHost) {
           await host.run('a', 'x');
-          await host.run('a', 'y', { identity: { subject: 'caller', kind: 'user' } });
+          await host.run('a', 'y', { caller: { id: 'caller', kind: 'user', roles: [], scopes: [] } });
           return { close: async () => {} };
         },
       })),
       testAdapter('TriggerPort', 'interface', 'tr', () => ({ async start(h: typeof fire) { fire = h; return { close: async () => {} }; } })),
     ],
   });
-  const handle = await s.start({ identity: { subject: 'svc', kind: 'agent' } });
-  await fire!({ id: 't1', type: 'tick', source: 'test' });
+  const handle = await s.start({ caller: { id: 'svc', kind: 'agent', roles: [], scopes: [] } });
+  await fire!({ id: 't1', kind: 'tick', source: 'test' });
   assert.deepEqual(seen, ['svc', 'caller', 'svc']);
   await handle.close();
   seen.length = 0;
   await s.host().run('a', 'z');
-  assert.deepEqual(seen, [undefined], 'without start options no identity is invented');
+  assert.deepEqual(seen, [undefined], 'without start options no caller is invented');
   await s.close();
 });
 
@@ -149,16 +150,17 @@ test('host for mounted channels: stream fallback, governed model without injecti
     ],
   });
   const host = s.host();
-  const events = [];
+  const events: RunEvent[] = [];
   for await (const e of host.stream!('a', 'hello', { runId: 'run-9' })) events.push(e);
-  assert.deepEqual(events.map((e) => e.type), ['text', 'run_end']);
-  assert.equal(events[1]!.status, 'completed');
-  await host.model!().chat({ model: 'm', messages: [{ role: 'user', content: 'q' }] }, s.context({ agent: 'gateway' }));
+  assert.deepEqual(events.map((e) => e.type), ['text', 'run.end']);
+  assert.deepEqual(events[1], { type: 'run.end', status: 'completed' });
+  await host.model!().chat({ model: 'm', messages: [{ role: 'user', parts: [{ type: 'text', text: 'q' }] }] }, s.context({ agent: 'gateway' }));
   assert.ok(!JSON.stringify(requests.at(-1)).includes('ferry'), 'the hosted model does not inject knowledge');
   const tools = await host.tools!().listTools(s.context({ agent: 'gateway' }));
   assert.deepEqual(tools.map((t) => t.name), ['knowledge__wiki']);
   const out = await host.tools!().callTool('knowledge__wiki', { query: 'ferry' }, s.context({ agent: 'gateway' }));
-  assert.match(out.content, /noon/);
+  assert.match(out.text, /noon/);
+  assert.equal(out.ok, true);
   const handle = await s.start();
   assert.equal(mounted, 0, 'start() leaves mount-only channels to a host server');
   await handle.close();

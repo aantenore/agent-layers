@@ -7,7 +7,7 @@ const ctx = { name: 'x', env: {}, cwd: process.cwd(), telemetry: noopTelemetry }
 
 test('PORT_VERSIONS covers every port and each port names its layer', () => {
   assert.equal(Object.keys(PORT_VERSIONS).length, 21);
-  for (const p of Object.values(PORTS)) assert.match(PORT_VERSIONS[p.port], /^\d+\.\d+\.\d+$/);
+  for (const p of Object.values(PORTS)) assert.equal(PORT_VERSIONS[p.port], '1.0.0', p.port);
   assert.equal(PORTS.TriggerPort.layer, 'interface');
   assert.equal(PORTS.ApprovalPort.layer, 'identity');
 });
@@ -18,6 +18,7 @@ test('defineAdapter rejects inconsistent descriptors', () => {
   assert.throws(() => defineAdapter({ ...base, layer: 'llm' } as never), /belongs to layer cache/);
   assert.throws(() => defineAdapter({ ...base, maps: {} } as never), /standard or a technology/);
   assert.throws(() => defineAdapter({ ...base, portVersion: '9.0.0' } as never), /implements CachePort 9\.0\.0/);
+  assert.throws(() => defineAdapter({ ...base, portVersion: '0.2.0' } as never), /implements CachePort 0\.2\.0/, '0.x adapters are refused');
   assert.throws(() => defineAdapter({ ...base, tiers: [] } as never), /tiers/);
   assert.throws(() => defineAdapter({ ...base, name: 'Bad Name' } as never), /kebab-case/);
   assert.throws(() => defineAdapter({ ...base, port: 'NopePort' } as never), /unknown port/);
@@ -49,4 +50,17 @@ test('loader resolves adapters on demand; load errors are surfaced', async () =>
   assert.deepEqual(calls, ['lazy', 'other']);
   const failing = new AdapterRegistry({ loader: async () => { throw new SyntaxError('bad module'); } });
   await assert.rejects(failing.resolve('RouterPort', 'x'), /\[cache\/x\] failed to load: bad module/);
+});
+
+test('create builds ctx.mappings from the descriptor defaults when the caller gives none', async () => {
+  let seen: { mappings: import('../src/index.ts').Mappings } | undefined;
+  const base = testAdapter('ToolPort', 'tool', 'mapped', (_o, c) => { seen = c; return { listTools: async () => [], callTool: async () => ({ ok: true, text: '' }) }; });
+  const mapped = { ...base, mappingDefaults: { in: { shape: 'ToolSpec', rules: [{ from: '/title', to: '/description' }] } } } as AnyAdapter;
+  const r = new AdapterRegistry().register(mapped);
+  await r.create('ToolPort', 'mapped', {}, ctx);
+  assert.equal(seen!.mappings.key, 'x');
+  assert.deepEqual(seen!.mappings.in({ title: 'Look up' }, { name: 'n', description: '', params: {} }), { name: 'n', description: 'Look up', params: {} });
+  const own = { key: 'own', rules: { in: [], out: [] }, in: <T>(_n: unknown, s: T) => s, out: <W>(_s: unknown, w: W) => w };
+  await r.create('ToolPort', 'mapped', {}, { ...ctx, mappings: own });
+  assert.equal(seen!.mappings, own, 'a mappings object from the caller is kept');
 });

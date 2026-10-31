@@ -4,13 +4,18 @@ import type { Tier } from './adapter.ts';
 import { configSchema } from './config-schema.ts';
 import { ConfigError } from './errors.ts';
 import { coerceLimits, limitProblem, validateLimits, type LimitValue } from './limits.ts';
+import { mappingsProblems, mergeMappings, type MappingsConfig } from './mappings.ts';
+import type { ModelSettings } from './ports/model.ts';
+import type { Ext } from './ports/base.ts';
+import type { FusionOptions } from './pipeline/knowledge.ts';
 import type { GuardStage } from './ports/guard.ts';
 import type { AgentSpec } from './ports/runtime.ts';
 import type { PolicyRule } from './policy.ts';
-import { validate } from './schema.ts';
+import { validate, type JsonSchema } from './schema.ts';
 import { SLOTS, type SlotName } from './slots.ts';
 import { STACK_LIMITS } from './stack-limits.ts';
 import { deepMerge, isPlainObject } from './util.ts';
+import { Vocabularies, vocabularyProblems, type VocabulariesConfig } from './vocab.ts';
 
 export interface AdapterRef { adapter: string; name?: string; options?: Record<string, unknown>; stages?: GuardStage[] }
 export interface AppendList { $merge: 'append'; items: AdapterRef[] }
@@ -27,7 +32,7 @@ export type LayersConfig =
 
 /** Limits are numbers once the config is parsed; `"unbounded"` only where docs/limits.md allows it. */
 export interface PipelineConfig {
-  knowledge?: { k?: number; maxChars?: number; maxK?: number; mode?: 'system' | 'user' | 'tools' | 'off' };
+  knowledge?: { k?: number; maxChars?: number; maxK?: number; mode?: 'system' | 'user' | 'tools' | 'off'; fusion?: FusionOptions };
   cacheTtlMs?: number;
   approvalTimeoutMs?: number;
 }
@@ -35,6 +40,8 @@ export interface PipelineConfig {
 /** Limits that belong to no single layer (see docs/limits.md). */
 export interface LimitsConfig {
   check?: { timeoutMs?: number; deployTimeoutMs?: number; listToolsTimeoutMs?: number };
+  /** Largest `ext` bag kept on a shape the core passes on (default 16384 bytes). */
+  extBytes?: number;
 }
 
 /** Network host of the stack (gateway mode). */
@@ -69,7 +76,9 @@ export interface GatewayConfig {
   allowedHosts?: string[];
 }
 
-export interface AgentConfig { file?: string; instructions?: string; model?: string; tools?: string[]; knowledge?: string[]; params?: Record<string, unknown> }
+export interface AgentConfig {
+  file?: string; instructions?: string; model?: string; tools?: string[]; knowledge?: string[]; settings?: ModelSettings; ext?: Ext;
+}
 
 /** Profile layers: like LayersConfig, but an entry may omit `adapter` to change only its options. */
 export type LayersOverlay = {
@@ -89,6 +98,8 @@ export interface ProfileConfig {
   pipeline?: PipelineConfig;
   gateway?: GatewayConfig;
   limits?: LimitsConfig;
+  vocabularies?: VocabulariesConfig;
+  mappings?: MappingsConfig;
 }
 
 /** Contents of agent-layers.json. Schema: spec/schemas/stack-config.json. */
@@ -102,6 +113,10 @@ export interface StackConfig {
   pipeline?: PipelineConfig;
   gateway?: GatewayConfig;
   limits?: LimitsConfig;
+  /** Values added to extensible vocabularies (see spec/language.md). */
+  vocabularies?: VocabulariesConfig;
+  /** Boundary mapping rules per adapter instance (see spec/language.md). */
+  mappings?: MappingsConfig;
   profiles?: Record<string, ProfileConfig>;
   agents?: Record<string, AgentConfig>;
 }
@@ -120,6 +135,8 @@ export interface ResolvedConfig {
   pipeline: PipelineConfig;
   gateway: GatewayConfig;
   limits: LimitsConfig;
+  vocabularies: VocabulariesConfig;
+  mappings: MappingsConfig;
   agents: Record<string, AgentConfig>;
   /** Directory of the config file; relative paths resolve against it. */
   dir: string;
@@ -130,9 +147,16 @@ export const PRODUCTION_REQUIRES: readonly SlotName[] = ['identity', 'authorizat
 
 export const PROFILE_ENV = 'AGENT_LAYERS_PROFILE';
 
-/** Validates a parsed config against the stack config schema. Limit values get the limit's own message. */
+const PARAMS_REMOVED = 'params was removed in 1.0: put temperature, maxOutputTokens and stop under settings, and adapter-specific keys under ext (namespaced)';
+
+/**
+ * Validates a parsed config against the stack config schema, plus the rules a schema cannot say (vocabulary
+ * collisions, mapping rules). Limit values get the limit's own message.
+ */
 export function validateConfig(config: unknown): string[] {
-  return validate(configSchema, config).map((e) => {
+  const errors = validate(configSchema, config).map((e) => {
+    const params = /^\$\.agents\.([^.]+)\.params: unknown property$/.exec(e);
+    if (params) return `$.agents.${params[1]}: ${PARAMS_REMOVED}`;
     const m = /^\$((?:\.\w+)+): does not match any allowed shape$/.exec(e);
     const tail = m?.[1]!.slice(1).split('.');
     if (!tail) return e;
@@ -144,6 +168,19 @@ export function validateConfig(config: unknown): string[] {
     const problem = spec && limitProblem(spec, value);
     return problem ? `$.${tail.join('.')}: ${problem}` : e;
   });
+  if (!isPlainObject(config)) return errors;
+  errors.push(...languageProblems(config, '$.'));
+  for (const [name, p] of Object.entries(isPlainObject(config.profiles) ? config.profiles : {})) {
+    if (isPlainObject(p)) errors.push(...languageProblems(p, `$.profiles.${name}.`, config.vocabularies as VocabulariesConfig | undefined));
+  }
+  return errors;
+}
+
+function languageProblems(block: Record<string, unknown>, prefix: string, base?: VocabulariesConfig): string[] {
+  return [
+    ...vocabularyProblems(block.vocabularies, `${prefix}vocabularies`, base ? new Vocabularies([base]) : undefined),
+    ...mappingsProblems(block.mappings, `${prefix}mappings`),
+  ];
 }
 
 const ENV_REF = /\$\{env:([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
@@ -203,6 +240,8 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
   let pipeline: PipelineConfig = config.pipeline ?? {};
   let gateway: GatewayConfig = config.gateway ?? {};
   let limits: LimitsConfig = config.limits ?? {};
+  let vocabularies: VocabulariesConfig = config.vocabularies ?? {};
+  let mappings: MappingsConfig = mergeMappings({}, config.mappings);
   let tier: Tier = 'prototype';
   let requires: SlotName[] | undefined;
   for (const name of chain) {
@@ -212,6 +251,8 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
     if (p.pipeline) pipeline = deepMerge(pipeline, p.pipeline);
     if (p.gateway) gateway = deepMerge(gateway, p.gateway);
     if (p.limits) limits = deepMerge(limits, p.limits);
+    if (p.vocabularies) vocabularies = deepMerge(vocabularies, p.vocabularies);
+    if (p.mappings) mappings = mergeMappings(mappings, p.mappings);
     if (p.tier) tier = p.tier;
     if (p.requires) requires = p.requires;
   }
@@ -225,7 +266,7 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
     ...(config.name ? { name: config.name } : {}),
     ...(profile ? { profile } : {}),
     chain, tier, ...(requires ? { requires } : {}),
-    plugins: config.plugins ?? [], layers, policy, pipeline, gateway, limits, agents: config.agents ?? {}, dir,
+    plugins: config.plugins ?? [], layers, policy, pipeline, gateway, limits, vocabularies, mappings, agents: config.agents ?? {}, dir,
   };
 }
 
@@ -281,9 +322,30 @@ export async function readRawConfig(file: string): Promise<StackConfig> {
   return raw as StackConfig;
 }
 
+const unquote = (s: string) => s.trim().replace(/^["']|["']$/g, '');
+const scalar = (s: string): string | number | boolean => {
+  const v = s.trim();
+  if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+  if (v === 'true' || v === 'false') return v === 'true';
+  return unquote(v);
+};
+const list = (s: string) => s.slice(1, -1).split(',').map(unquote).filter(Boolean);
+
+/** `{ a: 1, b: [x, y], c: "z" }`: one level of a flow mapping with scalar and list values. */
+function flowMap(text: string, key: string): Record<string, unknown> {
+  const body = text.trim().slice(1, -1);
+  const out: Record<string, unknown> = {};
+  for (const m of body.matchAll(/("[^"]+"|'[^']+'|[A-Za-z_][\w.-]*)\s*:\s*(\[[^\]]*\]|"[^"]*"|'[^']*'|[^,]+)/g)) {
+    out[unquote(m[1]!)] = m[2]!.trim().startsWith('[') ? list(m[2]!.trim()) : scalar(m[2]!);
+  }
+  if (!Object.keys(out).length && body.trim()) throw new ConfigError([`agent file: ${key} must be a flow mapping such as { temperature: 0 }`]);
+  return out;
+}
+
 /**
- * Minimal front matter: `key: value` and `key: [a, b]` lines between `---` fences.
- * Body after the front matter is the agent's instructions.
+ * Minimal front matter between `---` fences: `key: value`, `key: [a, b]` and, for `settings` and `ext`, a one-line
+ * flow mapping (`settings: { temperature: 0, maxOutputTokens: 512 }`). The body is the agent's instructions.
+ * `params` was removed in 1.0 and is an error.
  */
 export function parseAgentFile(text: string): AgentConfig {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
@@ -293,9 +355,9 @@ export function parseAgentFile(text: string): AgentConfig {
     const kv = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(line.trim());
     if (!kv) continue;
     const [, key, value = ''] = kv;
-    out[key!] = value.startsWith('[') && value.endsWith(']')
-      ? value.slice(1, -1).split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
-      : value.replace(/^["']|["']$/g, '');
+    if (key === 'params') throw new ConfigError([`agent file: ${PARAMS_REMOVED}`]);
+    if ((key === 'settings' || key === 'ext') && value.trim().startsWith('{')) out[key!] = flowMap(value, key);
+    else out[key!] = value.startsWith('[') && value.endsWith(']') ? list(value) : unquote(value);
   }
   return { ...(out as AgentConfig), instructions: m[2]!.trim() };
 }
@@ -307,13 +369,17 @@ export async function agentSpec(config: ResolvedConfig, name: string): Promise<A
   const fromFile = entry.file ? parseAgentFile(await readFile(resolve(config.dir, entry.file), 'utf8')) : {};
   const merged = { ...fromFile, ...Object.fromEntries(Object.entries(entry).filter(([k, v]) => k !== 'file' && v !== undefined)) } as AgentConfig;
   if (!merged.model) throw new ConfigError([`agents.${name}: model is required`]);
+  if ('params' in merged) throw new ConfigError([`agents.${name}: ${PARAMS_REMOVED}`]);
+  const problems = validate((configSchema.$defs as Record<string, JsonSchema>).agentSettings!, merged.settings ?? {}, `agents.${name}.settings`);
+  if (problems.length) throw new ConfigError(problems);
   return {
     name,
     instructions: merged.instructions ?? '',
     model: merged.model,
     tools: merged.tools ?? [],
     ...(merged.knowledge ? { knowledge: merged.knowledge } : {}),
-    ...(merged.params ? { params: merged.params } : {}),
+    ...(merged.settings && Object.keys(merged.settings).length ? { settings: merged.settings } : {}),
+    ...(merged.ext && Object.keys(merged.ext).length ? { ext: merged.ext } : {}),
   };
 }
 

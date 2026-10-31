@@ -40,6 +40,12 @@
     "limits": {
       "$ref": "#/$defs/limits"
     },
+    "vocabularies": {
+      "$ref": "#/$defs/vocabularies"
+    },
+    "mappings": {
+      "$ref": "#/$defs/mappings"
+    },
     "profiles": {
       "type": "object",
       "additionalProperties": {
@@ -748,12 +754,10 @@
         "risk": {
           "type": "array",
           "items": {
-            "enum": [
-              "read",
-              "write",
-              "exec"
-            ]
-          }
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+          },
+          "description": "Risk values; a core value (read, write, exec) also matches the values added like it."
         },
         "when": {
           "type": "object",
@@ -843,6 +847,54 @@
                 "off"
               ],
               "description": "system/user: inject before model calls; tools: expose as tools; off."
+            },
+            "fusion": {
+              "type": "object",
+              "description": "How passages from several sources are merged before injection.",
+              "properties": {
+                "method": {
+                  "enum": [
+                    "rrf",
+                    "raw"
+                  ],
+                  "description": "rrf (default): reciprocal rank fusion; raw: sort by the sources' own scores (only for sources that share one scorer)."
+                },
+                "rrfK": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1000
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                    }
+                  ],
+                  "default": 60,
+                  "description": "Rank constant of reciprocal rank fusion; default 60."
+                },
+                "weights": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                      }
+                    ],
+                    "default": 1,
+                    "description": "Weight of a source in the fusion; default 1."
+                  },
+                  "description": "Weight per knowledge source name (default 1)."
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
@@ -1106,6 +1158,49 @@
             }
           },
           "additionalProperties": false
+        },
+        "extBytes": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 1048576
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 16384,
+          "description": "Largest ext bag kept on a shape the core passes on; larger ones are dropped with an event (bytes); default 16384."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ext": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*\\.[A-Za-z0-9_.-]+$"
+      },
+      "description": "Extension bag: <namespace>.<name> keys, JSON values."
+    },
+    "agentSettings": {
+      "type": "object",
+      "description": "Model settings of the agent.",
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "stop": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -1115,7 +1210,7 @@
       "properties": {
         "file": {
           "type": "string",
-          "description": "Markdown agent file: front matter (model, tools, knowledge) and instructions as body."
+          "description": "Markdown agent file: front matter (model, tools, knowledge, settings) and instructions as body."
         },
         "instructions": {
           "type": "string"
@@ -1135,11 +1230,784 @@
             "type": "string"
           }
         },
-        "params": {
-          "type": "object"
+        "settings": {
+          "$ref": "#/$defs/agentSettings"
+        },
+        "ext": {
+          "$ref": "#/$defs/ext"
         }
       },
       "additionalProperties": false
+    },
+    "vocabularies": {
+      "type": "object",
+      "description": "Values added to extensible vocabularies: { \"<vocabulary>\": { \"add\": { \"<value>\": { \"like\": \"<core value>\" } }, \"aliases\": { \"<name>\": \"<value>\" } } }.",
+      "properties": {
+        "layer": {
+          "type": "object",
+          "description": "everything. Core values: infra, llm, cache, harness, knowledge, tool, identity, guardrail, interface, telemetry, eval. Extensible: no.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "infra",
+                      "llm",
+                      "cache",
+                      "harness",
+                      "knowledge",
+                      "tool",
+                      "identity",
+                      "guardrail",
+                      "interface",
+                      "telemetry",
+                      "eval"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "role": {
+          "type": "object",
+          "description": "Message.role. Core values: system, user, assistant, tool. Extensible: aliases.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "system",
+                      "user",
+                      "assistant",
+                      "tool"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "part": {
+          "type": "object",
+          "description": "Part.type. Core values: text, media, call, result, reasoning. Extensible: namespaced.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "text",
+                      "media",
+                      "call",
+                      "result",
+                      "reasoning"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "finish": {
+          "type": "object",
+          "description": "ModelReply.finish. Core values: end, limit, tools, refused, other. Extensible: like.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "end",
+                      "limit",
+                      "tools",
+                      "refused",
+                      "other"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "risk": {
+          "type": "object",
+          "description": "ToolSpec.risk, policy rules. Core values: read, write, exec. Extensible: like.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "read",
+                      "write",
+                      "exec"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "effect": {
+          "type": "object",
+          "description": "policy rules. Core values: allow, ask, deny. Extensible: no.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "allow",
+                      "ask",
+                      "deny"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "action": {
+          "type": "object",
+          "description": "AccessQuestion.action. Core values: call. Extensible: like.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "call"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "stage": {
+          "type": "object",
+          "description": "GuardCheck.stage. Core values: input, output, tool_args, tool_result. Extensible: no.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "input",
+                      "output",
+                      "tool_args",
+                      "tool_result"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "guardAction": {
+          "type": "object",
+          "description": "GuardVerdict.action. Core values: allow, block, redact. Extensible: no.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "allow",
+                      "block",
+                      "redact"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "guardLabel": {
+          "type": "object",
+          "description": "GuardVerdict.labels. Core values: pii, secret, injection, toxicity, policy, other. Extensible: like.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "pii",
+                      "secret",
+                      "injection",
+                      "toxicity",
+                      "policy",
+                      "other"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "runStatus": {
+          "type": "object",
+          "description": "RunResult.status. Core values: completed, failed, stopped, waiting. Extensible: no.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "completed",
+                      "failed",
+                      "stopped",
+                      "waiting"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "stopCode": {
+          "type": "object",
+          "description": "RunResult.reason.code. Core values: guard_block, denied, aborted, timeout, limit, needs_input, needs_auth, rejected, error. Extensible: like.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "guard_block",
+                      "denied",
+                      "aborted",
+                      "timeout",
+                      "limit",
+                      "needs_input",
+                      "needs_auth",
+                      "rejected",
+                      "error"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "event": {
+          "type": "object",
+          "description": "RunEvent.type. Core values: run.start, model.reply, tool.call, tool.result, text, run.end. Extensible: namespaced.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "run.start",
+                      "model.reply",
+                      "tool.call",
+                      "tool.result",
+                      "text",
+                      "run.end"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "callerKind": {
+          "type": "object",
+          "description": "Caller.kind. Core values: user, agent. Extensible: no.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "user",
+                      "agent"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "approvalStatus": {
+          "type": "object",
+          "description": "Approval.status. Core values: pending, approved, denied, expired. Extensible: no.",
+          "properties": {
+            "add": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "like"
+                ],
+                "properties": {
+                  "like": {
+                    "enum": [
+                      "pending",
+                      "approved",
+                      "denied",
+                      "expired"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "aliases": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "mappingRule": {
+      "type": "object",
+      "description": "One boundary mapping rule; rules run in order.",
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(/.*)?$"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^(/.*)?$"
+              },
+              "minItems": 1
+            }
+          ],
+          "description": "JSON Pointer into the source, or a list (for join)."
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^(/.*)?$",
+          "description": "JSON Pointer into the target."
+        },
+        "default": {
+          "description": "Value when from is missing or null."
+        },
+        "map": {
+          "type": "object",
+          "description": "Value table; \"*\" is the fallback."
+        },
+        "join": {
+          "type": "string",
+          "description": "\"union\" concatenates lists without duplicates; any other string joins strings."
+        },
+        "split": {
+          "type": "string",
+          "description": "Separator that turns a string into a list."
+        },
+        "drop": {
+          "type": "string",
+          "pattern": "^(/.*)?$",
+          "description": "JSON Pointer removed from the target."
+        },
+        "fn": {
+          "type": "string",
+          "pattern": "^[^#]+#[A-Za-z_$][\\w$]*$",
+          "description": "\"<module path>#<export>\": (source, target, ctx) => target."
+        }
+      },
+      "additionalProperties": false
+    },
+    "mappings": {
+      "type": "object",
+      "description": "Boundary mapping rules per adapter instance: <slot> or <slot>.<instance>. A list replaces the adapter's default rules, { \"$merge\": \"append\" } adds to them, null removes.",
+      "propertyNames": {
+        "pattern": "^[a-z]+(\\.[A-Za-z0-9_-]+)?$"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "in": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/mappingRule"
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "$merge",
+                      "items"
+                    ],
+                    "properties": {
+                      "$merge": {
+                        "const": "append"
+                      },
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/$defs/mappingRule"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "out": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/mappingRule"
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "$merge",
+                      "items"
+                    ],
+                    "properties": {
+                      "$merge": {
+                        "const": "append"
+                      },
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/$defs/mappingRule"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
     },
     "profile": {
       "type": "object",
@@ -1201,6 +2069,12 @@
         },
         "limits": {
           "$ref": "#/$defs/limits"
+        },
+        "vocabularies": {
+          "$ref": "#/$defs/vocabularies"
+        },
+        "mappings": {
+          "$ref": "#/$defs/mappings"
         }
       },
       "additionalProperties": false

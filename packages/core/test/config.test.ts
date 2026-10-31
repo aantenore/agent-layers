@@ -63,6 +63,34 @@ test('agent files: front matter plus instructions', () => {
   assert.deepEqual(a, { model: 'mock', tools: ['docs__search', 'util__*'], instructions: 'You help.' });
 });
 
+test('agent files: settings and ext flow maps; params is refused', () => {
+  const a = parseAgentFile('---\nmodel: mock\nsettings: { temperature: 0, maxOutputTokens: 512, stop: ["END"] }\next: { x.mode: fast }\n---\nYou help.\n');
+  assert.deepEqual(a.settings, { temperature: 0, maxOutputTokens: 512, stop: ['END'] });
+  assert.deepEqual(a.ext, { 'x.mode': 'fast' });
+  assert.throws(() => parseAgentFile('---\nmodel: mock\nparams: { temperature: 0 }\n---\nx'), (e: unknown) => e instanceof ConfigError && /settings/.test(e.message) && /ext/.test(e.message));
+});
+
+test('agents.<x>.params is rejected with a message that names settings and ext', () => {
+  assert.throws(() => parseConfig(JSON.stringify({ agents: { a: { model: 'm', params: { temperature: 0 } } } })),
+    (e: unknown) => e instanceof ConfigError && /agents\.a/.test(e.message) && /settings/.test(e.message) && /ext/.test(e.message));
+  const c = parseConfig(JSON.stringify({ agents: { a: { model: 'm', settings: { temperature: 0, stop: ['x'] }, ext: { 'x.k': 1 } } } }));
+  assert.deepEqual(c.agents.a, { model: 'm', settings: { temperature: 0, stop: ['x'] }, ext: { 'x.k': 1 } });
+  assert.throws(() => parseConfig(JSON.stringify({ agents: { a: { model: 'm', settings: { max_tokens: 5 } } } })), ConfigError);
+});
+
+test('language blocks load: vocabularies, mappings, fusion and extBytes', () => {
+  const c = parseConfig(JSON.stringify({
+    vocabularies: { risk: { add: { admin: { like: 'exec' } } } },
+    mappings: { identity: { in: [{ from: '/scope', to: '/scopes', split: ' ' }] } },
+    pipeline: { knowledge: { fusion: { method: 'rrf', rrfK: 30, weights: { wiki: 2 } } } },
+    limits: { extBytes: 4096 },
+  }));
+  assert.equal(c.pipeline.knowledge?.fusion?.rrfK, 30);
+  assert.equal(c.limits.extBytes, 4096);
+  assert.throws(() => parseConfig(JSON.stringify({ vocabularies: { risk: { add: { exec: { like: 'exec' } } } } })), ConfigError);
+  assert.throws(() => parseConfig(JSON.stringify({ limits: { extBytes: 10 } })), /extBytes/);
+});
+
 test('published JSON Schemas are in sync with the TypeScript definition', () => {
   const expected = `${JSON.stringify(configSchema, null, 2)}\n`;
   for (const f of ['../schema/agent-layers.schema.json', '../../../spec/schemas/stack-config.json']) {

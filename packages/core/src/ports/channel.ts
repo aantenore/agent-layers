@@ -1,8 +1,8 @@
 import type { CallContext, PortBase } from './base.ts';
-import type { Identity } from './identity.ts';
+import type { Caller } from './identity.ts';
 import type { ModelPort } from './model.ts';
 import type { RunEvent, RunInput, RunResult } from './runtime.ts';
-import type { TelemetryPort, TraceContext } from './telemetry.ts';
+import type { TraceContext } from './telemetry.ts';
 import type { ToolPort } from './tool.ts';
 
 /** What a channel can reach: the stack's agents, inbound identity and, for hosted channels, the governed ports. */
@@ -11,7 +11,7 @@ export interface ChannelHost {
   run(agent: string, input: RunInput, ctx?: Partial<CallContext>): Promise<RunResult>;
   stream?(agent: string, input: RunInput, ctx?: Partial<CallContext>): AsyncIterable<RunEvent>;
   /** Verifies an inbound credential; undefined when no identity layer is configured. */
-  verify?(credential: string): Promise<Identity>;
+  verify?(credential: string): Promise<Caller>;
   /** The governed model (guards, cache, router, telemetry; no knowledge injection); absent without a model. */
   model?(): ModelPort;
   /** The governed tools (policy, approval, authorization, guards, credentials), knowledge sources included as read-only tools. */
@@ -25,16 +25,16 @@ export interface ChannelHandle {
   done?: Promise<void>;
 }
 
-/** One inbound request handled by a mounted channel or trigger. */
+/** One inbound request handled by a mounted channel or trigger: the envelope; the payload becomes a RunInput. */
 export interface InboundContext {
   /** Caller verified by the host; absent only when the host accepted an anonymous request. */
-  identity?: Identity;
+  caller?: Caller;
   requestId: string;
   /** Aborted when the client goes away or the host's time limit expires. */
   signal: AbortSignal;
   /** Public origin of the host (`scheme://host:port`), for absolute URLs in documents the route returns. */
   origin: string;
-  /** Trace context the request carried (`traceparent`, `tracestate`), when valid. Pass it on as `CallContext.trace`. */
+  /** Trace context the request carried, copied unchanged. Pass it on as `CallContext.trace`. */
   trace?: TraceContext;
 }
 

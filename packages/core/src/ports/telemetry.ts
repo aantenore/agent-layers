@@ -13,19 +13,21 @@ export interface Span {
   setError(err: unknown): void;
 }
 
-/** Distributed trace context, as the W3C Trace Context headers carry it between processes. */
+/**
+ * Distributed trace context carried between processes. Opaque to the core: the telemetry adapter that wrote it owns
+ * the format (W3C Trace Context for OTLP), and channels copy it in and out unchanged.
+ */
 export interface TraceContext {
-  /** `00-<32 hex trace id>-<16 hex parent id>-<2 hex flags>`. */
-  traceparent: string;
-  tracestate?: string;
+  parent: string;
+  state?: string;
 }
 
 export interface SpanOptions {
-  /** Remote parent from another process; used only when no span of the adapter is active. */
+  /** Remote parent from another process; used only when no span of the adapter is active. Ignored when invalid. */
   parent?: TraceContext;
 }
 
-/** Spans around work, point-in-time events, numeric metrics. */
+/** Spans around work, point-in-time events, numeric metrics. The core names its own with `agent.*`. */
 export interface TelemetryPort extends PortBase {
   /** Run `fn` inside a span; resolves to its value and rethrows its error after recording it. */
   span<T>(name: string, attrs: LayerAttributes, fn: (span: Span) => Promise<T>, opts?: SpanOptions): Promise<T>;

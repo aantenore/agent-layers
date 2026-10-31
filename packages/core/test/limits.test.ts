@@ -17,7 +17,7 @@ const limited = defineAdapter({
   portVersion: PORT_VERSIONS.ToolPort, tiers: ['prototype', 'production'],
   optionsSchema: { type: 'object', properties: { ...limitProperties(LIMITS), items: { type: 'object' } }, additionalProperties: false },
   limits: LIMITS,
-  create: (o: Record<string, unknown>) => { seen = o; return { listTools: async () => [], callTool: async () => ({ content: '' }) }; },
+  create: (o: Record<string, unknown>) => { seen = o; return { listTools: async () => [], callTool: async () => ({ ok: true, text: '' }) }; },
 });
 const ctx = { name: 'limited', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
 
@@ -107,7 +107,7 @@ test('knowledge tools: k and maxK from the pipeline; a larger k from the model i
   const asked: number[] = [];
   const tools = knowledgeTools({ docs: { search: async (q) => { asked.push(q.k!); return []; } } }, { k: 3, maxK: 5 });
   const [spec] = await tools.listTools({ runId: 'r', agent: 'a' });
-  assert.equal((spec!.inputSchema.properties as Record<string, { maximum: number }>).k!.maximum, 5);
+  assert.equal((spec!.params.properties as Record<string, { maximum: number }>).k!.maximum, 5);
   await tools.callTool('docs', { query: 'q' }, { runId: 'r', agent: 'a' });
   await tools.callTool('docs', { query: 'q', k: 50 }, { runId: 'r', agent: 'a' });
   assert.deepEqual(asked, [3, 5]);

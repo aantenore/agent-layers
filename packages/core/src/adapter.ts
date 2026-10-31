@@ -2,13 +2,16 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { AdapterError, errorMessage } from './errors.ts';
+import { extDeclarationProblems, type ExtDeclaration } from './ext.ts';
 import type { Layer } from './layers.ts';
 import { coerceLimits, validateLimits, type LimitSpec } from './limits.ts';
+import { createMappings, mappingDefaultsProblems, type MappingDefaults, type Mappings } from './mappings.ts';
 import { compatibleVersion, isPortName, PORTS, type PortName, type PortTypes } from './ports/catalog.ts';
 import type { ServiceSpec } from './ports/deploy.ts';
 import type { TelemetryPort } from './ports/telemetry.ts';
 import type { Stack } from './stack.ts';
 import { validate, type JsonSchema } from './schema.ts';
+import { vocabularyProblems, type VocabulariesConfig } from './vocab.ts';
 
 /** Inbound: exposes a stack port through a standard (an HTTP API, a server). outbound: consumes a standard or technology as a port. */
 export type Direction = 'inbound' | 'outbound';
@@ -32,7 +35,16 @@ export interface AdapterContext {
    * adapter is used, not inside `create`: it throws until composition has finished.
    */
   stack?: () => Stack;
+  /**
+   * The instance's boundary mappings: its descriptor's `mappingDefaults` rules, replaced or extended by the stack
+   * config's `mappings` block. Call `mappings.in(native, shape)` / `mappings.out(shape, wire)` where the adapter
+   * translates. Rules that change nothing are free.
+   */
+  mappings: Mappings;
 }
+
+/** What `AdapterRegistry.create` takes: a context whose mappings default to the descriptor's own. */
+export type AdapterContextInit = Omit<AdapterContext, 'mappings'> & { mappings?: Mappings };
 
 export interface AdapterDescriptor<P extends PortName = PortName, O = any> {
   layer: Layer;
@@ -51,6 +63,18 @@ export interface AdapterDescriptor<P extends PortName = PortName, O = any> {
    * readiness gate reports unsafe ones on the production tier. Listed in docs/limits.md.
    */
   limits?: Readonly<Record<string, LimitSpec>>;
+  /**
+   * The `ext` keys the adapter writes (`produces`, in its namespace, which defaults to the adapter name), the keys of
+   * other namespaces it reads (`reads`) and the ones telemetry may export (`safe`). Checked by conformance (`checkExt`).
+   */
+  ext?: ExtDeclaration;
+  /** Values the adapter adds to extensible vocabularies (same rules as the config block; config wins). */
+  vocabularies?: VocabulariesConfig;
+  /**
+   * The adapter's mapping edges: the language shape its `in` rules build and its `out` rules read, with its built-in
+   * translation published as default rules. A direction absent here takes no rules from config.
+   */
+  mappingDefaults?: MappingDefaults;
   /** Reference services this adapter needs running (started through the DeployPort by `up` / `dev`). */
   services?(options: O): ServiceSpec[];
   create(options: O, ctx: AdapterContext): PortTypes[P] | Promise<PortTypes[P]>;
@@ -72,6 +96,12 @@ export function defineAdapter<P extends PortName, O = Record<string, unknown>>(d
   if (!Array.isArray(d.tiers) || d.tiers.length === 0 || d.tiers.some((t) => !TIERS.includes(t))) fail(`tiers must be a non-empty subset of ${TIERS.join(', ')}`);
   if (typeof d.create !== 'function') fail('create must be a function');
   for (const l of Object.values(d.limits ?? {})) if (!l.path.startsWith('options.')) fail(`limit ${l.path} must be an options.* path`);
+  const language = [
+    ...extDeclarationProblems(d.ext, d.name),
+    ...vocabularyProblems(d.vocabularies, 'vocabularies'),
+    ...mappingDefaultsProblems(d.mappingDefaults, d.ext?.namespace ?? d.name),
+  ];
+  if (language.length) fail(language.join('; '));
   return Object.freeze({ ...d, tiers: Object.freeze([...d.tiers]) });
 }
 
@@ -127,7 +157,7 @@ export class AdapterRegistry {
   }
 
   /** Validates options against the adapter's schema and creates the port instance. */
-  async create<P extends PortName>(port: P, name: string, options: unknown, ctx: AdapterContext): Promise<PortTypes[P]> {
+  async create<P extends PortName>(port: P, name: string, options: unknown, init: AdapterContextInit): Promise<PortTypes[P]> {
     const layer = PORTS[port].layer;
     const adapter = await this.resolve(port, name);
     if (!adapter) throw new AdapterError(layer, name, `not installed: no ${port} adapter named "${name}"`);
@@ -138,6 +168,10 @@ export class AdapterRegistry {
     const seen = new Set(errors.map((e) => e.split(':')[0]));
     if (adapter.optionsSchema) errors.push(...validate(adapter.optionsSchema, opts, 'options').filter((e) => !seen.has(e.split(':')[0])));
     if (errors.length) throw new AdapterError(layer, name, `invalid options: ${errors.join('; ')}`);
+    const ctx: AdapterContext = {
+      ...init,
+      mappings: init.mappings ?? createMappings(init.name, { in: adapter.mappingDefaults?.in?.rules ?? [], out: adapter.mappingDefaults?.out?.rules ?? [] }),
+    };
     try {
       return await adapter.create(opts, ctx);
     } catch (err) {

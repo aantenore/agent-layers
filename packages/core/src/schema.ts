@@ -4,7 +4,7 @@ export type JsonSchema = Record<string, unknown>;
 /**
  * Small JSON Schema validator for adapter options, configs and conformance checks.
  * Supports type, properties, required, additionalProperties, items, enum, const, anyOf, oneOf,
- * allOf, if/then, $ref to local #/$defs, min/max, minLength/maxLength, minItems/maxItems, pattern.
+ * allOf, if/then, $ref to local #/$defs, min/max, minLength/maxLength, minItems/maxItems, pattern, propertyNames.
  * Unknown keywords are ignored. Returns one message per problem, prefixed with its JSON path.
  */
 export function validate(schema: JsonSchema, value: unknown, path = '$'): string[] {
@@ -83,6 +83,13 @@ function check(schema: JsonSchema, value: unknown, path: string, errors: string[
     const props = (schema.properties ?? {}) as Record<string, JsonSchema>;
     for (const key of (schema.required as string[] | undefined) ?? []) {
       if (obj[key] === undefined) errors.push(`${path}.${key}: required`);
+    }
+    if (schema.propertyNames && typeof schema.propertyNames === 'object') {
+      for (const key of Object.keys(obj)) {
+        const e: string[] = [];
+        check(schema.propertyNames as JsonSchema, key, `${path}.${key}`, e, root);
+        if (e.length) errors.push(`${path}.${key}: property name ${JSON.stringify(key)} is not allowed`);
+      }
     }
     for (const [key, v] of Object.entries(obj)) {
       if (v === undefined) continue;

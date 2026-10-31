@@ -4,8 +4,8 @@ import { isLayer, type Layer } from './layers.ts';
 import type { Attributes, LayerAttributes, Span, SpanOptions, TelemetryPort, TraceContext } from './ports/telemetry.ts';
 
 const SECRET_KEY = /(^|[._-])(token|authorization|password|passwd|secret|api[_-]?key|apikey|cookie|credential)s?$|(^|[._-])(authorization|password|secret|api[_-]?key|cookie)[._-]/i;
-/** Semantic-convention keys (token counts, token types) are known to be safe. */
-const SAFE_PREFIX = 'gen_ai.';
+/** Token counts and kinds are known to be safe, although their keys mention tokens. */
+const SAFE_PREFIX = 'agent.tokens.';
 
 /** Drops undefined values and masks attributes whose key looks like a secret. */
 export function sanitizeAttributes<T extends Attributes>(attrs: T): T {
@@ -40,7 +40,8 @@ export function createTelemetry(ports: readonly TelemetryPort[]): TelemetryPort 
     name: 'telemetry',
     async span<T>(name: string, attrs: LayerAttributes, fn: (span: Span) => Promise<T>, opts?: SpanOptions): Promise<T> {
       requireLayer('span', name, attrs);
-      const parent = opts?.parent && traceContext(opts.parent.traceparent, opts.parent.tracestate);
+      // The remote parent is opaque here: each telemetry adapter parses it in its own format, or ignores it.
+      const parent = opts?.parent;
       const safe = sanitizeAttributes(attrs);
       const spans: Span[] = [];
       const combined: Span = {
@@ -75,38 +76,21 @@ export function createTelemetry(ports: readonly TelemetryPort[]): TelemetryPort 
   };
 }
 
-const TRACEPARENT = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/;
-/** W3C limits: tracestate is at most 512 characters of list members. */
-const TRACESTATE = /^[\x20-\x7e]{1,512}$/;
-
 /**
- * A trace context from the W3C Trace Context headers, or undefined when `traceparent` does not parse: version `ff`,
- * all-zero ids and malformed values are refused. A malformed `tracestate` is dropped, as the specification says.
+ * The trace to hand to another process: the active span of `telemetry`, else `fallback` (the context the run was
+ * started with). Undefined when neither has one. Outbound adapters write it in their protocol's format.
  */
-export function traceContext(traceparent: string | null | undefined, tracestate?: string | null): TraceContext | undefined {
-  const m = typeof traceparent === 'string' ? TRACEPARENT.exec(traceparent.trim().toLowerCase()) : null;
-  if (!m || m[1] === 'ff' || /^0+$/.test(m[2]!) || /^0+$/.test(m[3]!)) return undefined;
-  const state = typeof tracestate === 'string' ? tracestate.trim() : '';
-  return { traceparent: `${m[1]}-${m[2]}-${m[3]}-${m[4]}`, ...(state && TRACESTATE.test(state) ? { tracestate: state } : {}) };
-}
-
-/**
- * Headers that carry the active trace to another process: the active span of `telemetry`, else `fallback` (the
- * context the run was started with). Empty when neither has one.
- */
-export function traceHeaders(telemetry?: TelemetryPort, fallback?: TraceContext): Record<string, string> {
+export function activeTrace(telemetry?: TelemetryPort, fallback?: TraceContext): TraceContext | undefined {
   let c: TraceContext | undefined;
   try { c = telemetry?.current?.(); } catch { c = undefined; }
-  c ??= fallback;
-  if (!c) return {};
-  return { traceparent: c.traceparent, ...(c.tracestate ? { tracestate: c.tracestate } : {}) };
+  return c ?? fallback;
 }
 
 function quiet(fn: () => void): void {
   try { fn(); } catch { /* telemetry must never break a run */ }
 }
 
-/** W3C ids of a recorded span or of the span an event happened in, when the recorder keeps trace ids. */
+/** Trace and span ids of a recorded span or of the span an event happened in, when the recorder keeps trace ids. */
 export type TraceIds = { traceId?: string; spanId?: string; parentSpanId?: string };
 
 /** A finished span, event or metric, as recording adapters write it. */
@@ -115,36 +99,52 @@ export type TelemetryRecord =
   | ({ type: 'event'; name: string; layer: Layer; time: string; attrs: Attributes } & Omit<TraceIds, 'parentSpanId'>)
   | { type: 'metric'; name: string; layer: Layer; time: string; value: number; attrs: Attributes };
 
-interface RecordedContext { traceId: string; spanId: string; flags: string; tracestate?: string }
+/** Ids a trace codec reads from and writes to a TraceContext. `flags` and `state` are kept as they came. */
+export interface TraceIdSet { traceId: string; spanId: string; flags?: string; state?: string }
+
+/**
+ * The format of trace contexts for a recorder that keeps trace ids. The core has none of its own: a telemetry adapter
+ * that speaks a trace standard (W3C Trace Context) passes its codec.
+ */
+export interface TraceCodec {
+  /** Ids of a context from another process; undefined when the value is not valid (the span then starts a new trace). */
+  parse(trace: TraceContext): TraceIdSet | undefined;
+  /** The context of a span, to hand to another process. */
+  format(ids: TraceIdSet): TraceContext;
+  /** A new trace id (default: 16 random bytes in hex). */
+  newTraceId?(): string;
+  /** A new span id (default: 8 random bytes in hex). */
+  newSpanId?(): string;
+}
 
 const hexId = (bytes: number) => randomBytes(bytes).toString('hex');
 
 /**
- * Builds a TelemetryPort from a function that writes finished records (console, files, test capture). With `traceIds`
- * the records carry W3C trace and span ids, spans nest like those of a tracing backend, a remote `parent` is honoured
+ * Builds a TelemetryPort from a function that writes finished records (console, files, test capture). With a `trace`
+ * codec the records carry trace and span ids, spans nest like those of a tracing backend, a remote `parent` is honoured
  * and `current()` returns the active context, so a file shows one trace across processes. Keep it on one recorder per
  * stack: two recorders that both keep ids would start different traces for the same root span.
  */
-export function recordingTelemetry(write: (record: TelemetryRecord) => void, name = 'recording', opts: { traceIds?: boolean } = {}): TelemetryPort {
-  const active = opts.traceIds ? new AsyncLocalStorage<RecordedContext>() : undefined;
-  const open = (parent?: TraceContext): { ctx: RecordedContext; parentSpanId?: string } | undefined => {
-    if (!active) return undefined;
+export function recordingTelemetry(write: (record: TelemetryRecord) => void, name = 'recording', opts: { trace?: TraceCodec } = {}): TelemetryPort {
+  const codec = opts.trace;
+  const active = codec ? new AsyncLocalStorage<TraceIdSet>() : undefined;
+  const newSpan = () => codec?.newSpanId?.() ?? hexId(8);
+  const open = (parent?: TraceContext): { ctx: TraceIdSet; parentSpanId?: string } | undefined => {
+    if (!active || !codec) return undefined;
     const local = active.getStore();
-    if (local) return { ctx: { ...local, spanId: hexId(8) }, parentSpanId: local.spanId };
-    const remote = parent && traceContext(parent.traceparent, parent.tracestate);
-    if (remote) {
-      const [, traceId, spanId, flags] = remote.traceparent.split('-');
-      return { ctx: { traceId: traceId!, spanId: hexId(8), flags: flags!, ...(remote.tracestate ? { tracestate: remote.tracestate } : {}) }, parentSpanId: spanId! };
-    }
-    return { ctx: { traceId: hexId(16), spanId: hexId(8), flags: '01' } };
+    if (local) return { ctx: { ...local, spanId: newSpan() }, parentSpanId: local.spanId };
+    let remote: TraceIdSet | undefined;
+    try { remote = parent ? codec.parse(parent) : undefined; } catch { remote = undefined; }
+    if (remote) return { ctx: { ...remote, spanId: newSpan() }, parentSpanId: remote.spanId };
+    return { ctx: { traceId: codec.newTraceId?.() ?? hexId(16), spanId: newSpan() } };
   };
   const ids = (o: ReturnType<typeof open>): TraceIds => (o ? { traceId: o.ctx.traceId, spanId: o.ctx.spanId, ...(o.parentSpanId ? { parentSpanId: o.parentSpanId } : {}) } : {});
   return {
     name,
-    ...(active ? {
+    ...(active && codec ? {
       current: () => {
         const c = active.getStore();
-        return c ? { traceparent: `00-${c.traceId}-${c.spanId}-${c.flags}`, ...(c.tracestate ? { tracestate: c.tracestate } : {}) } : undefined;
+        return c ? codec.format(c) : undefined;
       },
     } : {}),
     async span(spanName, attrs, fn, spanOpts) {

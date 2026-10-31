@@ -1,7 +1,8 @@
 import type { CallContext } from './ports/base.ts';
-import type { AccessRequest, Identity } from './ports/identity.ts';
-import type { ToolRisk, ToolSpec } from './ports/tool.ts';
+import { ANONYMOUS, publicCaller, type AccessQuestion, type Caller, type PublicCaller } from './ports/identity.ts';
+import type { Risk, ToolSpec } from './ports/tool.ts';
 import { matchesAny } from './util.ts';
+import { CORE_VOCABULARIES, type Vocabularies } from './vocab.ts';
 
 export type PolicyEffect = 'allow' | 'ask' | 'deny';
 
@@ -10,68 +11,64 @@ export interface PolicyRule {
   effect: PolicyEffect;
   /** Tool name globs (prefixed names); any tool when omitted. */
   tools?: string[];
-  risk?: ToolRisk[];
-  /** Conditions on the caller. `authenticated: true` matches any verified identity, `false` only an anonymous caller. */
+  /** Risk values. A rule on a core value also matches the added values `like` it. */
+  risk?: Risk[];
+  /** Conditions on the caller. `authenticated: true` matches any verified caller, `false` only an anonymous one. */
   when?: { roles?: string[]; scopes?: string[]; kind?: 'user' | 'agent'; authenticated?: boolean };
 }
 
-export interface PolicySubject { tool: string; risk: ToolRisk; identity?: Identity }
+/** What a policy rule is matched against. No `caller` means anonymous. */
+export interface PolicySubject { tool: string; risk: Risk; caller?: Caller | PublicCaller }
 
 /** Effect of the first matching rule, or undefined when no rule matches. */
-export function evaluatePolicy(rules: readonly PolicyRule[], s: PolicySubject): PolicyEffect | undefined {
-  return rules.find((r) => ruleMatches(r, s))?.effect;
+export function evaluatePolicy(rules: readonly PolicyRule[], s: PolicySubject, vocab: Vocabularies = CORE_VOCABULARIES): PolicyEffect | undefined {
+  return rules.find((r) => ruleMatches(r, s, vocab))?.effect;
 }
 
-function ruleMatches(r: PolicyRule, s: PolicySubject): boolean {
+function ruleMatches(r: PolicyRule, s: PolicySubject, vocab: Vocabularies): boolean {
   if (r.tools && !matchesAny(r.tools, s.tool)) return false;
-  if (r.risk && !r.risk.includes(s.risk)) return false;
+  if (r.risk) {
+    const core = vocab.core('risk', s.risk) ?? 'exec';
+    if (!r.risk.includes(s.risk) && !r.risk.includes(core)) return false;
+  }
   const w = r.when;
   if (!w) return true;
-  const id = s.identity;
-  if (w.authenticated !== undefined && w.authenticated !== (id !== undefined)) return false;
-  if (w.kind && id?.kind !== w.kind) return false;
-  if (w.roles && !w.roles.some((x) => id?.roles?.includes(x))) return false;
-  if (w.scopes && !w.scopes.some((x) => id?.scopes?.includes(x))) return false;
+  const c = s.caller;
+  if (w.authenticated !== undefined && w.authenticated !== (c !== undefined)) return false;
+  if (w.kind && c?.kind !== w.kind) return false;
+  if (w.roles && !w.roles.some((x) => c?.roles?.includes(x))) return false;
+  if (w.scopes && !w.scopes.some((x) => c?.scopes?.includes(x))) return false;
   return true;
 }
 
 /** Tools without a declared risk are treated as the most dangerous kind. */
-export const riskOf = (spec: Pick<ToolSpec, 'risk'>): ToolRisk => spec.risk ?? 'exec';
-
-/** Subject of a call made without a verified identity. Never matches user or agent rules. */
-const ANONYMOUS_SUBJECT = 'anonymous';
+export const riskOf = (spec: Pick<ToolSpec, 'risk'>): Risk => spec.risk ?? 'exec';
 
 /**
- * Authorization request for calling a tool, built from the caller's identity and the tool spec. A call without a
- * verified identity is an explicit anonymous subject (`authenticated: false`), never the agent's own identity.
+ * Access question for calling a tool, built from the caller and the tool spec. A call without a verified caller is
+ * the explicit anonymous caller, never the agent's own identity. The spec's `attrs` become the target's.
  */
-export function toolAccessRequest(tool: string, spec: ToolSpec, args: unknown, ctx: CallContext): AccessRequest {
-  const id = ctx.identity;
+export function accessQuestion(tool: string, spec: ToolSpec, args: Record<string, unknown> | undefined, ctx: CallContext): AccessQuestion {
   return {
-    subject: id
-      ? { type: id.kind, id: id.subject, properties: { roles: id.roles ?? [], scopes: id.scopes ?? [], authenticated: true } }
-      : { type: ANONYMOUS_SUBJECT, id: ANONYMOUS_SUBJECT, properties: { roles: [], scopes: [], authenticated: false } },
-    action: { name: 'call' },
-    resource: { type: 'tool', id: tool, properties: { risk: riskOf(spec), agent: ctx.agent, layer: spec.layer ?? 'tool' } },
-    context: { args },
+    caller: publicCaller(ctx.caller) ?? { ...ANONYMOUS, roles: [], scopes: [] },
+    action: 'call',
+    target: { kind: 'tool', id: tool, layer: spec.layer ?? 'tool', risk: riskOf(spec), agent: ctx.agent, ...(spec.attrs ? { attrs: spec.attrs } : {}) },
+    ...(args ? { args } : {}),
   };
 }
 
 /**
- * Reads the identity back from an access request (for policy engines that work on AccessRequest only). Only the exact
- * subject types `user` and `agent` of an authenticated subject yield an identity; anything else (anonymous, unknown
- * types, `authenticated: false`) has none, so rules on kind, roles or scopes do not match, as in `evaluatePolicy`.
+ * The policy subject of an access question (for policy engines that work on questions only). Only callers of kind
+ * `user` or `agent` with an id count as callers; anything else (anonymous, unknown kinds) has none, so rules on kind,
+ * roles or scopes do not match, as in `evaluatePolicy`. An unknown risk counts as `exec`.
  */
-export function subjectOf(req: AccessRequest): PolicySubject {
-  const subject = req.subject ?? ({} as Partial<AccessRequest['subject']>);
-  const props = subject.properties ?? {};
-  const kind: 'user' | 'agent' | undefined = subject.type === 'user' ? 'user' : subject.type === 'agent' ? 'agent' : undefined;
-  const authenticated = props.authenticated !== false;
+export function policySubject(q: AccessQuestion, vocab: Vocabularies = CORE_VOCABULARIES): PolicySubject {
+  const c = q.caller as Partial<PublicCaller> | undefined;
   const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
-  const risk = req.resource.properties?.risk;
-  const out: PolicySubject = { tool: req.resource.id, risk: risk === 'read' || risk === 'write' ? risk : 'exec' };
-  if (kind && authenticated && typeof subject.id === 'string' && subject.id) {
-    out.identity = { subject: subject.id, kind, roles: strings(props.roles), scopes: strings(props.scopes) };
+  const risk = vocab.has('risk', q.target?.risk) ? q.target.risk : 'exec';
+  const out: PolicySubject = { tool: String(q.target?.id ?? ''), risk };
+  if ((c?.kind === 'user' || c?.kind === 'agent') && typeof c.id === 'string' && c.id) {
+    out.caller = { id: c.id, kind: c.kind, roles: strings(c.roles), scopes: strings(c.scopes) };
   }
   return out;
 }

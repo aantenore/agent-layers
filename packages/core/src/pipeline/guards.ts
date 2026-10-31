@@ -1,6 +1,7 @@
-import { publicIdentity } from '../ports/identity.ts';
+import { ATTR, METRIC, SPAN } from '../names.ts';
 import type { CallContext } from '../ports/base.ts';
-import type { GuardPort, GuardStage } from '../ports/guard.ts';
+import type { GuardLabel, GuardPort, GuardStage } from '../ports/guard.ts';
+import { publicCaller } from '../ports/identity.ts';
 import type { TelemetryPort } from '../ports/telemetry.ts';
 
 export interface GuardOutcome {
@@ -8,7 +9,10 @@ export interface GuardOutcome {
   text: string;
   /** Guard that blocked. */
   guard?: string;
+  /** Internal text of the guard that blocked; never parsed. */
   reason?: string;
+  /** Labels of every guard that did not allow, in order. */
+  labels?: GuardLabel[];
 }
 
 /** Reason of the block when a guard throws or rejects. Never the error's own message. */
@@ -29,25 +33,29 @@ export async function runGuards(
 ): Promise<GuardOutcome> {
   let current = text;
   let redacted = false;
+  const labels: GuardLabel[] = [];
+  const caller = publicCaller(ctx.caller);
   for (const [i, g] of guardsFor(guards, stage).entries()) {
     const name = guardName(g, i);
-    const verdict = await telemetry.span('guard.check', { 'agent.layer': 'guardrail', 'guard.name': name, 'guard.stage': stage, ...(tool ? { 'gen_ai.tool.name': tool } : {}) }, async (span) => {
-      const subject = publicIdentity(ctx.identity);
-      const v = await g.check({ stage, text: current, agent: ctx.agent, runId: ctx.runId, ...(tool ? { tool } : {}), ...(subject ? { subject } : {}) }, ctx.signal ? { signal: ctx.signal } : {})
+    const base = { [ATTR.layer]: 'guardrail' as const, [ATTR.guardName]: name, [ATTR.guardStage]: stage };
+    const verdict = await telemetry.span(SPAN.guardCheck, { ...base, ...(tool ? { [ATTR.toolName]: tool } : {}) }, async (span) => {
+      const v = await g.check({ stage, text: current, agent: ctx.agent, runId: ctx.runId, ...(tool ? { tool } : {}), ...(caller ? { caller } : {}) }, ctx.signal ? { signal: ctx.signal } : {})
         // The thrown text can echo the inspected content or a backend's credentials: the reason is fixed.
-        .catch(() => ({ action: 'block' as const, reason: GUARD_ERROR }));
-      span.setAttributes({ 'guard.action': v.action });
+        .catch(() => ({ action: 'block' as const, reason: GUARD_ERROR, labels: ['other'] }));
+      span.setAttributes({ [ATTR.guardAction]: v.action });
       return v;
     });
     if (verdict.action !== 'allow') {
-      telemetry.metric('agent.guardrail.actions', 1, { 'agent.layer': 'guardrail', 'guard.name': name, 'guard.stage': stage, 'guard.action': verdict.action });
+      telemetry.metric(METRIC.guardActions, 1, { ...base, [ATTR.guardAction]: verdict.action });
+      labels.push(...(verdict.labels ?? []));
     }
-    if (verdict.action === 'block') return { action: 'block', text: current, guard: name, ...(verdict.reason ? { reason: verdict.reason } : {}) };
+    const found = labels.length ? { labels: [...new Set(labels)] } : {};
+    if (verdict.action === 'block') return { action: 'block', text: current, guard: name, ...(verdict.reason ? { reason: verdict.reason } : {}), ...found };
     if (verdict.action === 'redact') {
-      if (typeof verdict.text !== 'string') return { action: 'block', text: current, guard: name, reason: 'redact verdict without text' };
+      if (typeof verdict.text !== 'string') return { action: 'block', text: current, guard: name, reason: 'redact verdict without text', ...found };
       current = verdict.text;
       redacted = true;
     }
   }
-  return { action: redacted ? 'redact' : 'allow', text: current };
+  return { action: redacted ? 'redact' : 'allow', text: current, ...(labels.length ? { labels: [...new Set(labels)] } : {}) };
 }

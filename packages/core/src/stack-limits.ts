@@ -18,6 +18,8 @@ export const PIPELINE_LIMITS = defineLimits({
   maxK: { path: 'pipeline.knowledge.maxK', default: 20, unit: 'count', min: 1, max: 1000 },
   cacheTtlMs: { path: 'pipeline.cacheTtlMs', default: null, fallback: 'the cache adapter\'s TTL', unit: 'ms', min: 0 },
   approvalTimeoutMs: { path: 'pipeline.approvalTimeoutMs', default: 0, unit: 'ms', min: 0, safe: { max: 3_600_000 } },
+  rrfK: { path: 'pipeline.knowledge.fusion.rrfK', default: 60, unit: 'count', min: 1, max: 1000 },
+  fusionWeight: { path: 'pipeline.knowledge.fusion.weights.*', default: 1, unit: 'count', min: 0, max: 100, integer: false },
 });
 
 /** Limits of `agent-layers check` (`limits.check` block). */
@@ -27,5 +29,10 @@ export const CHECK_LIMITS = defineLimits({
   listToolsTimeoutMs: { path: 'limits.check.listToolsTimeoutMs', default: 5000, unit: 'ms', min: 1 },
 });
 
+/** Limits of the SDK language (`limits` block). */
+export const LANGUAGE_LIMITS = defineLimits({
+  extBytes: { path: 'limits.extBytes', default: 16_384, unit: 'bytes', min: 256, max: 1_048_576, safe: { max: 65_536 } },
+});
+
 /** Every limit set in the stack config itself (adapters declare theirs on the descriptor). */
-export const STACK_LIMITS: readonly LimitSpec[] = [...limitList(GATEWAY_LIMITS), ...limitList(PIPELINE_LIMITS), ...limitList(CHECK_LIMITS)];
+export const STACK_LIMITS: readonly LimitSpec[] = [...limitList(GATEWAY_LIMITS), ...limitList(PIPELINE_LIMITS), ...limitList(CHECK_LIMITS), ...limitList(LANGUAGE_LIMITS)];

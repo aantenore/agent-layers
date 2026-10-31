@@ -59,3 +59,24 @@ test('diff reports same, changed, added and removed per slot', () => {
   assert.match(text, /model\s+changed\s+mock-model → gateway/);
   assert.match(text, /guardrails\s+added\s+presidio/);
 });
+
+test('language problems and warnings: vocabulary values in policy, ext keys read but not produced', async () => {
+  const reader = { ...testAdapter('ToolPort', 'tool', 'reader', () => ({})), ext: { reads: ['other.key'] } } as never;
+  const reg = new AdapterRegistry().register([testAdapter('ModelPort', 'llm', 'mock-model', () => ({})), reader]);
+  const base: StackConfig = { layers: { model: { adapter: 'mock-model' }, tools: { r: { adapter: 'reader' } } } };
+
+  const ok = await readiness(resolveProfile(base), reg);
+  assert.equal(ok.ok, true, JSON.stringify(ok.problems));
+  assert.equal(ok.warnings.length, 1);
+  assert.match(ok.warnings[0]!, /tools\.r: adapter "reader" reads ext key "other\.key" that no adapter in the profile produces/);
+
+  const bad = await readiness(resolveProfile({ ...base, policy: [{ effect: 'allow', risk: ['admin'] }] }), reg);
+  assert.equal(bad.ok, false);
+  const lang = bad.problems.filter((p) => p.kind === 'language');
+  assert.equal(lang.length, 1);
+  assert.equal(lang[0]!.slot, undefined, 'language problems that belong to no slot carry none');
+  assert.match(lang[0]!.message, /policy\[0\]\.risk: "admin" is not a risk value/);
+
+  const added = await readiness(resolveProfile({ ...base, policy: [{ effect: 'allow', risk: ['admin'] }], vocabularies: { risk: { add: { admin: { like: 'exec' } } } } }), reg);
+  assert.equal(added.problems.filter((p) => p.kind === 'language').length, 0, 'a risk added through vocabularies is accepted');
+});

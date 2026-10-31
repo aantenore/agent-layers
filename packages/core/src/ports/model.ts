@@ -1,73 +1,77 @@
-import type { CallContext, PortBase } from './base.ts';
+import type { CallContext, Ext, PortBase } from './base.ts';
 
-/** Content part of a message. Only `text` parts are interpreted by the core; others pass through. */
-export type ContentPart = { type: 'text'; text: string } | { type: string; [k: string]: unknown };
+/** Message roles. Closed: config may add aliases, resolved by adapters at the edge. */
+export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
-export interface ToolCall {
-  id: string;
-  type: 'function';
-  function: { name: string; arguments: string };
-}
+export interface TextPart { type: 'text'; text: string; ext?: Ext }
+/** Image, audio or file. `data` is base64. Passed through by the core. */
+export interface MediaPart { type: 'media'; mediaType: string; url?: string; data?: string; ext?: Ext }
+/** A tool call the model made. `invalid` holds the raw text when the model's arguments did not parse. */
+export interface CallPart { type: 'call'; id: string; tool: string; args: Record<string, unknown>; invalid?: string; ext?: Ext }
+/** The result answering one call. */
+export interface ResultPart { type: 'result'; callId: string; ok: boolean; text: string; data?: unknown; ext?: Ext }
+/** The model's reasoning, when the backend returns it. Kept in history, never shown as output. */
+export interface ReasoningPart { type: 'reasoning'; text: string; ext?: Ext }
+/** Adapter-defined part, `<namespace>.<name>`. Passed through untouched, never read by the core. */
+export interface ExtPart { type: `${string}.${string}`; [k: string]: unknown }
 
-export type ChatMessage =
-  | { role: 'system' | 'developer'; content: string | ContentPart[]; name?: string }
-  | { role: 'user'; content: string | ContentPart[]; name?: string }
-  | { role: 'assistant'; content: string | ContentPart[] | null; tool_calls?: ToolCall[]; name?: string }
-  | { role: 'tool'; content: string | ContentPart[]; tool_call_id: string };
+export type CorePart = TextPart | MediaPart | CallPart | ResultPart | ReasoningPart;
+export type Part = CorePart | ExtPart;
 
-export interface ChatTool {
-  type: 'function';
-  function: { name: string; description?: string; parameters?: Record<string, unknown> };
-}
+/**
+ * One message. `parts` is always a list. `system`: text only; `user`: text and media; `assistant`: text, reasoning and
+ * calls; `tool`: results only.
+ */
+export interface Message { role: Role; parts: Part[]; ext?: Ext }
 
-export interface Usage { prompt_tokens: number; completion_tokens: number; total_tokens?: number }
+/** What the model sees of a tool. `params` is the JSON Schema of the arguments object. */
+export interface ToolInfo { name: string; description?: string; params: Record<string, unknown> }
 
-/** Chat request. Field names follow the most common wire format; `extra` carries backend-specific fields. */
-export interface ChatRequest {
+export type ToolMode = 'auto' | 'none' | 'required' | { tool: string };
+
+/** Sampling settings. The same shape is `AgentSpec.settings`. */
+export interface ModelSettings { temperature?: number; maxOutputTokens?: number; stop?: string[] }
+
+/** Schema: spec/schemas/model-request.json. */
+export interface ModelRequest {
   model: string;
-  messages: ChatMessage[];
-  tools?: ChatTool[];
-  tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
-  temperature?: number;
-  max_tokens?: number;
-  stop?: string[];
-  /** Passed through untouched to the backend (merged into its request body). */
-  extra?: Record<string, unknown>;
+  messages: Message[];
+  tools?: ToolInfo[];
+  /** Default `auto`. */
+  toolMode?: ToolMode;
+  settings?: ModelSettings;
+  ext?: Ext;
 }
 
-export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | (string & {});
+/** Why the model stopped. Core values; config may add values `like` one of them. */
+export type Finish = 'end' | 'limit' | 'tools' | 'refused' | 'other' | (string & {});
 
-export interface ChatChoice {
-  index: number;
-  message: { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] };
-  finish_reason: FinishReason | null;
-}
+/** Token counts. Cached or reasoning tokens go in `ext`. */
+export interface Usage { inputTokens: number; outputTokens: number; ext?: Ext }
 
-export interface ChatResponse {
-  id?: string;
+/** Schema: spec/schemas/model-reply.json. One answer per call. */
+export interface ModelReply {
   model: string;
-  choices: ChatChoice[];
+  /** Role `assistant`. */
+  message: Message;
+  /** `tools` exactly when the message has at least one call part. */
+  finish: Finish;
   usage?: Usage;
-  /** Backend-specific fields of the response. */
-  extra?: Record<string, unknown>;
-}
-
-export interface ToolCallDelta {
-  index: number;
+  /** Backend response id. */
   id?: string;
-  type?: 'function';
-  function?: { name?: string; arguments?: string };
+  ext?: Ext;
 }
 
-export interface ChatChunk {
-  id?: string;
-  model?: string;
-  choices: { index: number; delta: { role?: 'assistant'; content?: string | null; tool_calls?: ToolCallDelta[] }; finish_reason?: FinishReason | null }[];
-  usage?: Usage;
-}
+/** One streamed fragment. Schema: spec/schemas/model-delta.json. A stream ends with exactly one `end`. */
+export type ModelDelta =
+  | { type: 'text'; text: string }
+  | { type: 'reasoning'; text: string }
+  /** Fragments of call `index`; `argsText` fragments concatenate to the JSON arguments. */
+  | { type: 'call'; index: number; id?: string; tool?: string; argsText?: string }
+  | { type: 'end'; finish: Finish; usage?: Usage; model?: string; id?: string; ext?: Ext };
 
-/** Models (layer `llm`, with `cache` in front): one chat completion, optionally streamed. */
+/** Models (layer `llm`, with `cache` in front): one model call, optionally streamed. */
 export interface ModelPort extends PortBase {
-  chat(req: ChatRequest, ctx: CallContext): Promise<ChatResponse>;
-  stream?(req: ChatRequest, ctx: CallContext): AsyncIterable<ChatChunk>;
+  chat(req: ModelRequest, ctx: CallContext): Promise<ModelReply>;
+  stream?(req: ModelRequest, ctx: CallContext): AsyncIterable<ModelDelta>;
 }
