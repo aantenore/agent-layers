@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import { Vocabularies } from '@agent-layers/core';
 import { createHttpGuard, parseVerdict, type HttpGuardOptions } from '../src/index.ts';
-import { shim, type Shim } from './shim.ts';
+import { redirecting, shim, type Shim } from './shim.ts';
 
 let service: Shim;
 before(async () => { service = await shim(); });
@@ -103,6 +103,19 @@ test('failure reasons come from a fixed set and never from error text', async ()
   assert.equal(await reasonOf(async () => new Response('echo hello', { status: 429 })), 'guard service unavailable: HTTP 429');
   assert.equal(await reasonOf((_u, init) => new Promise((_r, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)))), 'guard service unavailable: timeout');
 });
+
+for (const status of [307, 308]) {
+  test(`a ${status} redirect is refused: the check and the token never reach the other host`, async () => {
+    const r = await redirecting(status);
+    try {
+      assert.deepEqual(await createHttpGuard({ url: r.url, token: 't' }).check(input), { action: 'block', reason: `guard service unavailable: redirects are not followed (HTTP ${status})` });
+      assert.deepEqual(await createHttpGuard({ url: r.url, token: 't', onError: 'allow' }).check(input), { action: 'allow' });
+      assert.deepEqual(r.hits, []);
+    } finally {
+      await r.close();
+    }
+  });
+}
 
 test('URLs with credentials are rejected at creation', () => {
   assert.throws(() => createHttpGuard({ url: 'https://user:pw@guard.example/check' }), /must not carry credentials/);

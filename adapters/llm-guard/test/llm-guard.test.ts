@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createMappings } from '@agent-layers/core';
 import { createLlmGuard, type LlmGuardOptions } from '../src/index.ts';
-import { mockLlmGuard, type MockLlmGuard } from './mock-llm-guard.ts';
+import { mockLlmGuard, redirecting, type MockLlmGuard } from './mock-llm-guard.ts';
 
 let api: MockLlmGuard;
 before(async () => { api = await mockLlmGuard(); });
@@ -111,8 +111,31 @@ test('label rules are replaceable; unlisted scanners are other; a failing mappin
   const mappings = createMappings('guardrails.scan', { in: [{ from: '/scanners', to: '/labels', map: { Gibberish: 'policy' } }] });
   assert.deepEqual((await createLlmGuard({ url: 'http://x' }, { fetch, mappings }).check(at('input', 'hello'))).labels, ['policy']);
   const broken = createMappings('guardrails.scan', { in: [{ from: '/scanners', to: '/labels/__proto__' }] });
-  assert.deepEqual(await createLlmGuard({ url: 'http://x' }, { fetch, mappings: broken }).check(at('input', 'hello')), { action: 'block', reason: 'llm-guard: label mapping failed' });
+  assert.deepEqual(await createLlmGuard({ url: 'http://x' }, { fetch, mappings: broken }).check(at('input', 'hello')), { action: 'block', reason: 'llm-guard: Gibberish, PromptInjection', labels: ['other'], ext: { 'llm-guard.scanners': ['Gibberish', 'PromptInjection'], 'llm-guard.mappingError': 'label mapping failed' } });
 });
+
+test('a failing label mapping never turns a detection into allow, even with onError allow', async () => {
+  const broken = createMappings('guardrails.scan', { in: [{ from: '/scanners', to: '/labels/__proto__' }] });
+  const blocked = async () => new Response(JSON.stringify({ is_valid: false, scanners: { PromptInjection: 1 } }));
+  assert.deepEqual(await createLlmGuard({ url: 'http://x', onError: 'allow' }, { fetch: blocked, mappings: broken }).check(at('input', 'hello')),
+    { action: 'block', reason: 'llm-guard: PromptInjection', labels: ['other'], ext: { 'llm-guard.scanners': ['PromptInjection'], 'llm-guard.mappingError': 'label mapping failed' } });
+  const sanitized = async () => new Response(JSON.stringify({ is_valid: false, scanners: { Secrets: 1 }, sanitized_prompt: 'key ******' }));
+  assert.deepEqual(await createLlmGuard({ url: 'http://x', onError: 'allow', sanitizeScanners: ['Secrets'] }, { fetch: sanitized, mappings: broken }).check(at('input', 'key sk-1')),
+    { action: 'redact', text: 'key ******', reason: 'llm-guard: sanitized (Secrets)', labels: ['other'], ext: { 'llm-guard.scanners': ['Secrets'], 'llm-guard.mappingError': 'label mapping failed' } });
+});
+
+for (const status of [307, 308]) {
+  test(`a ${status} redirect is refused: the text and the token never reach the other host`, async () => {
+    const r = await redirecting(status);
+    try {
+      assert.deepEqual(await createLlmGuard({ url: r.url, token: 't' }).check(at('input', 'hello')), { action: 'block', reason: `llm-guard unavailable: redirects are not followed (HTTP ${status})` });
+      assert.deepEqual(await createLlmGuard({ url: r.url, token: 't', onError: 'allow' }).check(at('input', 'hello')), { action: 'allow' });
+      assert.deepEqual(r.hits, []);
+    } finally {
+      await r.close();
+    }
+  });
+}
 
 test('maxResponseBytes bounds the answer; a larger one blocks with a fixed reason', async () => {
   const big = async () => new Response(JSON.stringify({ is_valid: true, scanners: {}, pad: 'x'.repeat(4096) }));

@@ -1,4 +1,4 @@
-import { CORE_VOCABULARIES, createMappings, defineAdapter, GUARD_STAGES, limitProperties, limitValue, MappingError, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict, type LimitValue, type MappingRule, type Mappings, type Vocabularies } from '@agent-layers/core';
+import { CORE_VOCABULARIES, createMappings, defineAdapter, GUARD_STAGES, limitProperties, limitValue, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict, type LimitValue, type MappingRule, type Mappings, type Vocabularies } from '@agent-layers/core';
 import { assertPlainUrl, failure, HttpStatusError, InvalidResponseError, postJson, trimSlash, type FetchLike, type HttpOptions } from './http.ts';
 import { LIMITS } from './limits.ts';
 
@@ -37,6 +37,9 @@ export interface LlmGuardDeps {
 
 /** Names of the scanners that decided a verdict, as `ext["llm-guard.scanners"]`. */
 export const SCANNERS_KEY = 'llm-guard.scanners';
+
+/** Set when the label mapping failed on a detection: the verdict stands, labelled `other`. */
+export const MAPPING_ERROR_KEY = 'llm-guard.mappingError';
 
 /**
  * Default scanner → label rules (LLM Guard's prompt and output scanners), replaceable through the stack's
@@ -90,10 +93,18 @@ export function createLlmGuard(options: LlmGuardOptions, deps: LlmGuardDeps = {}
   const vocab = (): Vocabularies => {
     try { return deps.vocabularies?.() ?? CORE_VOCABULARIES; } catch { return CORE_VOCABULARIES; }
   };
-  /** The verdict with labels from the scanner names (through the mappings) and the names under `ext`. */
+  /**
+   * The verdict with labels from the scanner names (through the mappings) and the names under `ext`. A failing
+   * mapping never weakens the verdict: it stays, labelled `other`, with the failure noted under `ext`.
+   */
   const described = (verdict: GuardVerdict, scanners: string[]): GuardVerdict => {
     if (!scanners.length) return verdict;
-    const labels = labelsOf((mappings.in({ scanners }, verdict) as GuardVerdict | undefined)?.labels, vocab());
+    let labels: GuardVerdict['labels'];
+    try {
+      labels = labelsOf((mappings.in({ scanners }, verdict) as GuardVerdict | undefined)?.labels, vocab());
+    } catch {
+      return { ...verdict, labels: ['other'], ext: { [SCANNERS_KEY]: scanners, [MAPPING_ERROR_KEY]: 'label mapping failed' } };
+    }
     return { ...verdict, ...(labels ? { labels } : {}), ext: { [SCANNERS_KEY]: scanners } };
   };
   const repairing = new Set(options.sanitizeScanners);
@@ -128,8 +139,8 @@ export function createLlmGuard(options: LlmGuardOptions, deps: LlmGuardDeps = {}
         return await inspect(stage, text, opts?.signal);
       } catch (err) {
         if (opts?.signal?.aborted) throw err;
+        // Only an unavailable or misbehaving service reaches here: label mapping failures are handled in `described`.
         if ((options.onError ?? 'block') === 'allow') return { action: 'allow' };
-        if (err instanceof MappingError) return { action: 'block', reason: 'llm-guard: label mapping failed' };
         const why = err instanceof HttpStatusError && (err.status === 401 || err.status === 403) ? `authentication failed (HTTP ${err.status})` : failure(err);
         return { action: 'block', reason: `llm-guard unavailable: ${why}` };
       }
@@ -162,7 +173,7 @@ export const adapter = defineAdapter<'GuardPort', LlmGuardOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
-  ext: { produces: [SCANNERS_KEY] },
+  ext: { produces: [SCANNERS_KEY, MAPPING_ERROR_KEY] },
   mappingDefaults: { in: { shape: 'GuardVerdict', rules: LABEL_RULES } },
   create: (options, ctx) => createLlmGuard(options, { name: ctx.name, mappings: ctx.mappings, ...(ctx.stack ? { vocabularies: () => ctx.stack?.().vocabularies } : {}) }),
 });

@@ -10,9 +10,11 @@ planted in tool results.
 
 Fails closed: an unreachable service, a timeout, an unexpected body or a rejected token gives a `block` with the reason
 `llm-guard unavailable: <cause>`. A missing token answers HTTP 403 and a wrong one HTTP 401; both read
-`authentication failed`. The cause is one of `HTTP <status>`, `timeout`, `response too large`, `invalid response`,
-`network error` (a failing label mapping: `llm-guard: label mapping failed`);
-error text and the token never appear in reasons, and URLs with credentials are rejected at creation.
+`authentication failed`. The cause is one of `HTTP <status>`, `redirects are not followed (HTTP <status>)`, `timeout`,
+`response too large`, `invalid response`, `network error`; error text and the token never appear in reasons, and URLs
+with credentials are rejected at creation. Redirects are never followed, so the text and the token stay with the
+configured host. `onError` applies only to these failures: a label mapping that fails on a detection keeps the `block`
+or `redact` verdict, labelled `other`, with `ext["llm-guard.mappingError"]` set.
 
 Verdicts that name scanners carry `labels` from the guard label vocabulary and the scanner names under
 `ext["llm-guard.scanners"]`. Scanner names become labels through `in` mapping rules on `GuardVerdict` (source

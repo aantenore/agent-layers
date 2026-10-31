@@ -6,9 +6,12 @@ Finds PII with the Presidio analyzer (`POST /analyze`) and rewrites it with the 
 the text. Verdict reasons name entity types (`PII redacted: EMAIL_ADDRESS`), never the matched values. Verdicts carry
 `labels` from the guard label vocabulary and the entity types found under `ext["presidio.entities"]` (identifier-like
 names only). If Presidio cannot be reached or answers badly the guard fails closed: the verdict is `block` with the
-reason `presidio unavailable: <cause>`, where the cause is one of `HTTP <status>`, `timeout`, `response too large`,
-`invalid response`, `network error` (a failing label mapping: `presidio: label mapping failed`). Error text and response bodies are never copied into
-reasons: they can echo URLs, headers or the text that was sent. URLs with credentials are rejected at creation.
+reason `presidio unavailable: <cause>`, where the cause is one of `HTTP <status>`, `redirects are not followed (HTTP
+<status>)`, `timeout`, `response too large`, `invalid response`, `network error`. `onError` applies only to these
+failures: a label mapping that fails on a detection keeps the `block` or `redact` verdict, labelled `other`, with
+`ext["presidio.mappingError"]` set. Redirects are never followed, so the text and headers stay with the configured
+host. Error text and response bodies are never copied into reasons: they can echo URLs, headers or the text that was
+sent. URLs with credentials are rejected at creation.
 
 Tested live against Presidio 2.2.362 (`reference/guardrail`).
 

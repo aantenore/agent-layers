@@ -47,6 +47,16 @@ export async function readBounded(res: Response, max: number, what: string): Pro
   return Buffer.concat(chunks).toString('utf8');
 }
 
+/** The service answered with a redirect: it is never followed, so the text and credentials stay with the configured host. */
+export class RedirectError extends Error {
+  override name = 'RedirectError';
+  readonly status: number;
+  constructor(status: number, what: string) {
+    super(`${what}: redirects are not followed (HTTP ${status})`);
+    this.status = status;
+  }
+}
+
 export class HttpStatusError extends Error {
   override name = 'HttpStatusError';
   readonly status: number;
@@ -57,16 +67,21 @@ export class HttpStatusError extends Error {
 }
 
 /**
- * POSTs JSON and returns the parsed body. Non-2xx answers, bodies over `maxResponseBytes` and non-JSON bodies throw.
- * Response bodies are left out of error messages: services often echo the text they were sent.
+ * POSTs JSON and returns the parsed body. Redirects, non-2xx answers, bodies over `maxResponseBytes` and non-JSON
+ * bodies throw. Response bodies are left out of error messages: services often echo the text they were sent.
  */
 export async function postJson(url: string, body: unknown, what: string, o: HttpOptions, signal?: AbortSignal): Promise<unknown> {
   const res = await (o.fetch ?? fetch)(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json', ...o.headers },
     body: JSON.stringify(body),
+    redirect: 'manual',
     signal: anySignal(signal, timeoutSignal(o.timeoutMs)),
   });
+  if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+    await res.body?.cancel().catch(() => {});
+    throw new RedirectError(res.status, what);
+  }
   if (!res.ok) {
     await res.body?.cancel().catch(() => {});
     throw new HttpStatusError(res.status, what);
@@ -82,10 +97,12 @@ export async function postJson(url: string, body: unknown, what: string, o: Http
 export const trimSlash = (url: string) => url.replace(/\/+$/, '');
 
 /**
- * Why a call failed, from a fixed set: `HTTP <status>`, `timeout`, `response too large`, `invalid response`,
- * `network error`. Error text is never used: it can echo URLs with credentials, headers or the text that was sent.
+ * Why a call failed, from a fixed set: `HTTP <status>`, `redirects are not followed (HTTP <status>)`, `timeout`,
+ * `response too large`, `invalid response`, `network error`. Error text is never used: it can echo URLs with
+ * credentials, headers or the text that was sent.
  */
 export function failure(err: unknown): string {
+  if (err instanceof RedirectError) return `redirects are not followed (HTTP ${err.status})`;
   if (err instanceof HttpStatusError) return `HTTP ${err.status}`;
   if (err instanceof ResponseTooLargeError) return 'response too large';
   if (err instanceof InvalidResponseError) return 'invalid response';

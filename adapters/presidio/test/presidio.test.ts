@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createMappings, Vocabularies, type MappingFn } from '@agent-layers/core';
 import { createPresidioGuard, type PresidioOptions } from '../src/index.ts';
-import { mockPresidio, type MockPresidio } from './mock-presidio.ts';
+import { mockPresidio, redirecting, type MockPresidio } from './mock-presidio.ts';
 
 let presidio: MockPresidio;
 before(async () => { presidio = await mockPresidio(); });
@@ -33,8 +33,31 @@ test('label mappings are replaceable; unknown labels become other; a failing map
   assert.deepEqual((await unknown.check(input('a@b.co'))).labels, ['other'], 'not in the vocabulary: other');
   const boom: MappingFn = () => { throw new Error('a@b.co'); };
   const failing = createPresidioGuard({ analyzerUrl: presidio.analyzerUrl, action: 'block' }, { mappings: createMappings('guardrails.pii', { in: [{ fn: './m.ts#boom' }] }, { fns: new Map([['./m.ts#boom', boom]]) }) });
-  assert.deepEqual(await failing.check(input('a@b.co')), { action: 'block', reason: 'presidio: label mapping failed' });
+  assert.deepEqual(await failing.check(input('a@b.co')), { action: 'block', reason: 'PII detected: EMAIL_ADDRESS', labels: ['other'], ext: { 'presidio.entities': ['EMAIL_ADDRESS'], 'presidio.mappingError': 'label mapping failed' } });
 });
+
+test('a failing label mapping never turns a detection into allow, even with onError allow', async () => {
+  const boom: MappingFn = () => { throw new Error('a@b.co'); };
+  const mappings = createMappings('guardrails.pii', { in: [{ fn: './m.ts#boom' }] }, { fns: new Map([['./m.ts#boom', boom]]) });
+  const blocking = createPresidioGuard({ analyzerUrl: presidio.analyzerUrl, action: 'block', onError: 'allow' }, { mappings });
+  assert.deepEqual(await blocking.check(input('a@b.co')), { action: 'block', reason: 'PII detected: EMAIL_ADDRESS', labels: ['other'], ext: { 'presidio.entities': ['EMAIL_ADDRESS'], 'presidio.mappingError': 'label mapping failed' } });
+  const redacting = createPresidioGuard({ analyzerUrl: presidio.analyzerUrl, anonymizerUrl: presidio.anonymizerUrl, onError: 'allow' }, { mappings });
+  assert.deepEqual(await redacting.check(input('write to a@b.co')), { action: 'redact', text: 'write to <EMAIL_ADDRESS>', reason: 'PII redacted: EMAIL_ADDRESS', labels: ['other'], ext: { 'presidio.entities': ['EMAIL_ADDRESS'], 'presidio.mappingError': 'label mapping failed' } });
+});
+
+for (const status of [307, 308]) {
+  test(`a ${status} redirect is refused: the text never reaches the other host`, async () => {
+    const r = await redirecting(status);
+    try {
+      const v = await createPresidioGuard({ analyzerUrl: r.url, action: 'block', headers: { 'x-api-key': 'k' } }).check(input('jane@example.com'));
+      assert.deepEqual(v, { action: 'block', reason: `presidio unavailable: redirects are not followed (HTTP ${status})` });
+      assert.deepEqual(await createPresidioGuard({ analyzerUrl: r.url, action: 'block', onError: 'allow' }).check(input('jane@example.com')), { action: 'allow' });
+      assert.deepEqual(r.hits, []);
+    } finally {
+      await r.close();
+    }
+  });
+}
 
 test('entity types that are not identifier-like stay out of reasons and ext', async () => {
   const fetch = async () => Response.json([{ entity_type: 'jane@example.com leaked', start: 0, end: 4, score: 1 }, { entity_type: 'CUSTOM_ID', start: 0, end: 4, score: 1 }]);

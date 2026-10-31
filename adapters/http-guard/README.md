@@ -32,8 +32,9 @@ object, otherwise the stack blocks the call.
 
 Fails closed: a non-2xx answer, a timeout, a body that is not JSON or larger than `maxResponseBytes`, an unknown
 `action`, a `redact` without `text` or `labels` that are not such a list becomes a `block` with the reason
-`guard service unavailable: <cause>`, where the cause is one of `HTTP <status>`, `timeout`, `response too large`,
-`invalid response`, `network error`. Error text and response bodies are not copied into reasons. URLs with credentials
+`guard service unavailable: <cause>`, where the cause is one of `HTTP <status>`, `redirects are not followed (HTTP
+<status>)`, `timeout`, `response too large`, `invalid response`, `network error`. Redirects are never followed, so the
+text and the token stay with the configured host. Error text and response bodies are not copied into reasons. URLs with credentials
 are rejected at creation: use `token` or `headers`.
 
 A minimal service in Node, as a template for other languages:

@@ -1,4 +1,4 @@
-import { CORE_VOCABULARIES, createMappings, defineAdapter, GUARD_STAGES, limitProperties, limitValue, MappingError, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict, type LimitValue, type MappingRule, type Mappings, type Vocabularies } from '@agent-layers/core';
+import { CORE_VOCABULARIES, createMappings, defineAdapter, GUARD_STAGES, limitProperties, limitValue, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict, type LimitValue, type MappingRule, type Mappings, type Vocabularies } from '@agent-layers/core';
 import { assertPlainUrl, failure, InvalidResponseError, postJson, trimSlash, type FetchLike, type HttpOptions } from './http.ts';
 import { LIMITS } from './limits.ts';
 
@@ -42,6 +42,9 @@ interface Finding { entity_type: string; start: number; end: number; score: numb
 
 /** Entity types found, as `ext["presidio.entities"]`. */
 export const ENTITIES_KEY = 'presidio.entities';
+
+/** Set when the label mapping failed on a detection: the verdict stands, labelled `other`. */
+export const MAPPING_ERROR_KEY = 'presidio.mappingError';
 
 /** Presidio's predefined entity types, all personal data. */
 const PII_ENTITIES = [
@@ -102,11 +105,19 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
     const findings = found as Finding[];
     if (!findings.length) return { action: 'allow' };
     const types = entityTypes(findings);
-    /** The verdict with labels from the entity types (through the mappings) and the types under `ext`. */
+    /**
+     * The verdict with labels from the entity types (through the mappings) and the types under `ext`. A failing
+     * mapping never weakens the verdict: it stays, labelled `other`, with the failure noted under `ext`.
+     */
     const described = (verdict: GuardVerdict): GuardVerdict => {
-      const mapped = mappings.in({ entities: types }, verdict) as GuardVerdict;
-      const labels = labelsOf(mapped?.labels, vocab());
-      return { ...verdict, ...(labels ? { labels } : {}), ...(types.length ? { ext: { [ENTITIES_KEY]: types } } : {}) };
+      const entities = types.length ? { [ENTITIES_KEY]: types } : {};
+      let labels: GuardVerdict['labels'];
+      try {
+        labels = labelsOf((mappings.in({ entities: types }, verdict) as GuardVerdict | undefined)?.labels, vocab());
+      } catch {
+        return { ...verdict, labels: ['other'], ext: { ...entities, [MAPPING_ERROR_KEY]: 'label mapping failed' } };
+      }
+      return { ...verdict, ...(labels ? { labels } : {}), ...(types.length ? { ext: entities } : {}) };
     };
     if (action === 'block') return described({ action: 'block', reason: `PII detected: ${types.join(', ')}` });
     const res = await postJson(anonymizer!, {
@@ -128,8 +139,9 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
         return await inspect(text, opts?.signal);
       } catch (err) {
         if (opts?.signal?.aborted) throw err;
+        // Only an unavailable or misbehaving service reaches here: label mapping failures are handled in `described`.
         if ((options.onError ?? 'block') === 'allow') return { action: 'allow' };
-        return { action: 'block', reason: err instanceof MappingError ? 'presidio: label mapping failed' : `presidio unavailable: ${failure(err)}` };
+        return { action: 'block', reason: `presidio unavailable: ${failure(err)}` };
       }
     },
   };
@@ -163,7 +175,7 @@ export const adapter = defineAdapter<'GuardPort', PresidioOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
-  ext: { produces: [ENTITIES_KEY] },
+  ext: { produces: [ENTITIES_KEY, MAPPING_ERROR_KEY] },
   mappingDefaults: { in: { shape: 'GuardVerdict', rules: LABEL_RULES } },
   create: (options, ctx) => createPresidioGuard(options, { name: ctx.name, mappings: ctx.mappings, ...(ctx.stack ? { vocabularies: () => ctx.stack?.().vocabularies } : {}) }),
 });
