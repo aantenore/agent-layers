@@ -12,9 +12,9 @@ per stack.
 
 Conditions (all that are set must hold):
 
-- `minEstTokens`, `maxEstTokens`: estimated tokens of the request, about 4 characters each over messages, tool calls and
+- `minEstTokens`, `maxEstTokens`: estimated tokens of the request, about 4 characters each over message text, tool calls, tool results and
   tool definitions. Inclusive.
-- `hasTools`: the request offers tools (`tool_choice: "none"` counts as none).
+- `hasTools`: the request offers tools (`toolMode: "none"` counts as none).
 - `turnAtLeast`: turn N follows N-1 assistant messages, so a first request is turn 1.
 
 A rule needs at least one condition; use `default` for the catch-all.

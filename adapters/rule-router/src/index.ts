@@ -1,11 +1,11 @@
-import { contentText, defineAdapter, PORT_VERSIONS, type ChatRequest, type RouterPort } from '@agent-layers/core';
+import { defineAdapter, PORT_VERSIONS, type CallPart, type ModelRequest, type Part, type RouterPort } from '@agent-layers/core';
 
 /** Conditions on a request. All that are set must hold. */
 export interface RouteCondition {
   /** Estimated size of the request, in tokens (about 4 characters each: messages, tool calls and tool definitions). */
   minEstTokens?: number;
   maxEstTokens?: number;
-  /** Whether the request offers tools (`tool_choice: "none"` counts as none). */
+  /** Whether the request offers tools (`toolMode: "none"` counts as none). */
   hasTools?: boolean;
   /** The request is for this turn or a later one: turn N follows N-1 assistant messages. */
   turnAtLeast?: number;
@@ -23,21 +23,28 @@ export interface RuleRouterOptions {
 
 const CONDITIONS = ['minEstTokens', 'maxEstTokens', 'hasTools', 'turnAtLeast'] as const;
 
-/** Rough token estimate of a request: characters / 4 over messages, tool calls and tool definitions. */
-export function estimateTokens(req: ChatRequest): number {
-  let chars = 0;
-  for (const m of req.messages) {
-    chars += contentText(m.content).length;
-    if (m.role === 'assistant' && m.tool_calls) chars += JSON.stringify(m.tool_calls).length;
+/** Characters of one part: text of text, reasoning and result parts, the JSON of a call; media counts nothing. */
+function partChars(p: Part): number {
+  if (p.type === 'text' || p.type === 'reasoning' || p.type === 'result') return String((p as { text?: unknown }).text ?? '').length;
+  if (p.type === 'call') {
+    const c = p as CallPart;
+    return c.tool.length + (c.invalid ?? JSON.stringify(c.args ?? {})).length;
   }
+  return 0;
+}
+
+/** Rough token estimate of a request: characters / 4 over message parts, tool calls and tool definitions. */
+export function estimateTokens(req: ModelRequest): number {
+  let chars = 0;
+  for (const m of req.messages) for (const p of m.parts) chars += partChars(p);
   if (req.tools?.length) chars += JSON.stringify(req.tools).length;
   return Math.ceil(chars / 4);
 }
 
-const turnOf = (req: ChatRequest) => 1 + req.messages.filter((m) => m.role === 'assistant').length;
-const offersTools = (req: ChatRequest) => (req.tools?.length ?? 0) > 0 && req.tool_choice !== 'none';
+const turnOf = (req: ModelRequest) => 1 + req.messages.filter((m) => m.role === 'assistant').length;
+const offersTools = (req: ModelRequest) => (req.tools?.length ?? 0) > 0 && req.toolMode !== 'none';
 
-function matches(when: RouteCondition, req: ChatRequest): boolean {
+function matches(when: RouteCondition, req: ModelRequest): boolean {
   if (when.hasTools !== undefined && offersTools(req) !== when.hasTools) return false;
   if (when.turnAtLeast !== undefined && turnOf(req) < when.turnAtLeast) return false;
   if (when.minEstTokens !== undefined || when.maxEstTokens !== undefined) {

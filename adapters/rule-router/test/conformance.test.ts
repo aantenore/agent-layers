@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { checkAdapter } from '@agent-layers/conformance';
+import { textMessage } from '@agent-layers/core';
 import { adapter } from '../src/index.ts';
 
-const user = (content: string) => ({ model: 'default', messages: [{ role: 'user' as const, content }] });
+const user = (text: string) => ({ model: 'default', messages: [textMessage('user', text)] });
 
 test('rule-router passes RouterPort conformance', async () => {
   const report = await checkAdapter(adapter, {

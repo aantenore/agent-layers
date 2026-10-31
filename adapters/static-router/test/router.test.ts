@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { testContext } from '@agent-layers/conformance';
 import { createStaticRouter } from '../src/index.ts';
 
-const req = (model: string) => ({ model, messages: [{ role: 'user' as const, content: 'hi' }] });
+const req = (model: string) => ({ model, messages: [{ role: 'user' as const, parts: [{ type: 'text' as const, text: 'hi' }] }] });
 
 test('agent mapping wins over alias and default', async () => {
   const router = createStaticRouter({ model: 'd', agents: { support: 'a' }, aliases: { fast: 'b' } });

@@ -1,4 +1,4 @@
-import { contentText, defineLimits, lastUserText, limitValue, type ChatRequest, type ChatTool } from '@agent-layers/core';
+import { defineLimits, lastUserText, limitValue, messageText, type ModelRequest, type ResultPart, type ToolInfo } from '@agent-layers/core';
 
 export interface MockRule {
   /** Regular expression (case-insensitive) tested on the last user message. */
@@ -13,9 +13,9 @@ export interface MockRule {
 
 /** What the mock model decided to say. */
 export interface Decision {
-  content: string | null;
-  /** Full tool name and JSON arguments of the call, when it calls a tool. */
-  call?: { name: string; arguments: string };
+  text: string;
+  /** Full tool name and arguments of the call, when it calls a tool. */
+  call?: { tool: string; args: Record<string, unknown> };
 }
 
 /** Configurable limits; see docs/limits.md. */
@@ -38,14 +38,14 @@ function fillValue(value: unknown, groups: readonly (string | undefined)[]): unk
   return value;
 }
 
-const offered = (tools: readonly ChatTool[], wanted: string) =>
-  tools.find((t) => t.function.name === wanted || t.function.name.split('__').pop() === wanted);
+const offered = (tools: readonly ToolInfo[], wanted: string) =>
+  tools.find((t) => t.name === wanted || t.name.split('__').pop() === wanted);
 
 /** The line `[1] (source) text` of a knowledge block, without its prefix. */
-function firstPassage(messages: ChatRequest['messages']): string | undefined {
+function firstPassage(messages: ModelRequest['messages']): string | undefined {
   for (const m of [...messages].reverse()) {
     if (m.role !== 'system' && m.role !== 'user') continue;
-    const text = contentText(m.content);
+    const text = messageText(m);
     if (!text.includes('<context type="knowledge"')) continue;
     const line = /^\[1\](?: \([^)\n]*\))? ?(.*)$/m.exec(text);
     if (line?.[1]) return line[1];
@@ -54,25 +54,28 @@ function firstPassage(messages: ChatRequest['messages']): string | undefined {
 }
 
 /** Chooses the answer: tool result, first matching rule, forced tool call, knowledge passage, then echo. */
-export function decide(req: ChatRequest, rules: readonly CompiledRule[], toolResultChars?: number): Decision {
+export function decide(req: ModelRequest, rules: readonly CompiledRule[], toolResultChars?: number): Decision {
   const last = req.messages.at(-1);
-  if (last?.role === 'tool') return { content: contentText(last.content).trim().slice(0, limitValue(LIMITS.toolResultChars, toolResultChars)) };
+  if (last?.role === 'tool') {
+    const text = last.parts.filter((p): p is ResultPart => p.type === 'result').map((p) => p.text).join('\n');
+    return { text: text.trim().slice(0, limitValue(LIMITS.toolResultChars, toolResultChars)) };
+  }
 
-  const tools = req.tool_choice === 'none' ? [] : (req.tools ?? []);
+  const mode = req.toolMode ?? 'auto';
+  const tools = mode === 'none' ? [] : (req.tools ?? []);
   const user = lastUserText(req.messages);
   for (const rule of rules) {
     const hit = rule.regex.exec(user);
     if (!hit) continue;
     const tool = rule.tool ? offered(tools, rule.tool) : undefined;
-    if (tool) return { content: null, call: { name: tool.function.name, arguments: JSON.stringify(fillValue(rule.args ?? {}, hit)) } };
-    if (rule.reply !== undefined) return { content: fill(rule.reply, hit) };
+    if (tool) return { text: '', call: { tool: tool.name, args: fillValue(rule.args ?? {}, hit) as Record<string, unknown> } };
+    if (rule.reply !== undefined) return { text: fill(rule.reply, hit) };
   }
 
-  const choice = req.tool_choice;
-  if (choice === 'required' || (typeof choice === 'object' && choice.type === 'function')) {
-    const tool = typeof choice === 'object' ? tools.find((t) => t.function.name === choice.function.name) : tools[0];
-    if (tool) return { content: null, call: { name: tool.function.name, arguments: '{}' } };
+  if (mode === 'required' || typeof mode === 'object') {
+    const tool = typeof mode === 'object' ? tools.find((t) => t.name === mode.tool) : tools[0];
+    if (tool) return { text: '', call: { tool: tool.name, args: {} } };
   }
 
-  return { content: firstPassage(req.messages) ?? `You said: ${user}` };
+  return { text: firstPassage(req.messages) ?? `You said: ${user}` };
 }

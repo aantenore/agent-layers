@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AdapterRegistry, noopTelemetry, type CallContext, type ChatRequest, type ModelPort } from '@agent-layers/core';
+import { AdapterRegistry, noopTelemetry, replyText, textMessage, type CallContext, type ModelPort, type ModelRequest } from '@agent-layers/core';
 import { adapter } from '../src/index.ts';
 
 const ctx = { name: 'mock', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
 const call: CallContext = { runId: 'r', agent: 'a' };
 const make = (options: Record<string, unknown>) => new AdapterRegistry().register(adapter).create('ModelPort', 'mock-model', options, ctx) as Promise<ModelPort>;
-const afterTool: ChatRequest = { model: 'mock', messages: [{ role: 'user', content: 'go' }, { role: 'tool', tool_call_id: 'c1', content: 'r'.repeat(50) }] };
+const afterTool: ModelRequest = {
+  model: 'mock',
+  messages: [textMessage('user', 'go'), { role: 'tool', parts: [{ type: 'result', callId: 'c1', ok: true, text: 'r'.repeat(50) }] }],
+};
 
 test('toolResultChars and latencyMs take effect (numeric strings, as from ${env:...})', async () => {
-  assert.equal((await (await make({})).chat(afterTool, call)).choices[0]!.message.content, 'r'.repeat(50));
-  assert.equal((await (await make({ toolResultChars: '10' })).chat(afterTool, call)).choices[0]!.message.content, 'r'.repeat(10));
+  assert.equal(replyText(await (await make({})).chat(afterTool, call)), 'r'.repeat(50));
+  assert.equal(replyText(await (await make({ toolResultChars: '10' })).chat(afterTool, call)), 'r'.repeat(10));
   const started = Date.now();
   await (await make({ latencyMs: '60' })).chat(afterTool, call);
   assert.ok(Date.now() - started >= 50);

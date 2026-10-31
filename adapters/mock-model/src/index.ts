@@ -1,5 +1,6 @@
 import {
-  contentText, defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type CallContext, type ChatChunk, type ChatRequest, type ChatResponse, type ModelPort, type Usage,
+  defineAdapter, limitProperties, limitValue, PORT_VERSIONS, replyToDeltas, type CallContext, type Message, type ModelDelta, type ModelPort, type ModelReply,
+  type ModelRequest, type Part,
 } from '@agent-layers/core';
 import { compileRules, decide, LIMITS, type Decision, type MockRule } from './script.ts';
 
@@ -30,6 +31,10 @@ function wait(ms: number, signal: AbortSignal | undefined): Promise<void> {
 
 const tokens = (chars: number) => Math.ceil(chars / 4);
 
+/** Characters of the text a message carries: text, reasoning and result parts. */
+const messageChars = (m: Message) =>
+  m.parts.reduce((sum, p) => sum + (p.type === 'text' || p.type === 'reasoning' || p.type === 'result' ? String((p as { text?: unknown }).text ?? '').length : 0), 0);
+
 /** Deterministic model for offline development and tests: no network, no randomness. */
 export function createMockModel(options: MockModelOptions = {}, name = 'mock-model'): ModelPort {
   const model = options.model ?? 'mock';
@@ -38,41 +43,37 @@ export function createMockModel(options: MockModelOptions = {}, name = 'mock-mod
   const toolResultChars = limitValue(LIMITS.toolResultChars, options.toolResultChars);
   let seq = 0;
 
-  async function answer(req: ChatRequest, ctx: CallContext): Promise<{ decision: Decision; response: ChatResponse }> {
+  async function answer(req: ModelRequest, ctx: CallContext): Promise<{ decision: Decision; reply: ModelReply }> {
     await wait(latencyMs, ctx.signal);
     const decision = decide(req, rules, toolResultChars);
     const n = ++seq;
     const { call } = decision;
-    const promptChars = req.messages.reduce((sum, m) => sum + contentText(m.content).length, 0);
-    const outputChars = (decision.content?.length ?? 0) + (call ? call.name.length + call.arguments.length : 0);
-    const usage: Usage = { prompt_tokens: tokens(promptChars), completion_tokens: tokens(outputChars) };
-    usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
-    const message: ChatResponse['choices'][number]['message'] = { role: 'assistant', content: decision.content };
-    if (call) message.tool_calls = [{ id: `call_${n}`, type: 'function', function: call }];
+    const promptChars = req.messages.reduce((sum, m) => sum + messageChars(m), 0);
+    const outputChars = decision.text.length + (call ? call.tool.length + JSON.stringify(call.args).length : 0);
+    const parts: Part[] = [];
+    if (decision.text) parts.push({ type: 'text', text: decision.text });
+    if (call) parts.push({ type: 'call', id: `call_${n}`, tool: call.tool, args: call.args });
     return {
       decision,
-      response: { id: `mock-${n}`, model, choices: [{ index: 0, message, finish_reason: call ? 'tool_calls' : 'stop' }], usage },
+      reply: {
+        id: `mock-${n}`, model, message: { role: 'assistant', parts }, finish: call ? 'tools' : 'end',
+        usage: { inputTokens: tokens(promptChars), outputTokens: tokens(outputChars) },
+      },
     };
   }
 
   return {
     name,
-    chat: async (req, ctx) => (await answer(req, ctx)).response,
-    async *stream(req, ctx): AsyncGenerator<ChatChunk> {
-      const { response } = await answer(req, ctx);
-      const choice = response.choices[0]!;
-      const base = { ...(response.id ? { id: response.id } : {}), model };
-      let first = true;
-      for (const word of choice.message.content?.match(/\s*\S+|\s+/g) ?? []) {
-        if (ctx.signal?.aborted) throw abortError();
-        yield { ...base, choices: [{ index: 0, delta: { ...(first ? { role: 'assistant' as const } : {}), content: word } }] };
-        first = false;
+    chat: async (req, ctx) => (await answer(req, ctx)).reply,
+    async *stream(req, ctx): AsyncGenerator<ModelDelta> {
+      const { reply } = await answer(req, ctx);
+      for (const delta of replyToDeltas(reply)) {
+        if (delta.type !== 'text') { yield delta; continue; }
+        for (const word of delta.text.match(/\s*\S+|\s+/g) ?? []) {
+          if (ctx.signal?.aborted) throw abortError();
+          yield { type: 'text', text: word };
+        }
       }
-      const calls = choice.message.tool_calls ?? [];
-      if (calls.length) {
-        yield { ...base, choices: [{ index: 0, delta: { ...(first ? { role: 'assistant' as const } : {}), tool_calls: calls.map((c, index) => ({ index, ...c })) } }] };
-      }
-      yield { ...base, choices: [{ index: 0, delta: {}, finish_reason: choice.finish_reason }], ...(response.usage ? { usage: response.usage } : {}) };
     },
   };
 }
