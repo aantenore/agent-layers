@@ -16,9 +16,9 @@ test('http-tools passes ToolPort conformance', async () => {
       },
       fixtures: {
         calls: [
-          { name: 'shout', args: { value: 'hello' }, expect: 'hello', isError: false },
-          { name: 'shout', args: {}, isError: true },
-          { name: 'status', args: { code: 503 }, expect: 'HTTP 503', isError: true },
+          { name: 'shout', args: { value: 'hello' }, expect: 'hello', ok: true },
+          { name: 'shout', args: {}, ok: false },
+          { name: 'status', args: { code: 503 }, expect: 'HTTP 503', ok: false },
         ],
       },
     });

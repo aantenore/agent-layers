@@ -21,9 +21,9 @@ test('maxResultChars, errorBodyChars and minSecretChars take effect when set; a 
         fail: { description: 'Fail', method: 'GET', url: `${api.url}/status/500` },
       },
     });
-    assert.match((await tools.callTool('big', {}, call)).content, /^x{10}\n\[truncated: 100 chars/);
-    assert.match((await tools.callTool('bigger', {}, call)).content, /^x{20}\n\[truncated/);
-    assert.equal((await tools.callTool('fail', {}, call)).content, 'HTTP 500 Internal Server Error: sta…');
+    assert.match((await tools.callTool('big', {}, call)).text, /^x{10}\n\[truncated: 100 chars/);
+    assert.match((await tools.callTool('bigger', {}, call)).text, /^x{20}\n\[truncated/);
+    assert.equal((await tools.callTool('fail', {}, call)).text, 'HTTP 500 Internal Server Error: sta…');
     const keyed = createHttpTools({ minSecretChars: 3, tools: { keyed: { description: 'Keyed', method: 'GET', url: `${api.url}/echo`, headers: { 'x-api-key': 'abc' } } } });
     assert.equal(((await keyed.callTool('keyed', {}, call)).data as { headers: Record<string, string> }).headers['x-api-key'], '[redacted]');
     // The default minimum (4) leaves a 3-character value alone.

@@ -1,4 +1,4 @@
-import { defineAdapter, limitProperties, limitSchema, limitValue, PORT_VERSIONS, type JsonSchema, type LimitValue, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec } from '@agent-layers/core';
+import { defineAdapter, limitProperties, limitSchema, limitValue, PORT_VERSIONS, type Attrs, type JsonSchema, type LimitValue, type Risk, type ToolPort, type ToolResult, type ToolSpec } from '@agent-layers/core';
 import { interpolate } from './env.ts';
 import { LIMITS } from './limits.ts';
 import { checkArgs, checkRequestSpec, defaultRisk, pathArgs, sendRequest, type HttpMethod, type RequestSpec } from './request.ts';
@@ -12,7 +12,9 @@ export interface HttpToolDef extends Omit<RequestSpec, 'method' | 'errorBodyChar
   /** JSON Schema of the arguments (default: derived from the path, query and header arguments). */
   schema?: Record<string, unknown>;
   /** Default: `read` for GET and HEAD, `write` otherwise. */
-  risk?: ToolRisk;
+  risk?: Risk;
+  /** Plain attributes a policy may read (owner, tags); copied to the tool spec. */
+  attrs?: Attrs;
 }
 
 /** Options, validated against `optionsSchema` before `create` runs. */
@@ -61,8 +63,8 @@ export function createHttpTools(options: HttpToolsOptions, { name = 'http-tools'
     tools.set(toolName, {
       request, schema,
       spec: {
-        name: toolName, description: def.description, inputSchema: schema, risk: def.risk ?? defaultRisk(method),
-        layer: 'tool', ...(def.auth ? { audience: def.auth.audience } : {}),
+        name: toolName, description: def.description, params: schema, risk: def.risk ?? defaultRisk(method),
+        layer: 'tool', ...(def.auth ? { audience: def.auth.audience } : {}), ...(def.attrs ? { attrs: def.attrs } : {}),
       },
     });
   }
@@ -71,9 +73,9 @@ export function createHttpTools(options: HttpToolsOptions, { name = 'http-tools'
     async listTools() {
       return [...tools.values()].map((t) => t.spec);
     },
-    async callTool(toolName, args, ctx): Promise<ToolOutcome> {
+    async callTool(toolName, args, ctx): Promise<ToolResult> {
       const tool = tools.get(toolName);
-      if (!tool) return { content: `Unknown tool: ${toolName}`, isError: true };
+      if (!tool) return { ok: false, text: `Unknown tool: ${toolName}` };
       const input = args ?? {};
       const invalid = checkArgs(tool.schema, input);
       if (invalid) return invalid;
@@ -112,7 +114,12 @@ export const adapter = defineAdapter<'ToolPort', HttpToolsOptions>({
             body: { enum: ['json', 'none'] },
             bodyArg: { type: 'string', minLength: 1 },
             schema: { type: 'object' },
-            risk: { enum: ['read', 'write', 'exec'] },
+            risk: { type: 'string', minLength: 1, description: 'read, write, exec, or a value added to the risk vocabulary' },
+            attrs: {
+              type: 'object',
+              additionalProperties: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }, strings] },
+              description: 'Plain attributes a policy may read',
+            },
             timeoutMs: limitSchema(LIMITS.toolTimeoutMs, { description: 'Time limit per request of this tool' }),
             maxResultChars: limitSchema(LIMITS.toolMaxResultChars, { description: 'Response text cap of this tool' }),
             auth: {
@@ -135,6 +142,7 @@ export const adapter = defineAdapter<'ToolPort', HttpToolsOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
+  ext: { produces: [] },
   create: (options, ctx) => createHttpTools(options, { name: ctx.name, env: ctx.env }),
 });
 

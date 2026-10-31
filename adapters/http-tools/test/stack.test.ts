@@ -69,7 +69,7 @@ async function runStack(target: Target) {
       const result = await (await stack.agent(agent)).run(`${agent} ${target.input}`);
       assert.equal(result.status, 'completed', agent);
       assert.equal(result.output, target.expected, agent);
-      assert.deepEqual(result.events?.map((e) => e.type).slice(0, 4), ['run_start', 'model_response', 'tool_call', 'tool_result'], agent);
+      assert.deepEqual(result.events?.map((e) => e.type).slice(0, 4), ['run.start', 'model.reply', 'tool.call', 'tool.result'], agent);
     }
     const names = (await stack.tools.listTools(stack.context({ agent: 'described' }))).map((t) => t.name);
     assert.ok(names.includes('api__decode') && names.includes('spec__decodeBase64'));

@@ -9,11 +9,12 @@ Declares HTTP endpoints as tools in the config, with no code. Each call is one r
   parameters (arrays repeat the key); `headerArgs` those sent as headers; with `body: "json"` the remaining arguments
   (or only `bodyArg`) are the JSON body. Arguments are validated against `schema` before anything is sent; without a
   `schema` one is derived from the placeholders and lists.
-- **Risk**: `read` for GET and HEAD, `write` otherwise, unless `risk` says otherwise.
+- **Risk**: `read` for GET and HEAD, `write` otherwise, unless `risk` says otherwise (a core value or one added to the
+  `risk` vocabulary). `attrs` (plain values a policy may read, such as an owner) are copied to the tool spec.
 - **Auth**: with `auth: { audience, scopes? }` the request carries `Authorization: Bearer <token>` from
   `ctx.credentials`. Without credentials, or when the token request fails, nothing is sent and the result is an error.
   The token (and the secret of a static `Authorization` header) is removed from the response before the model sees it.
-- **Results**: a non-2xx status is an error result with the start of the body. JSON is pretty-printed and returned as
+- **Results**: `{ ok, text, data? }`. A non-2xx status is a result with `ok: false` and the start of the body. JSON is pretty-printed and returned as
   `data` too; binary bodies are summarized; text is cut at `maxResultChars`. An unreachable host, a timeout and a
   cancelled call reject.
 
@@ -29,7 +30,7 @@ Limits accept `${env:NAME}`; `timeoutMs` and `maxResultChars` (also per tool) ac
 `agent-layers check` fails on the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 Per tool: `description`, `method`, `url` (absolute), `query`, `headerArgs`, `headers`, `body` (`json` or `none`),
-`bodyArg`, `schema`, `risk`, `timeoutMs`, `maxResultChars`, `auth`. `${env:NAME}` and `${env:NAME:-default}` in `url`
+`bodyArg`, `schema` (becomes the spec's `params`), `risk`, `attrs`, `timeoutMs`, `maxResultChars`, `auth`. `${env:NAME}` and `${env:NAME:-default}` in `url`
 and `headers` are resolved when the tools are created.
 
 ```json

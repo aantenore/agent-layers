@@ -26,9 +26,9 @@ test('live: declarative tools against httpbin', { timeout: 60_000 }, async (t) =
     options,
     fixtures: {
       calls: [
-        { name: 'decode', args: { value: 'cmVpbmxvb3A=' }, expect: 'reinloop', isError: false },
-        { name: 'status', args: { code: 418 }, expect: 'HTTP 418', isError: true },
-        { name: 'bearer', args: {}, isError: true }, // no credentials: nothing is sent
+        { name: 'decode', args: { value: 'cmVpbmxvb3A=' }, expect: 'reinloop', ok: true },
+        { name: 'status', args: { code: 418 }, expect: 'HTTP 418', ok: false },
+        { name: 'bearer', args: {}, ok: false }, // no credentials: nothing is sent
       ],
     },
   });
@@ -40,6 +40,6 @@ test('live: declarative tools against httpbin', { timeout: 60_000 }, async (t) =
   assert.deepEqual(body.json, { title: 'hi' });
   assert.deepEqual(body.args, { dry: ['true'] });
   const ok = await tools.callTool('bearer', {}, ctx({ credentials: { token: async (audience) => `token-for-${audience}` } }));
-  assert.equal(ok.isError, undefined);
-  assert.equal(ok.content.includes('token-for-tools-api'), false);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.text.includes('token-for-tools-api'), false);
 });

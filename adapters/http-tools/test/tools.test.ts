@@ -18,14 +18,14 @@ test('path arguments are URL-encoded, query arrays repeat, header arguments are 
       search: { description: 'Search', method: 'GET', url: `${url}/echo`, query: ['q', 'tag'], headerArgs: ['x-trace'], headers: { 'x-api-key': 'static-key' } },
     },
   });
-  assert.equal((await tools.callTool('text', { value: 'a/b c' }, ctx())).content, 'a/b c');
+  assert.equal((await tools.callTool('text', { value: 'a/b c' }, ctx())).text, 'a/b c');
   const out = await tools.callTool('search', { q: 'hi', tag: ['a', 'b'], 'x-trace': 't1' }, ctx());
   const echoed = out.data as { query: object; headers: Record<string, string> };
   assert.deepEqual(echoed.query, { q: ['hi'], tag: ['a', 'b'] });
   assert.equal(echoed.headers['x-trace'], 't1');
   assert.equal(echoed.headers['x-api-key'], '[redacted]'); // a static header value never comes back
   assert.equal(api.requests.at(-1)!.headers['x-api-key'], 'static-key');
-  assert.equal(JSON.parse(out.content).method, 'GET');
+  assert.equal(JSON.parse(out.text).method, 'GET');
 }));
 
 test('JSON body: the remaining arguments, or only bodyArg', () => withApi(async (url) => {
@@ -49,10 +49,10 @@ test('arguments are validated before anything is sent', () => withApi(async (url
     },
   });
   const wrong = await tools.callTool('get', { id: 'x', limit: 'many' }, ctx());
-  assert.equal(wrong.isError, true);
-  assert.match(wrong.content, /Invalid arguments: args\.limit/);
-  assert.match((await tools.callTool('derived', {}, ctx())).content, /args\.id: required/);
-  assert.match((await tools.callTool('derived', { id: 'a', other: 1 }, ctx())).content, /unknown property/);
+  assert.equal(wrong.ok, false);
+  assert.match(wrong.text, /Invalid arguments: args\.limit/);
+  assert.match((await tools.callTool('derived', {}, ctx())).text, /args\.id: required/);
+  assert.match((await tools.callTool('derived', { id: 'a', other: 1 }, ctx())).text, /unknown property/);
   assert.equal(api.requests.length, 0);
   const specs = await tools.listTools(ctx());
   assert.deepEqual(specs.map((s) => [s.name, s.risk, s.layer]), [['get', 'read', 'tool'], ['derived', 'read', 'tool']]);
@@ -78,12 +78,12 @@ test('non-2xx answers are error results; binary, empty and large bodies are summ
     },
   });
   const err = await tools.callTool('status', { code: 418 }, ctx());
-  assert.equal(err.isError, true);
-  assert.match(err.content, /^HTTP 418/);
-  assert.match(err.content, /status 418/);
-  assert.match((await tools.callTool('bytes', {}, ctx())).content, /^HTTP 200: 32 bytes of image\/png \(not shown\)$/);
-  assert.equal((await tools.callTool('empty', {}, ctx())).content, 'HTTP 204 (no content)');
-  assert.equal((await tools.callTool('big', {}, ctx())).content, 'xxxxxxxxxx\n[truncated: 100 chars in total]');
+  assert.equal(err.ok, false);
+  assert.match(err.text, /^HTTP 418/);
+  assert.match(err.text, /status 418/);
+  assert.match((await tools.callTool('bytes', {}, ctx())).text, /^HTTP 200: 32 bytes of image\/png \(not shown\)$/);
+  assert.equal((await tools.callTool('empty', {}, ctx())).text, 'HTTP 204 (no content)');
+  assert.equal((await tools.callTool('big', {}, ctx())).text, 'xxxxxxxxxx\n[truncated: 100 chars in total]');
 }));
 
 test('auth: bearer token from the caller credentials; without credentials nothing is sent', () => withApi(async (url, api) => {
@@ -91,17 +91,17 @@ test('auth: bearer token from the caller credentials; without credentials nothin
   const tools = createHttpTools({ tools: { me: { description: 'me', method: 'GET', url: `${url}/echo`, auth: { audience: 'tools-api', scopes: ['read'] } } } });
   assert.equal((await tools.listTools(ctx()))[0]!.audience, 'tools-api');
   const refused = await tools.callTool('me', {}, ctx());
-  assert.equal(refused.isError, true);
-  assert.match(refused.content, /needs credentials for audience "tools-api"/);
+  assert.equal(refused.ok, false);
+  assert.match(refused.text, /needs credentials for audience "tools-api"/);
   const broken = await tools.callTool('me', {}, ctx({ credentials: { token: async () => { throw new Error('idp down'); } } }));
-  assert.match(broken.content, /idp down/);
+  assert.match(broken.text, /idp down/);
   assert.equal(api.requests.length, 0);
   const ok = await tools.callTool('me', {}, ctx({ credentials: { token: async (audience, opts) => { asked.push([audience, opts?.scopes]); return 'tok-123'; } } }));
-  assert.equal(ok.isError, undefined);
+  assert.equal(ok.ok, true);
   assert.equal(api.requests[0]!.headers.authorization, 'Bearer tok-123');
   assert.deepEqual(asked, [['tools-api', ['read']]]);
   // The echo API returns the Authorization header; the token must not come back.
-  assert.equal(ok.content.includes('tok-123'), false);
+  assert.equal(ok.text.includes('tok-123'), false);
   assert.equal((ok.data as { headers: { authorization: string } }).headers.authorization, 'Bearer [redacted]');
 }));
 
@@ -113,7 +113,7 @@ test('a static Authorization header is redacted too, and ${env:X} resolves from 
   const out = await tools.callTool('me', {}, ctx());
   assert.equal(api.requests[0]!.headers.authorization, 'Bearer static-secret');
   assert.equal(api.requests[0]!.headers['x-api-key'], 'dev-key');
-  assert.equal(out.content.includes('static-secret'), false);
+  assert.equal(out.text.includes('static-secret'), false);
 }));
 
 test('a missing environment variable fails when the tools are built', () => {
@@ -123,7 +123,7 @@ test('a missing environment variable fails when the tools are built', () => {
 test('unknown tool is an error result; unreachable host and cancellation reject', async () => {
   const tools = createHttpTools({ tools: { t: { description: 't', method: 'GET', url: 'http://127.0.0.1:9/x', timeoutMs: 2000 } } });
   const unknown = await tools.callTool('nope', {}, ctx());
-  assert.equal(unknown.isError, true);
+  assert.equal(unknown.ok, false);
   await assert.rejects(tools.callTool('t', {}, ctx()));
   const ac = new AbortController();
   ac.abort();
@@ -144,17 +144,17 @@ test('path parameters made only of dots are rejected and nothing is sent', () =>
   const tools = createHttpTools({ tools: { item: { description: 'Item', method: 'GET', url: `${url}/api/items/{id}` }, deep: { description: 'Deep', method: 'GET', url: `${url}/api/{a}/{b}` } } });
   for (const bad of ['..', '.', '...']) {
     const out = await tools.callTool('item', { id: bad }, ctx());
-    assert.equal(out.isError, true);
-    assert.match(out.content, /Invalid path parameter\(s\): id/);
+    assert.equal(out.ok, false);
+    assert.match(out.text, /Invalid path parameter\(s\): id/);
   }
-  assert.equal((await tools.callTool('deep', { a: 'x', b: '..' }, ctx())).isError, true);
+  assert.equal((await tools.callTool('deep', { a: 'x', b: '..' }, ctx())).ok, false);
   assert.equal(api.requests.length, 0);
   // Encoded traversal stays a single, harmless segment; dots inside a value are fine.
-  assert.equal((await tools.callTool('item', { id: '%2e%2e' }, ctx())).isError, undefined);
+  assert.equal((await tools.callTool('item', { id: '%2e%2e' }, ctx())).ok, true);
   assert.equal(api.requests[0]!.path, '/api/items/%252e%252e');
-  assert.equal((await tools.callTool('item', { id: 'a/../b' }, ctx())).isError, undefined);
+  assert.equal((await tools.callTool('item', { id: 'a/../b' }, ctx())).ok, true);
   assert.equal(api.requests[1]!.path, '/api/items/a%2F..%2Fb');
-  assert.equal((await tools.callTool('item', { id: 'v1.2' }, ctx())).isError, undefined);
+  assert.equal((await tools.callTool('item', { id: 'v1.2' }, ctx())).ok, true);
   assert.equal(api.requests[2]!.path, '/api/items/v1.2');
 }));
 
@@ -164,7 +164,7 @@ test('placeholders are not allowed in the scheme or host', () => {
   }
 });
 
-test('every static header value, header argument value and the token are redacted from content and data', () => withApi(async (url) => {
+test('every static header value, header argument value and the token are redacted from text and data', () => withApi(async (url) => {
   const tools = createHttpTools({
     tools: {
       me: {
@@ -183,7 +183,7 @@ test('every static header value, header argument value and the token are redacte
 test('a secret that a server echoes JSON-escaped is redacted too', () => withApi(async (url) => {
   const tools = createHttpTools({ tools: { me: { description: 'me', method: 'GET', url: `${url}/echo`, headers: { 'x-api-key': 'pa"ss\\word' } } } });
   const out = await tools.callTool('me', {}, ctx());
-  assert.equal(out.content.includes('pa\\"ss'), false);
+  assert.equal(out.text.includes('pa\\"ss'), false);
   assert.equal((out.data as { headers: Record<string, string> }).headers['x-api-key'], '[redacted]');
 }));
 
@@ -195,11 +195,11 @@ test('a secret echoed as \\u escapes is masked in text and data, for successes a
     },
   });
   const ok = await tools.callTool('ok', {}, ctx({ credentials: { token: async () => 'tok-xyz-789' } }));
-  assert.equal(ok.isError, undefined);
+  assert.equal(ok.ok, true);
   for (const secret of ['key-from-env-123', 'tok-xyz-789']) assert.equal(JSON.stringify(ok).includes(secret), false, secret);
   assert.deepEqual(ok.data, { key: '[redacted]', bearer: 'Bearer [redacted]' });
   const bad = await tools.callTool('bad', {}, ctx());
-  assert.equal(bad.isError, true);
-  assert.equal(bad.content.includes('key-from-env-123'), false);
-  assert.match(bad.content, /\[redacted\]/);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.text.includes('key-from-env-123'), false);
+  assert.match(bad.text, /\[redacted\]/);
 }));
