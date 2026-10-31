@@ -2,10 +2,12 @@
 // through the gateway, with failure injection in production and layer attribution from the recorded telemetry.
 //
 //   node --conditions=source scripts/slice.mjs [--only prototype,pilot,production] [--minimal] [--keep]
+//     [--inject reinloop,pydantic|none] [--inject-model fast]
 //
 // Starts what each step needs (reference services with docker compose, the gateway, the Python agent) with bounded
 // timeouts and stops all of it at the end, volumes included; --keep leaves the services up. --minimal asks only the tool
-// question, on reinloop and Pydantic AI, skips the comparison cell and injects the faults on reinloop only. Results go to
+// question, on reinloop and Pydantic AI, skips the comparison cell and injects the faults on reinloop only; --inject
+// names the runtimes the faults are injected on and --inject-model their model group. Results go to
 // examples/slice/.agent-layers/slice-results.json and .md. Needs uv (the Python agent runs in every tier); pilot and
 // production also need Docker and Ollama serving qwen3:4b on the host.
 import { spawn, spawnSync } from 'node:child_process';
@@ -14,6 +16,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { request } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { settledCount } from './lib/settle.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SLICE = join(ROOT, 'examples', 'slice');
@@ -28,6 +31,8 @@ const onlyAt = args.indexOf('--only');
 const only = new Set((args.find((a) => a.startsWith('--only='))?.slice(7) ?? (onlyAt >= 0 ? args[onlyAt + 1] : undefined) ?? 'prototype,pilot,production').split(','));
 const keep = args.includes('--keep');
 const minimal = args.includes('--minimal');
+/** Value of `--name value` or `--name=value`. */
+const opt = (name) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3) ?? (args.includes(`--${name}`) ? args[args.indexOf(`--${name}`) + 1] : undefined);
 
 const PORTS = { gateway: Number(process.env.SLICE_GATEWAY_PORT ?? 8799), agent: Number(process.env.SLICE_AGENT_PORT ?? 9109) };
 const GW = `http://127.0.0.1:${PORTS.gateway}`;
@@ -43,6 +48,8 @@ const STEP = { service: 300, start: 90_000, ask: 240_000 };
 // Real-model cells use the gateway's `hosted` group when a hosted model is configured in the environment (for example
 // `node --env-file=.env ...`), else the local `fast` group. Values are never printed.
 const REAL_MODEL = process.env.HOSTED_MODEL ? 'hosted' : 'fast';
+// Model group of the fault injections (--inject-model), so faults can run on the local model while the cells use the hosted one.
+const INJECT_MODEL = opt('inject-model') ?? REAL_MODEL;
 
 const [{ scoreLayers }, { ATTR, SPAN }] = await Promise.all([import('@agent-layers/adapter-layer-signals'), import('@agent-layers/core')]).catch(() => {
   console.error('run with: node --conditions=source scripts/slice.mjs');
@@ -132,10 +139,13 @@ async function gateway(profile, cell, env = {}) {
   return p;
 }
 
+/** The illustrative prices of the in-process runtimes (the `prototype` profile), so the Python agent's runs are priced alike. */
+const PRICING = JSON.stringify(JSON.parse(readFileSync(join(SLICE, 'agent-layers.json'), 'utf8')).profiles.prototype.layers.runtime.options.pricing);
+
 async function pythonAgent() {
   const p = start('python agent', PYTHON, ['-m', 'agent_layers_pydantic_ai'], {
     cwd: PY_DIR,
-    env: { AGENT_FILE: join(SLICE, 'agents', 'assistant.md'), GATEWAY_URL: GW, A2A_PORT: String(PORTS.agent), MODEL_TIMEOUT_S: '180' },
+    env: { AGENT_FILE: join(SLICE, 'agents', 'assistant.md'), GATEWAY_URL: GW, A2A_PORT: String(PORTS.agent), MODEL_TIMEOUT_S: '180', MODEL_PRICING: PRICING },
   });
   await healthy(`http://127.0.0.1:${PORTS.agent}/healthz`, p);
   return p;
@@ -191,21 +201,15 @@ function attribute(recs) {
   return { status, reason, scores: Object.fromEntries(scores.map((s) => [s.layer, { value: s.value, reason: s.reason }])), attributed: blamed?.layer ?? 'none', tokens, spans: recs.filter((r) => r.type === 'span').length };
 }
 
-/** Spans of the trace in Jaeger, once the count stops growing (the OTLP adapter exports every 2 s). */
-async function jaegerSpans(traceId, expected) {
-  let last = -1;
-  for (let i = 0; i < 15; i++) {
-    let count = 0;
-    try {
-      const res = await fetch(`http://localhost:16686/api/v3/traces/${traceId}`, { signal: AbortSignal.timeout(3000) });
-      if (res.ok) count = ((await res.json()).result?.resourceSpans ?? []).flatMap((r) => r.scopeSpans.flatMap((s) => s.spans)).length;
-    } catch { /* not exported yet */ }
-    if (count && (count >= expected || count === last)) return count;
-    last = count;
-    await sleep(1500);
-  }
-  return Math.max(last, 0);
-}
+/**
+ * Spans of the trace in Jaeger. They arrive in steps: the OTLP adapter exports every 2 s (`intervalMs`) and the
+ * collector batches for 1 s, so a long run shows its early spans before the rest. The count is read until it reaches
+ * the telemetry file's count, or stays the same for longer than that path (5 s), or 30 s pass.
+ */
+const jaegerSpans = (traceId, expected) => settledCount(async () => {
+  const res = await fetch(`http://localhost:16686/api/v3/traces/${traceId}`, { signal: AbortSignal.timeout(3000) });
+  return res.ok ? ((await res.json()).result?.resourceSpans ?? []).flatMap((r) => r.scopeSpans.flatMap((s) => s.spans)).length : 0;
+}, { expected, quietMs: 5000, deadlineMs: 30_000, sleep });
 
 // ---------------------------------------------------------------- the matrix
 
@@ -222,6 +226,8 @@ const RUNTIMES = [
 /** What a run covers: everything, or with --minimal one question on the two production-capable runtimes. */
 const ASKED = minimal ? QUESTIONS.filter((q) => q.id === 'tool') : QUESTIONS;
 const RUN_ON = minimal ? RUNTIMES.filter((r) => r.id !== 'basic') : RUNTIMES;
+/** Runtimes the faults are injected on: --inject, else reinloop with --minimal, else both production runtimes. */
+const INJECT_ON = (opt('inject') ?? (minimal ? 'reinloop' : 'reinloop,pydantic')).split(',').flatMap((id) => RUNTIMES.filter((r) => r.id === id && id !== 'basic'));
 const results = { started: new Date().toISOString(), mode: minimal ? 'minimal' : 'full', cells: [], checks: [], security: [], failures: [], diffs: {}, skipped: [] };
 
 function profileFor(tier, runtime) {
@@ -322,11 +328,11 @@ async function inject(runtime) {
   const record = async (i) => {
     const r = await ask(await tokens('production')[i.user](), i.text);
     const a = attribute(records(cell, r.traceId));
-    results.failures.push({ runtime: runtime.id, injection: i.id, expected: i.expected, ...r, ...a, identified: a.attributed === i.expected });
+    results.failures.push({ runtime: runtime.id, model: MODELS[INJECT_MODEL], injection: i.id, expected: i.expected, ...r, ...a, identified: a.attributed === i.expected });
     log(`  ${i.id}: ${r.state}, attributed ${a.attributed} (expected ${i.expected}) trace ${r.traceId}`);
   };
   try {
-    let gw = await gateway(profile, cell, { SLICE_MODEL: REAL_MODEL });
+    let gw = await gateway(profile, cell, { SLICE_MODEL: INJECT_MODEL });
     try {
       await record(INJECTIONS[0]);
       await record(INJECTIONS[1]);
@@ -335,7 +341,7 @@ async function inject(runtime) {
     } finally {
       await stop(gw);
     }
-    gw = await gateway(profile, cell, { APPEND: '1', SLICE_MODEL: REAL_MODEL, GATEWAY_URL: 'http://127.0.0.1:9/v1' });
+    gw = await gateway(profile, cell, { APPEND: '1', SLICE_MODEL: INJECT_MODEL, GATEWAY_URL: 'http://127.0.0.1:9/v1' });
     try { await record(INJECTIONS[3]); } finally { await stop(gw); }
   } finally {
     await stop(agent);
@@ -392,7 +398,7 @@ try {
     await productionExtras();
     if (!minimal) results.skipped.push({ cell: 'production × basic-runtime', why: 'basic-runtime is a prototype-tier adapter: the readiness gate refuses it (see check production-basic)' });
     for (const rt of RUN_ON.filter((r) => r.id !== 'basic')) await runCell('production', rt);
-    for (const rt of RUN_ON.filter((r) => r.id !== 'basic' && (!minimal || r.id === 'reinloop'))) await inject(rt);
+    for (const rt of INJECT_ON) await inject(rt);
   }
 } catch (err) {
   console.error(err instanceof Error ? err.stack : String(err));
