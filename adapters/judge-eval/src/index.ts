@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
-  AdapterRegistry, defineAdapter, limitProperties, limitValue, noopTelemetry, packageLoader, PORT_VERSIONS,
-  type AdapterContext, type CallContext, type ChatRequest, type EvalScore, type EvaluatorPort, type ModelPort, type TelemetryPort,
+  AdapterRegistry, ATTR, defineAdapter, EXT_KEY, extNamespace, limitProperties, limitValue, messageText, noopTelemetry, packageLoader,
+  PORT_VERSIONS, replyText, RESERVED_NAMESPACES, textMessage,
+  type AdapterContext, type CallContext, type Ext, type EvalScore, type EvaluatorPort, type ModelPort, type ModelRequest, type RunInput, type TelemetryPort,
 } from '@agent-layers/core';
 import { LIMITS } from './limits.ts';
 
@@ -31,8 +32,8 @@ export interface JudgeEvalOptions {
   maxTokens?: number;
   /** Characters of the judge's reason kept in the score (default 300). */
   maxReasonChars?: number;
-  /** Passed through to the backend, e.g. `{ "response_format": { "type": "json_object" } }`. */
-  extra?: Record<string, unknown>;
+  /** Request `ext` for the judge model's adapter; every key is in that adapter's namespace, e.g. `{ "openai.seed": 7 }`. */
+  ext?: Ext;
   /** When the judge fails or answers unusably: score 0 on the `eval` layer (default), or reject. */
   onError?: 'score' | 'throw';
 }
@@ -56,6 +57,19 @@ const SYSTEM = [
 ].join(' ');
 
 const truncate = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
+/** Problems of request `ext` keys: not namespaced, or in a namespace the core reserves. */
+export function judgeExtProblems(ext: Ext | undefined): string[] {
+  return Object.keys(ext ?? {}).flatMap((key) => {
+    const ns = extNamespace(key);
+    if (!ns) return [`ext key "${key}" is not namespaced (<namespace>.<name>)`];
+    return RESERVED_NAMESPACES.includes(ns) ? [`ext key "${key}" is in the namespace "${ns}", which the core reserves`] : [];
+  });
+}
+
+/** The case input as text: the string, or the messages of a conversation as `role: text` lines. */
+const inputText = (input: RunInput): string =>
+  typeof input === 'string' ? input : input.messages.map((m) => `${m.role}: ${messageText(m)}`).join('\n');
 
 /**
  * The judge reply, accepted only when the whole text is one JSON object with exactly `score` (a number from 0 to 1)
@@ -81,6 +95,8 @@ export function createJudgeEval(options: JudgeEvalOptions, deps: JudgeEvalDeps):
   const maxReasonChars = limitValue(LIMITS.maxReasonChars, options.maxReasonChars);
   const telemetry = deps.telemetry ?? noopTelemetry;
   const failed = (reason: string): EvalScore[] => [{ metric, value: 0, layer: 'eval', reason }];
+  const extProblems = judgeExtProblems(options.ext);
+  if (extProblems.length) throw new TypeError(`judge-eval ext: ${extProblems.join('; ')}`);
 
   return {
     name: deps.name ?? 'judge-eval',
@@ -91,7 +107,7 @@ export function createJudgeEval(options: JudgeEvalOptions, deps: JudgeEvalDeps):
       const fence = (deps.fence ?? newFence)();
       const clean = (v: string) => { let out = v; while (out.includes(fence)) out = out.replaceAll(fence, ''); return out; };
       const material = {
-        task: clean(c.input),
+        task: clean(inputText(c.input)),
         ...(c.expected !== undefined ? { reference: clean(typeof c.expected === 'string' ? c.expected : JSON.stringify(c.expected)) } : {}),
         answer: clean(run.output ?? ''),
         run_status: clean(String(run.status)),
@@ -101,19 +117,18 @@ export function createJudgeEval(options: JudgeEvalOptions, deps: JudgeEvalDeps):
         `Fence marker: ${fence}`,
         `${fence}\n${JSON.stringify(material)}\n${fence}`,
       ].join('\n\n');
-      const req: ChatRequest = {
+      const req: ModelRequest = {
         model: options.model,
-        messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }],
-        temperature: options.temperature ?? 0,
-        ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
-        ...(options.extra ? { extra: options.extra } : {}),
+        messages: [textMessage('system', SYSTEM), textMessage('user', prompt)],
+        settings: { temperature: options.temperature ?? 0, ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}) },
+        ...(options.ext ? { ext: options.ext } : {}),
       };
       const ctx: CallContext = { runId: run.runId, agent: 'judge-eval', telemetry };
       try {
-        const text = await telemetry.span('judge.score', { 'agent.layer': 'eval', 'eval.metric': metric, 'gen_ai.request.model': options.model }, async (span) => {
+        const text = await telemetry.span('judge-eval.score', { [ATTR.layer]: 'eval', 'judge-eval.metric': metric, [ATTR.modelRequested]: options.model }, async (span) => {
           const res = await deps.model.chat(req, ctx);
-          span.setAttributes({ 'gen_ai.response.model': res.model });
-          return res.choices[0]?.message.content ?? '';
+          span.setAttributes({ [ATTR.modelUsed]: res.model });
+          return replyText(res);
         });
         const judgement = parseJudgement(text, maxReasonChars);
         if (!judgement) {
@@ -152,7 +167,7 @@ export const adapter = defineAdapter<'EvaluatorPort', JudgeEvalOptions>({
       criteria: { type: 'string', minLength: 1 },
       metric: { type: 'string', minLength: 1 },
       temperature: { type: 'number', minimum: 0 },
-      extra: { type: 'object' },
+      ext: { type: 'object', propertyNames: { pattern: EXT_KEY.source } },
       onError: { enum: ['score', 'throw'] },
       ...limitProperties(LIMITS, { maxTokens: 'Limit for the judge answer', maxReasonChars: 'Characters of the judge reason kept in the score' }),
     },

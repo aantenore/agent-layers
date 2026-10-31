@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AdapterRegistry, noopTelemetry, type ChatResponse, type ModelPort } from '@agent-layers/core';
+import { AdapterRegistry, noopTelemetry, type ModelPort, type ModelReply } from '@agent-layers/core';
 import { adapter, createJudgeEval, parseJudgement } from '../src/index.ts';
 
 const ctx = { name: 'judge', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
-const reply = (content: string): ChatResponse => ({ model: 'judge-x', choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
+const reply = (content: string): ModelReply => ({ model: 'judge-x', message: { role: 'assistant', parts: [{ type: 'text', text: content }] }, finish: 'end' });
 const model: ModelPort = { name: 'stub', chat: async () => reply(`{"score":1,"reason":"${'r'.repeat(50)}"}`) };
 
 test('maxReasonChars truncates the reason', async () => {
@@ -15,7 +15,7 @@ test('maxReasonChars truncates the reason', async () => {
 
 test('maxTokens reaches the model request', async () => {
   const seen: (number | undefined)[] = [];
-  const spy: ModelPort = { name: 'spy', chat: async (req) => { seen.push(req.max_tokens); return reply('{"score":1,"reason":"ok"}'); } };
+  const spy: ModelPort = { name: 'spy', chat: async (req) => { seen.push(req.settings?.maxOutputTokens); return reply('{"score":1,"reason":"ok"}'); } };
   await createJudgeEval({ model: 'j', maxTokens: 64 }, { model: spy }).score({ id: 'c', input: 'q' }, { runId: 'r', output: 'a', status: 'completed' });
   assert.deepEqual(seen, [64]);
 });
@@ -28,4 +28,10 @@ test('limits from ${env:...} are coerced to numbers; out-of-range values are rej
   for (const bad of [{ maxTokens: 0 }, { maxTokens: 'unbounded' }, { maxReasonChars: 0 }, { maxReasonChars: 'unbounded' }]) {
     await assert.rejects(registry.create('EvaluatorPort', 'judge-eval', { model: 'j', backend, ...bad }, ctx), new RegExp(Object.keys(bad)[0]!), JSON.stringify(bad));
   }
+});
+
+test('ext in the options must have namespaced keys', async () => {
+  const registry = new AdapterRegistry().register(adapter);
+  await assert.rejects(registry.create('EvaluatorPort', 'judge-eval', { model: 'j', backend: { adapter: 'x' }, ext: { seed: 1 } }, ctx), /ext/);
+  await assert.rejects(registry.create('EvaluatorPort', 'judge-eval', { model: 'j', backend: { adapter: 'x' }, extra: { seed: 1 } }, ctx), /extra/);
 });

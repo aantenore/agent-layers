@@ -18,13 +18,17 @@ out`), never error text. Set `onError: "throw"` to reject instead.
 `ctx.stack()`): the stack's guards, cache, router and token accounting apply, and knowledge is not injected. `backend`
 names a ModelPort adapter, created like any other (`openai-compatible`, `mock-model`, ...), used only as a fallback:
 when the evaluator is created outside a stack, or the stack has no model. Outside a stack, `backend` is required. The
-judge call is a span on the `eval` layer with the model name and no content. From code, pass any ModelPort, for
+judge call is a span `judge-eval.score` on the `eval` layer with the requested and used model (`agent.model.requested`, `agent.model.used`), the metric (`judge-eval.metric`) and no content. From code, pass any ModelPort, for
 example the stack's own:
 
 ```ts
 import { createJudgeEval } from '@agent-layers/adapter-judge-eval';
 const judge = createJudgeEval({ model: 'gpt-4o-mini', criteria: 'Answers in one sentence' }, { model: stack.model, telemetry: stack.telemetry });
 ```
+
+The request is a `ModelRequest`: a system and a user message, `settings` with `temperature` and `maxOutputTokens`, and
+the configured `ext`. The verdict is read from the text of the reply. A case whose `input` is a conversation
+(`{ messages }`) is shown to the judge as `role: text` lines.
 
 ## Options
 
@@ -35,10 +39,14 @@ const judge = createJudgeEval({ model: 'gpt-4o-mini', criteria: 'Answers in one 
 | `criteria` | string | correct, relevant, consistent with the reference | What a good answer is |
 | `metric` | string | `"judge"` | Metric name of the score |
 | `temperature` | number | 0 | Sampling temperature |
-| `maxTokens` | integer | backend default | Limit for the judge answer |
+| `maxTokens` | integer | backend default | Limit for the judge answer (`settings.maxOutputTokens`) |
 | `maxReasonChars` | integer | `300` | Characters of the judge reason kept in the score |
-| `extra` | object | none | Passed to the backend, e.g. `{ "response_format": { "type": "json_object" } }` |
+| `ext` | object | none | Request `ext` for the judge model's adapter; every key is namespaced by that adapter, e.g. `{ "openai.seed": 7 }` |
 | `onError` | `"score"` \| `"throw"` | `"score"` | Score 0 on the `eval` layer, or reject |
+
+`ext` replaces the former `extra` option, which is no longer accepted. Keys must be `<namespace>.<name>` and outside the
+namespaces the core reserves (`sdk`, `agent`, `run`, `model`, `tool`); the keys are checked when the evaluator is
+created. The adapter writes no `ext` of its own, so it declares none.
 
 Limits accept `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 

@@ -22,7 +22,7 @@ test('a backend that is not installed is reported at creation', async () => {
 });
 
 test('inside a stack the judge uses the governed stack model; backend is only the fallback', async () => {
-  const { compose, recordingTelemetry, resolveProfile } = await import('@agent-layers/core');
+  const { compose, recordingTelemetry, resolveProfile, SPAN } = await import('@agent-layers/core');
   const { adapter: mockModel } = await import('@agent-layers/adapter-mock-model');
   const records: { name: string; layer: string }[] = [];
   const stack = await compose(resolveProfile({
@@ -34,7 +34,7 @@ test('inside a stack the judge uses the governed stack model; backend is only th
   try {
     const [score] = await stack.ports.eval[0]!.score({ id: 'a', input: 'q' }, { runId: 'r', output: 'a', status: 'completed' });
     assert.equal(score!.reason, 'stack model');
-    assert.ok(records.some((r) => r.name === 'chat' && r.layer === 'llm'), 'the judge call is a governed llm span');
+    assert.ok(records.some((r) => r.name === SPAN.modelCall && r.layer === 'llm'), 'the judge call is a governed llm span');
   } finally {
     await stack.close();
   }
