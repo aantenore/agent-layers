@@ -1,0 +1,70 @@
+# L7 gateway: LiteLLM proxy (OpenAI-compatible) with an exact-match response cache on Valkey (Redis protocol).
+# The LiteLLM config is inlined (`configs.*.content`) so this file has no relative bind mounts and keeps working when
+# several layer compose files are merged with multiple -f.
+name: l7-cache-router
+
+services:
+  valkey:
+    image: valkey/valkey:8.1.11-alpine
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-v1.83.14-stable
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${GATEWAY_KEY:-sk-local-change-me}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:4000:4000"
+    configs:
+      - source: litellm_config
+        target: /app/config.yaml
+    depends_on:
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+configs:
+  litellm_config:
+    content: |
+      # Model groups: callers send `model: "default"` (or "fallback-test") to the gateway.
+      # Ollama runs on the host; change `ollama_chat/qwen3:4b` to serve another model.
+      model_list:
+        - model_name: default
+          litellm_params:
+            model: ollama_chat/qwen3:4b
+            api_base: http://host.docker.internal:11434
+        # Primary points to a model that does not exist, so every request falls back to `default`.
+        - model_name: fallback-test
+          litellm_params:
+            model: ollama_chat/missing-model-for-fallback-test
+            api_base: http://host.docker.internal:11434
+
+      router_settings:
+        num_retries: 0
+        fallbacks:
+          - fallback-test: ["default"]
+
+      litellm_settings:
+        cache: true
+        cache_params:
+          type: redis
+          host: valkey
+          port: 6379
+          ttl: 600
+
+      general_settings:
+        master_key: os.environ/LITELLM_MASTER_KEY
