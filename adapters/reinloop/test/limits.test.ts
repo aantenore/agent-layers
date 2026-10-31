@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AdapterRegistry, compose, noopTelemetry, resolveProfile, type CallContext, type StackConfig } from '@agent-layers/core';
+import { AdapterRegistry, compose, noMappings, noopTelemetry, resolveProfile, type CallContext, type StackConfig } from '@agent-layers/core';
 import { adapter as functions, defineTool } from '@agent-layers/adapter-functions';
 import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
 import { adapter, type ReinloopOptions } from '../src/index.ts';
@@ -8,7 +8,7 @@ import { adapter, type ReinloopOptions } from '../src/index.ts';
 const actx = { name: 'runtime', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
 const add = defineTool({
   name: 'add', description: 'Adds two numbers', risk: 'read',
-  inputSchema: { type: 'object', properties: { a: { type: 'string' }, b: { type: 'string' } }, required: ['a', 'b'] },
+  params: { type: 'object', properties: { a: { type: 'string' }, b: { type: 'string' } }, required: ['a', 'b'] },
   run: async ({ a, b }, _ctx: CallContext) => `sum=${Number(a) + Number(b)}`,
 });
 
@@ -21,7 +21,7 @@ async function run(runtime: ReinloopOptions, input = 'add 2 and 3') {
     },
     agents: { calc: { instructions: '', model: 'mock', tools: ['math__*'] } },
   };
-  const math = { ...functions, create: () => functions.create({ tools: [add] }, { name: 'math', env: {}, cwd: process.cwd(), telemetry: undefined as never }) };
+  const math = { ...functions, create: () => functions.create({ tools: [add] }, { name: 'math', env: {}, cwd: process.cwd(), telemetry: undefined as never, mappings: noMappings() }) };
   const s = await compose(resolveProfile(config), { adapters: [mockModel, adapter, math] });
   try { return await (await s.agent('calc')).run(input); } finally { await s.close(); }
 }
@@ -36,9 +36,9 @@ test('the defaults let a run complete; unbounded settings are left to reinloop a
 test('budget and tool limits take effect when set', async () => {
   const calls = await run({ budget: { maxToolCalls: 1 } });
   assert.equal(calls.status, 'stopped');
-  assert.equal(calls.reason, 'budget:maxToolCalls');
+  assert.deepEqual(calls.reason, { code: 'limit', layer: 'harness', by: 'reinloop', detail: 'maxToolCalls' });
   const turns = await run({ budget: { maxTotalTokens: 1 } });
-  assert.equal(turns.reason, 'budget:maxTotalTokens');
+  assert.deepEqual(turns.reason, { code: 'limit', layer: 'harness', by: 'reinloop', detail: 'maxTotalTokens' });
   const cut = await run({ tools: { maxResultChars: 2 } });
   assert.match(cut.output, /output truncated: 5 chars total/);
   const timed = await run({ tools: { timeoutMs: 5000 } });

@@ -1,104 +1,97 @@
-import { contentText, type ChatMessage, type ChatRequest, type ChatResponse, type FinishReason, type ToolCall, type Usage as ChatUsage } from '@agent-layers/core';
-import type { Message, ModelParams, ModelRequest, ModelResponse, Part, StopReason, ToolCallPart, Usage } from 'reinloop';
+import { messageText, textMessage, type Finish, type Message as SdkMessage, type ModelReply, type ModelRequest as SdkRequest, type Part as SdkPart, type Usage as SdkUsage } from '@agent-layers/core';
+import type { Message, ModelParams, ModelRequest, ModelResponse, Part, StopReason, ToolCallPart } from 'reinloop';
 
-/** reinloop request → chat request: instructions become the system message, parts become chat messages. */
-export function toChatRequest(req: ModelRequest): ChatRequest {
+/**
+ * reinloop request → SDK model request: instructions become the system message, parts map one to one. Sampling
+ * settings that have a slot in the language go to `settings`; `ext` is the agent's, for the model adapter.
+ */
+export function toModelRequest(req: ModelRequest, ext?: SdkRequest['ext']): SdkRequest {
+  const settings = settingsOf(req.params);
   return {
     model: req.model,
-    messages: toChatMessages(req.instructions, req.messages),
-    ...(req.tools.length ? { tools: req.tools.map((t) => ({ type: 'function' as const, function: { name: t.name, description: t.description, parameters: t.schema } })) } : {}),
-    ...chatParams(req.params),
+    messages: toMessages(req.instructions, req.messages),
+    ...(req.tools.length ? { tools: req.tools.map((t) => ({ name: t.name, description: t.description, params: t.schema })) } : {}),
+    ...(Object.keys(settings).length ? { settings } : {}),
+    ...(ext && Object.keys(ext).length ? { ext } : {}),
   };
 }
 
-function chatParams(p: ModelParams | undefined): Partial<ChatRequest> {
+function settingsOf(p: ModelParams | undefined): NonNullable<SdkRequest['settings']> {
   if (!p) return {};
-  const extra = { ...(p.topP !== undefined ? { top_p: p.topP } : {}), ...p.extra };
   return {
     ...(p.temperature !== undefined ? { temperature: p.temperature } : {}),
-    ...(p.maxTokens !== undefined ? { max_tokens: p.maxTokens } : {}),
+    ...(p.maxTokens !== undefined ? { maxOutputTokens: p.maxTokens } : {}),
     ...(p.stop ? { stop: p.stop } : {}),
-    ...(Object.keys(extra).length ? { extra } : {}),
   };
 }
 
-export function toChatMessages(instructions: string | undefined, messages: readonly Message[]): ChatMessage[] {
-  const out: ChatMessage[] = instructions ? [{ role: 'system', content: instructions }] : [];
-  for (const m of messages) {
-    const text = textOf(m.parts);
-    if (m.role === 'user') out.push({ role: 'user', content: text });
-    else if (m.role === 'assistant') {
-      const calls: ToolCall[] = m.parts.filter(isCall).map((p) => ({ id: p.id, type: 'function', function: { name: p.name, arguments: JSON.stringify(p.args ?? {}) } }));
-      out.push({ role: 'assistant', content: text || (calls.length ? null : ''), ...(calls.length ? { tool_calls: calls } : {}) });
-    } else {
-      for (const p of m.parts) if (p.type === 'tool_result') out.push({ role: 'tool', tool_call_id: p.callId, content: p.content });
-    }
-  }
+export function toMessages(instructions: string | undefined, messages: readonly Message[]): SdkMessage[] {
+  const out: SdkMessage[] = instructions ? [textMessage('system', instructions)] : [];
+  for (const m of messages) out.push({ role: m.role, parts: m.parts.flatMap((p) => toPart(p) ?? []) });
   return out;
 }
 
-/** Chat response → reinloop response. Malformed tool arguments are flagged, so the loop answers them with a tool error. */
-export function fromChatResponse(res: ChatResponse, model: string): ModelResponse {
-  const choice = res.choices[0];
-  const parts: Part[] = [];
-  const text = contentText(choice?.message.content);
-  if (text) parts.push({ type: 'text', text });
-  for (const call of choice?.message.tool_calls ?? []) parts.push(toolCallPart(call));
-  const calls = parts.some(isCall);
-  return {
-    message: { role: 'assistant', parts },
-    usage: fromChatUsage(res.usage),
-    stopReason: calls ? 'tool_calls' : stopReasonOf(choice?.finish_reason ?? null),
-    model: res.model || model,
-  };
-}
-
-function toolCallPart(call: ToolCall): ToolCallPart {
-  const raw = call.function.arguments ?? '';
-  const base = { type: 'tool_call' as const, id: call.id, name: call.function.name };
-  if (!raw.trim()) return { ...base, args: {} };
-  try {
-    const args: unknown = JSON.parse(raw);
-    if (args && typeof args === 'object' && !Array.isArray(args)) return { ...base, args };
-    return { ...base, args: {}, argsIssue: { error: 'arguments must be a JSON object', repaired: false } };
-  } catch (err) {
-    return { ...base, args: {}, argsIssue: { error: err instanceof Error ? err.message : String(err), repaired: false } };
+/** reinloop part → SDK part. Hosted-tool parts have no equivalent in the language and are left out. */
+function toPart(p: Part): SdkPart | undefined {
+  switch (p.type) {
+    case 'text': return { type: 'text', text: p.text };
+    case 'thinking': return { type: 'reasoning', text: p.text };
+    case 'tool_call': return { type: 'call', id: p.id, tool: p.name, args: objectOf(p.args) };
+    case 'tool_result': return { type: 'result', callId: p.callId, ok: !p.isError, text: p.content };
+    default: return undefined;
   }
 }
 
-/** SDK input messages → reinloop messages; system and developer messages join the instructions. */
-export function fromChatMessages(messages: readonly ChatMessage[]): { system: string[]; messages: Message[] } {
+/** SDK reply → reinloop response. Malformed tool arguments are flagged, so the loop answers them with a tool error. */
+export function fromModelReply(reply: ModelReply, model: string): ModelResponse {
+  const parts = reply.message.parts.flatMap((p) => fromPart(p, new Map()) ?? []);
+  return {
+    message: { role: 'assistant', parts },
+    usage: fromUsage(reply.usage),
+    stopReason: parts.some(isCall) ? 'tool_calls' : stopOf(reply.finish),
+    model: reply.model || model,
+  };
+}
+
+/** SDK input messages → reinloop messages; system messages join the instructions. */
+export function fromMessages(messages: readonly SdkMessage[]): { system: string[]; messages: Message[] } {
   const system: string[] = [];
   const out: Message[] = [];
   const names = new Map<string, string>();
   for (const m of messages) {
-    if (m.role === 'system' || m.role === 'developer') system.push(contentText(m.content));
-    else if (m.role === 'user') out.push({ role: 'user', parts: [{ type: 'text', text: contentText(m.content) }] });
-    else if (m.role === 'assistant') {
-      const text = contentText(m.content);
-      const calls = (m.tool_calls ?? []).map(toolCallPart);
-      for (const c of calls) names.set(c.id, c.name);
-      out.push({ role: 'assistant', parts: [...(text ? [{ type: 'text' as const, text }] : []), ...calls] });
-    } else if (m.role === 'tool') {
-      out.push({ role: 'tool', parts: [{ type: 'tool_result', callId: m.tool_call_id, name: names.get(m.tool_call_id) ?? '', content: contentText(m.content) }] });
-    }
+    if (m.role === 'system') system.push(messageText(m));
+    else out.push({ role: m.role, parts: m.parts.flatMap((p) => fromPart(p, names) ?? []) });
   }
   return { system, messages: out };
 }
 
-export function fromChatUsage(u: ChatUsage | undefined): Usage {
-  return { inputTokens: u?.prompt_tokens ?? 0, outputTokens: u?.completion_tokens ?? 0 };
+/** SDK part → reinloop part; `names` maps call ids to tool names, which reinloop keeps on results. */
+function fromPart(p: SdkPart, names: Map<string, string>): Part | undefined {
+  switch (p.type) {
+    case 'text': return { type: 'text', text: (p as { text: string }).text };
+    case 'reasoning': return { type: 'thinking', text: (p as { text: string }).text };
+    case 'call': {
+      const c = p as Extract<SdkPart, { type: 'call' }>;
+      names.set(c.id, c.tool);
+      const call: ToolCallPart = { type: 'tool_call', id: c.id, name: c.tool, args: c.args };
+      return c.invalid !== undefined ? { ...call, args: {}, argsIssue: { error: 'arguments must be a JSON object', repaired: false } } : call;
+    }
+    case 'result': {
+      const r = p as Extract<SdkPart, { type: 'result' }>;
+      return { type: 'tool_result', callId: r.callId, name: names.get(r.callId) ?? '', content: r.text, ...(r.ok ? {} : { isError: true }) };
+    }
+    default: return undefined;
+  }
 }
 
-export function toChatUsage(u: Usage): ChatUsage {
-  return { prompt_tokens: u.inputTokens, completion_tokens: u.outputTokens, total_tokens: u.inputTokens + u.outputTokens };
-}
+export const fromUsage = (u: SdkUsage | undefined) => ({ inputTokens: u?.inputTokens ?? 0, outputTokens: u?.outputTokens ?? 0 });
 
-const STOP: Record<string, StopReason> = { stop: 'end', tool_calls: 'tool_calls', length: 'max_tokens', content_filter: 'refusal' };
-const FINISH: Record<StopReason, FinishReason> = { end: 'stop', tool_calls: 'tool_calls', max_tokens: 'length', refusal: 'content_filter', pause_turn: 'other', other: 'other' };
+const STOP: Record<string, StopReason> = { end: 'end', tools: 'tool_calls', limit: 'max_tokens', refused: 'refusal' };
+const FINISH: Record<StopReason, Finish> = { end: 'end', tool_calls: 'tools', max_tokens: 'limit', refusal: 'refused', pause_turn: 'other', other: 'other' };
 
-export const stopReasonOf = (finish: FinishReason | null): StopReason => (finish ? STOP[finish] ?? 'other' : 'end');
-export const finishReasonOf = (stop: StopReason): FinishReason => FINISH[stop] ?? 'other';
+export const stopOf = (finish: Finish): StopReason => STOP[finish] ?? 'other';
+export const finishOf = (stop: StopReason): Finish => FINISH[stop] ?? 'other';
 
 const isCall = (p: Part): p is ToolCallPart => p.type === 'tool_call';
-const textOf = (parts: readonly Part[]) => parts.filter((p): p is Extract<Part, { type: 'text' }> => p.type === 'text').map((p) => p.text).join('');
+const objectOf = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+

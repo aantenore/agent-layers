@@ -1,17 +1,17 @@
 import {
-  defineAdapter, defineLimits, errorMessage, limitSchema, limitValue, noopTelemetry, PORT_VERSIONS, publicIdentity, type AgentSpec, type CallContext,
-  type LimitValue, type RunEvent, type RunInput, type RunResult, type RuntimePort, type Stack,
+  defineAdapter, defineLimits, limitSchema, limitValue, noopTelemetry, PORT_VERSIONS, publicCaller, stopReasonOf, type AgentSpec, type CallContext,
+  type LimitValue, type RunEvent, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason,
 } from '@agent-layers/core';
 import {
   memoryStore, pricingFor, stream, summarizeCompaction, windowCompaction, type Agent, type Budget, type CompactionSettings, type Message,
   type ModelParams, type PolicyConfig, type Pricing, type RunResult as LoopResult, type ToolSettings,
 } from 'reinloop';
-import { fromChatMessages, toChatUsage } from './convert.ts';
-import { mapEvent, recordEnd, recordEvent } from './events.ts';
-import { governedProvider, governedTool } from './governed.ts';
+import { fromMessages, fromUsage } from './convert.ts';
+import { budgetName, mapEvent, recordEnd, recordEvent } from './events.ts';
+import { governedProvider, governedTool, type RunControl } from './governed.ts';
 
-export { fromChatMessages, fromChatResponse, toChatMessages, toChatRequest } from './convert.ts';
-export { governedProvider, governedTool } from './governed.ts';
+export { fromMessages, fromModelReply, toMessages, toModelRequest } from './convert.ts';
+export { governedProvider, governedTool, type RunControl } from './governed.ts';
 export { mapEvent } from './events.ts';
 
 /** Configurable limits; see docs/limits.md. Paths are nested objects of `options`, so the keys are short names. */
@@ -69,7 +69,7 @@ export interface ToolOptions {
 }
 
 export interface ReinloopOptions {
-  /** reinloop budgets; the run ends `stopped` with reason `budget:<limit>`. Default `{ maxTurns: 50 }`, the others unbounded. */
+  /** reinloop budgets; the run ends `stopped` with reason `{ code: 'limit', layer: 'harness', by: 'reinloop', detail: '<limit>' }`. Default `{ maxTurns: 50 }`, the others unbounded. */
   budget?: BudgetOptions;
   compaction?: CompactionOptions;
   /** Prices per model id (USD per million tokens), over reinloop's built-in table; used for `costUsd` and `maxCostUsd`. */
@@ -109,8 +109,6 @@ function toolSettingsOf(o: ToolOptions = {}): ToolSettings {
  */
 const ALLOW_ALL: PolicyConfig = { default: 'allow', risk: { read: 'allow', write: 'allow', exec: 'allow' } };
 
-const PARAM_KEYS = ['temperature', 'max_tokens', 'stop'] as const;
-
 /** Factory: binds agent specs to reinloop agents whose model and tools are the stack's governed ports. */
 export function createReinloopRuntime(options: ReinloopOptions = {}, name = 'reinloop'): RuntimePort {
   return {
@@ -123,7 +121,7 @@ export function createReinloopRuntime(options: ReinloopOptions = {}, name = 'rei
           const step = await it.next();
           if (step.done) {
             const r = step.value;
-            events.push(endEvent(r, false));
+            events.push(endEvent(r));
             return { runId: r.runId, status: r.status, output: r.output, usage: r.usage, costUsd: r.costUsd, ...(r.reason ? { reason: r.reason } : {}), events };
           }
           events.push(step.value);
@@ -137,7 +135,7 @@ export function createReinloopRuntime(options: ReinloopOptions = {}, name = 'rei
           for (;;) {
             const step = await it.next();
             if (step.done) {
-              yield endEvent(step.value, true);
+              yield endEvent(step.value);
               return;
             }
             yield step.value;
@@ -148,77 +146,100 @@ export function createReinloopRuntime(options: ReinloopOptions = {}, name = 'rei
   };
 }
 
-interface Outcome extends Required<Pick<RunResult, 'runId' | 'status' | 'output' | 'usage'>> { reason?: string; turns: number; costUsd: number }
+interface Outcome extends Required<Pick<RunResult, 'runId' | 'status' | 'output' | 'usage'>> { reason?: StopReason; costUsd: number; budget?: string }
 
-function endEvent(r: Outcome, withOutput: boolean): RunEvent {
-  return {
-    type: 'run_end', runId: r.runId, status: r.status, ...(r.reason ? { reason: r.reason } : {}), ...(withOutput ? { output: r.output } : {}),
-    usage: r.usage, turns: r.turns, costUsd: r.costUsd,
-  };
-}
+const endEvent = (r: Outcome): RunEvent => ({
+  type: 'run.end', status: r.status, ...(r.reason ? { reason: r.reason } : {}), usage: r.usage, costUsd: r.costUsd,
+});
 
 /** One run: builds the reinloop agent on the governed ports, drives it, maps its events and its result. */
 async function* execute(stack: Stack, spec: AgentSpec, input: RunInput, ctx: CallContext, options: ReinloopOptions, streaming: boolean): AsyncGenerator<RunEvent, Outcome> {
   const telemetry = ctx.telemetry ?? stack.telemetry ?? noopTelemetry;
-  const halt = new AbortController();
-  const signal = ctx.signal ? AbortSignal.any([ctx.signal, halt.signal]) : halt.signal;
+  const control: RunControl = { halt: new AbortController() };
+  const signal = ctx.signal ? AbortSignal.any([ctx.signal, control.halt.signal]) : control.halt.signal;
   const run: CallContext = { ...ctx, signal };
-  const empty = { runId: ctx.runId, output: '', usage: toChatUsage({ inputTokens: 0, outputTokens: 0 }), turns: 0, costUsd: 0 };
+  const empty = { runId: ctx.runId, output: '', usage: fromUsage(undefined), costUsd: 0 };
   let agent: Agent;
   let messages: Message[] | string;
   try {
     const tools = stack.toolsFor(spec);
     const specs = spec.tools.length ? await tools.listTools(run) : [];
-    const parsed = typeof input === 'string' ? { system: [], messages: input } : fromChatMessages(input.messages);
+    const parsed = typeof input === 'string' ? { system: [], messages: input } : fromMessages(input.messages);
     messages = parsed.messages;
+    const approval = stack.ports.approval?.name;
     agent = {
       name: spec.name,
-      model: { provider: governedProvider(stack.modelFor(spec), run, { stream: streaming }), model: spec.model, params: modelParams(spec), ...pricingOf(spec.model, options) },
+      model: {
+        provider: governedProvider(stack.modelFor(spec), run, control, { stream: streaming, ...(modelExt(spec) ? { ext: modelExt(spec)! } : {}) }),
+        model: spec.model, params: modelParams(spec), ...pricingOf(spec.model, options),
+      },
       instructions: [spec.instructions, ...parsed.system].filter(Boolean).join('\n\n') || undefined,
-      tools: specs.map((s) => governedTool(tools, s, run, halt)),
+      tools: specs.map((s) => governedTool(tools, s, run, control, approval)),
       policy: ALLOW_ALL,
       ...(options.budget ? { budget: budgetOf(options.budget)! } : {}),
       ...(options.compaction ? { compaction: compaction(options.compaction) } : {}),
       toolSettings: toolSettingsOf(options.tools),
     };
   } catch (err) {
-    return { ...empty, status: 'failed', reason: errorMessage(err) };
+    return { ...empty, status: 'failed', reason: stopReasonOf(err) };
   }
 
-  const identity = publicIdentity(ctx.identity);
+  const caller = publicCaller(ctx.caller);
+  const identity = caller ? { subject: caller.id, kind: caller.kind, roles: caller.roles, scopes: caller.scopes } : undefined;
   const handle = stream(agent, messages, { runId: ctx.runId, store: memoryStore(), signal, ...(identity ? { identity } : {}) });
   for await (const ev of handle) {
     recordEvent(telemetry, ev, spec.name);
-    const mapped = mapEvent(ev, { stream: streaming });
-    if (mapped) yield mapped;
+    for (const mapped of mapEvent(ev, { stream: streaming })) yield mapped;
   }
-  const out = outcome(await handle.result);
-  recordEnd(telemetry, { agent: spec.name, model: spec.model, costUsd: out.costUsd, ...(out.reason ? { reason: out.reason } : {}) });
+  const out = outcome(await handle.result, control, signal);
+  recordEnd(telemetry, { agent: spec.name, model: spec.model, costUsd: out.costUsd, ...(out.budget ? { budget: out.budget } : {}) });
   return out;
 }
 
+const LIMIT_MAX_TOKENS: StopReason = { code: 'limit', layer: 'harness', by: 'reinloop', detail: 'max_tokens' };
+
 /**
- * reinloop result → SDK result. `interrupted` (the caller aborted) becomes `stopped` with reason `aborted`; a guardrail
- * stop keeps its `guardrail:<guard>:<stage>` reason and has no output, as with any runtime.
+ * reinloop result → SDK result. A stop recorded by the governed ports (guard block, call waiting for a person) wins and
+ * has no output, as with any runtime. Otherwise reinloop's native reason is translated: `budget:<limit>` and
+ * `max_tokens` are limits of reinloop, an interruption is an abort or a timeout (from the signal's reason), an error
+ * is the error the model raised, if any. An answer cut at the token limit completes with that limit as its reason. Reasons never carry error text.
  */
-function outcome(r: LoopResult): Outcome {
-  const base = { runId: r.runId, usage: toChatUsage(r.usage), turns: r.turns, costUsd: r.costUsd };
-  if (r.status === 'interrupted') return { ...base, status: 'stopped', output: '', reason: 'aborted' };
-  if (r.reason?.startsWith('guardrail:')) return { ...base, status: 'stopped', output: '', reason: r.reason };
-  const status = r.status === 'completed' || r.status === 'stopped' ? r.status : 'failed';
-  return { ...base, status, output: r.output, ...(r.reason ? { reason: r.reason } : {}) };
+function outcome(r: LoopResult, control: RunControl, signal: AbortSignal): Outcome {
+  const base = { runId: r.runId, usage: fromUsage(r.usage), costUsd: r.costUsd };
+  if (control.end) return { ...base, status: control.end.status, output: '', reason: control.end.reason };
+  // An answer cut at the token limit still completes; the reason says it was cut.
+  if (r.status === 'completed') return { ...base, status: 'completed', output: r.output, ...(r.reason === 'max_tokens' ? { reason: LIMIT_MAX_TOKENS } : {}) };
+  if (r.status === 'interrupted') {
+    const reason = stopReasonOf(signal.reason);
+    return { ...base, status: 'stopped', output: '', reason: reason.code === 'error' ? { code: 'aborted' } : reason };
+  }
+  const budget = budgetName(r.reason);
+  if (budget || r.reason === 'max_tokens') {
+    return { ...base, status: 'stopped', output: r.output, reason: budget ? { ...LIMIT_MAX_TOKENS, detail: budget } : LIMIT_MAX_TOKENS, ...(budget ? { budget } : {}) };
+  }
+  const reason: StopReason = control.error !== undefined ? stopReasonOf(control.error) : { code: 'error', layer: 'harness', by: 'reinloop' };
+  return { ...base, status: r.status === 'stopped' || reason.code !== 'error' ? 'stopped' : 'failed', output: r.output, reason };
 }
 
-/** Agent `params`: `temperature`, `max_tokens` and `stop` go to the model; any other key is passed as `extra`. */
+/**
+ * Agent settings: `temperature`, `maxOutputTokens` and `stop` go to the model; `ext["reinloop.retryMaxTokens"]` makes
+ * reinloop repeat an answer cut at the token limit once with that limit.
+ */
 function modelParams(spec: AgentSpec): ModelParams {
-  const p = spec.params ?? {};
-  const extra = Object.fromEntries(Object.entries(p).filter(([k]) => !(PARAM_KEYS as readonly string[]).includes(k)));
+  const s = spec.settings ?? {};
+  const retry = spec.ext?.['reinloop.retryMaxTokens'];
   return {
-    ...(typeof p.temperature === 'number' ? { temperature: p.temperature } : {}),
-    ...(typeof p.max_tokens === 'number' ? { maxTokens: p.max_tokens } : {}),
-    ...(Array.isArray(p.stop) ? { stop: p.stop as string[] } : {}),
-    ...(Object.keys(extra).length ? { extra } : {}),
+    ...(s.temperature !== undefined ? { temperature: s.temperature } : {}),
+    ...(s.maxOutputTokens !== undefined ? { maxTokens: s.maxOutputTokens } : {}),
+    ...(s.stop ? { stop: s.stop } : {}),
+    ...(typeof retry === 'number' ? { retryMaxTokens: retry } : {}),
   };
+}
+
+/** The agent's `ext` keys outside the adapter's namespace: they belong to the model adapter and travel with each request. */
+function modelExt(spec: AgentSpec): Record<string, unknown> | undefined {
+  const entries = Object.entries(spec.ext ?? {}).filter(([k]) => !k.startsWith('reinloop.'));
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 function pricingOf(model: string, options: ReinloopOptions): { pricing?: Pricing } {
@@ -294,6 +315,7 @@ export const adapter = defineAdapter<'RuntimePort', ReinloopOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
+  ext: { reads: ['sdk.approval'] },
   create: (options, ctx) => createReinloopRuntime(options, ctx.name),
 });
 
