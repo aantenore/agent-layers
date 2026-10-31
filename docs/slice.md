@@ -5,13 +5,17 @@ three runtimes and three profiles. Between cells only `agent-layers.json` change
 so identity, authorization, guardrails and telemetry are enforced outside the runtime. In production, faults are
 injected one at a time, and the recorded telemetry is used to find which layer failed.
 
-The measurements below were recorded before the SDK language 1.0 ([ADR 0001](decisions/0001-sdk-language.md)), so span
-and event names in them are the old ones: `chat` is now `agent.model.call` and `knowledge.error` is
-`agent.knowledge.error`. Rerun the driver to refresh them.
+Two runs are recorded. The latest is a minimal re-verification after the SDK language 1.0
+([ADR 0001](decisions/0001-sdk-language.md)): pilot and production, one question per cell, faults on reinloop. The full
+matrix was recorded before 1.0, so span and event names in it are the old ones: `chat` is now `agent.model.call` and
+`knowledge.error` is `agent.knowledge.error`.
 
 Driver: [`scripts/slice.mjs`](../scripts/slice.mjs) (`node --conditions=source scripts/slice.mjs`). It brings up only
 the reference services each tier needs and takes them down with their volumes at the end. Every wait has a time
-limit. Run of 2026-10-31: under five minutes from the first cell to teardown, everything local, nothing left running.
+limit. `--minimal` asks only the tool question, on reinloop and Pydantic AI, skips the comparison cell and injects
+the faults on reinloop only. Full run before 1.0: under five minutes from the first cell to teardown. Minimal run after
+1.0: about two and a half minutes from the first `docker compose up` to the last `down -v`. Both local, nothing left
+running.
 
 ## What runs where
 
@@ -101,6 +105,46 @@ the gateway to loopback with `allowedHosts`.
 
 ## Results
 
+### After 1.0: minimal re-run
+
+`node --conditions=source scripts/slice.mjs --only pilot,production --minimal`, 2026-10-31, model group `fast`
+(`lfm2.5:8b` on the host Ollama), `KEYCLOAK_PORT=18080`, `OPENAPI_MCP_PORT=8091`, gateway on port 8799, Keycloak
+recreated so the realm's fixed service-account id is imported. The tool question as alice, one run per cell.
+
+| Tier | Runtime | tool (expects 212) | Tokens | Cost (USD) | Spans: telemetry file / Jaeger |
+|---|---|---|---|---|---|
+| pilot | reinloop | ok 7.9 s | 676 | 0.000149 | 7 / 2 ¹ |
+| pilot | Pydantic AI | ok 3.0 s | 1060 | n/a | 18 / 18 |
+| production | reinloop | ok 1.7 s | 676 | 0.000149 | 7 / 7 |
+| production | Pydantic AI | ok 552 ms | 355 | n/a | 16 / 16 |
+
+1. The first cell after the collector started: Jaeger held 2 of the 7 spans when the driver read it (it stops at the
+   first count that does not grow between two reads). Every span is in the gateway's telemetry file with the
+   driver's trace id. Not investigated further.
+
+| Check | Result |
+|---|---|
+| `agent-layers check --profile production` (no caller) | passed; `skip credentials oidc (CredentialPort)` |
+| `agent-layers check --profile production --token <alice>` | passed; `ok credentials oidc (CredentialPort)` |
+| `agent-layers check --profile production-basic --skip-conformance` | failed by design: prototype-only runtime |
+| Both production checks | `WARN limit layers.runtime.options.tools.timeoutMs is unbounded` (the slice profile leaves reinloop's tool timeout unbounded) |
+| No credential / `Origin: https://evil.example` / `Host: evil.example` | 401 / 403 / 403 |
+| Caller tokens or the gateway secret in process output or telemetry | none found |
+| `reference/identity` live test against the recreated Keycloak | 5/5, including "gets the agent its own token with client_credentials (kind agent)" |
+
+Faults, production, reinloop, one at a time:
+
+| Fault | Run | Attributed | Evidence (layer-signals reason) |
+|---|---|---|---|
+| bob (role `viewer`) asks to save a note: OPA denies the write tool | completed | identity | `2/2 denied: util__save_note, util__save_note` (the model tried twice) |
+| input with an email and a prompt-injection sentence | completed | guardrail | `1 redacted (presidio@input)` |
+| Qdrant stopped | completed | knowledge | `1 searches failed (of 1)` |
+| model at an unreachable URL | failed | llm | `run failed: error` (the fixed 1.0 stop code; before 1.0 the raw text `fetch failed`) |
+
+All four faults were attributed to the expected layer.
+
+### Before 1.0: full matrix
+
 The smoke questions run as alice, one run each: **tool** "Convert 100 C to Fahrenheit." (expects 212), **knowledge**
 "When does the first Larkspur ferry leave Quillmere?" (expects 07:15, a fact found only in the knowledge folder),
 **plain** "What is the capital of France? Answer in one word." (expects Paris). Each entry gives correctness and
@@ -140,7 +184,7 @@ Its tokens are still on the gateway's `chat` spans (1084 for the pilot tool run)
 Quality against latency: on the tool question, qwen3:4b (reasoning) took 44.5 s and 4128 tokens. lfm2.5:8b took
 6.8 s and 1451 tokens. Both answered correctly. The reasoning model is not needed for these questions.
 
-### Production gate and gateway mode
+### Production gate and gateway mode (before 1.0)
 
 | Check | Result |
 |---|---|
@@ -154,7 +198,8 @@ Quality against latency: on the tool question, qwen3:4b (reasoning) took 44.5 s 
 
 ## Failure injection and attribution
 
-Production, one fault at a time, on reinloop and on the Pydantic AI agent. After each run the driver takes the
+Before 1.0: production, one fault at a time, on reinloop and on the Pydantic AI agent (the run after 1.0, on reinloop
+only, is under [Results](#after-10-minimal-re-run)). After each run the driver takes the
 records of that run's trace from the gateway's telemetry file and scores them with `layer-signals`. The attributed
 layer is the worst-scored layer other than the harness; the harness is blamed only when nothing else is.
 
@@ -212,13 +257,17 @@ No judge model was run (`judge-eval`). It grades answers, not layers, and would 
 
 ## Not covered yet
 
-- Statistical weight: one run per question and per fault, three questions.
+- Statistical weight: one run per question and per fault, three questions before 1.0, one after.
+- After 1.0 only the minimal run: no knowledge or plain question, no basic-runtime cell, no qwen3:4b comparison, and
+  the faults on reinloop only. The Pydantic AI fault attribution was last verified before 1.0.
 - Prompt-injection detection: LLM Guard was not run, and Langfuse was skipped.
 - Pydantic AI cost: the agent does not put usage or cost in its A2A task metadata, which the stack's `a2a` runtime would read.
 - The `hosted` model group: configured (key and model only in `.env`, 1 USD LiteLLM budget, `maxCostUsd` 0.05 per
   reinloop run as a second guard). Not exercised in this run, so the budget enforcement is untested live.
-- Approvals (`ask` policy), streaming runs, CloudEvents triggers, the deploy layer, HTTP MCP tool servers
-  (`reference/tool`) and session continuity across runs.
+- Approvals (`ask` policy) and their resume in a later run of the same session are covered by unit tests and an A2A
+  test through the gateway (`adapters/a2a/test/approval-resume.test.ts`), not by the slice. Conversation continuity
+  across runs is not provided by `basic-runtime` or `reinloop`: a session carries approval decisions only.
+- Streaming runs, CloudEvents triggers, the deploy layer and HTTP MCP tool servers (`reference/tool`).
 - `layer-signals` itself does not pick a single layer: the driver applies "worst non-harness layer".
 - The `knowledge.error` event carries the source's raw error text (`error.message`). Elsewhere the stack uses fixed reasons.
 - The Pydantic AI runtime keys task ownership on a hash of an unverified bearer. It must stay behind the gateway, with
