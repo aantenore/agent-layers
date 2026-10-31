@@ -12,9 +12,9 @@ test('openapi passes ToolPort conformance', async () => {
       options: { spec: sampleSpec(api.url) },
       fixtures: {
         calls: [
-          { name: 'get_text_value', args: { value: 'hello' }, expect: 'hello', isError: false },
-          { name: 'getStatus', args: { code: 500 }, expect: 'HTTP 500', isError: true },
-          { name: 'echoQuery', args: {}, isError: true },
+          { name: 'get_text_value', args: { value: 'hello' }, expect: 'hello', ok: true },
+          { name: 'getStatus', args: { code: 500 }, expect: 'HTTP 500', ok: false },
+          { name: 'echoQuery', args: {}, ok: false },
         ],
       },
     });

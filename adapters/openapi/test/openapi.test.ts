@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import type { CallContext } from '@agent-layers/core';
+import { createMappings, type CallContext } from '@agent-layers/core';
 import { adapter, createOpenApiTools, type OpenApiOptions } from '../src/index.ts';
 import { startApi } from './mock.ts';
 import { sampleSpec } from './spec.ts';
@@ -22,17 +22,17 @@ test('lists one tool per operation with schemas built from parameters, bodies an
     ['echoQuery', 'read'], ['echoJson', 'write'], ['wipeEcho', 'write'], ['getStatus', 'read'], ['get_text_value', 'read'], ['putArray', 'write'],
   ]);
   const byName = Object.fromEntries(specs.map((s) => [s.name, s]));
-  const query = byName.echoQuery!.inputSchema as { properties: Record<string, any>; required: string[] };
+  const query = byName.echoQuery!.params as { properties: Record<string, any>; required: string[] };
   assert.deepEqual(Object.keys(query.properties), ['message', 'tag', 'x-trace']); // Authorization is handled by the transport
   assert.deepEqual(query.required, ['message']);
   assert.equal(query.properties.message.description, 'Text to echo');
   assert.equal(byName.echoQuery!.description, 'Echo the query');
-  const note = byName.echoJson!.inputSchema as { properties: Record<string, any>; required: string[] };
+  const note = byName.echoJson!.params as { properties: Record<string, any>; required: string[] };
   assert.deepEqual(Object.keys(note.properties), ['title', 'tags', 'parent', 'due']);
   assert.deepEqual(note.required, ['title']);
   assert.deepEqual(note.properties.due.type, ['string', 'null']); // 3.0 nullable
   assert.deepEqual(note.properties.parent, {}); // a reference back to itself is cut
-  assert.deepEqual((byName.putArray!.inputSchema as { properties: Record<string, any> }).properties.body.type, 'array');
+  assert.deepEqual((byName.putArray!.params as { properties: Record<string, any> }).properties.body.type, 'array');
   assert.equal(byName.getStatus!.description, 'Answer with the status');
   assert.equal(specs.find((s) => s.name === 'upload'), undefined); // multipart bodies are skipped
 }));
@@ -45,29 +45,29 @@ test('calls operations: path, query, header and body parameters reach the API', 
   const post = await tools.callTool('echoJson', { title: 'hello', tags: ['x'] }, ctx());
   assert.deepEqual((post.data as { json: unknown }).json, { title: 'hello', tags: ['x'] });
   assert.equal(api.requests.at(-1)!.headers['content-type'], 'application/json');
-  assert.equal((await tools.callTool('get_text_value', { value: 'a b' }, ctx())).content, 'a b');
+  assert.equal((await tools.callTool('get_text_value', { value: 'a b' }, ctx())).text, 'a b');
   const arr = await tools.callTool('putArray', { body: [1, 2] }, ctx());
   assert.deepEqual((arr.data as { json: unknown }).json, [1, 2]);
   const status = await tools.callTool('getStatus', { code: 404 }, ctx());
-  assert.equal(status.isError, true);
-  assert.match(status.content, /^HTTP 404/);
+  assert.equal(status.ok, false);
+  assert.match(status.text, /^HTTP 404/);
   const invalid = await tools.callTool('getStatus', { code: 99 }, ctx());
-  assert.match(invalid.content, /Invalid arguments: args\.code: must be >= 100/);
-  assert.match((await tools.callTool('echoJson', {}, ctx())).content, /args\.title: required/);
+  assert.match(invalid.text, /Invalid arguments: args\.code: must be >= 100/);
+  assert.match((await tools.callTool('echoJson', {}, ctx())).text, /args\.title: required/);
 }));
 
 test('include globs, risk by method and the unknown tool', () => withApi(async (url) => {
   const tools = await createOpenApiTools({ spec: sampleSpec(url), include: ['echo*', 'wipe*'], risk: { DELETE: 'exec', POST: 'exec' } });
   const specs = await tools.listTools(ctx());
   assert.deepEqual(specs.map((s) => [s.name, s.risk]), [['echoQuery', 'read'], ['echoJson', 'exec'], ['wipeEcho', 'exec']]);
-  assert.equal((await tools.callTool('getStatus', { code: 200 }, ctx())).isError, true);
+  assert.equal((await tools.callTool('getStatus', { code: 200 }, ctx())).ok, false);
 }));
 
 test('auth: bearer from the caller credentials on every operation; none, nothing sent', () => withApi(async (url, api) => {
   const tools = await createOpenApiTools({ spec: sampleSpec(url), auth: { audience: 'orders-api' } });
   assert.equal((await tools.listTools(ctx()))[0]!.audience, 'orders-api');
   const refused = await tools.callTool('echoQuery', { message: 'x' }, ctx());
-  assert.equal(refused.isError, true);
+  assert.equal(refused.ok, false);
   assert.equal(api.requests.length, 0);
   const ok = await tools.callTool('echoQuery', { message: 'x' }, ctx({ credentials: { token: async () => 'tok-abc' } }));
   assert.equal(api.requests[0]!.headers.authorization, 'Bearer tok-abc');
@@ -121,11 +121,11 @@ test('path parameters made only of dots are rejected and nothing is sent', () =>
   const tools = await createOpenApiTools({ spec: sampleSpec(`${url}/v1`) });
   for (const bad of ['..', '.', '....']) {
     const out = await tools.callTool('get_text_value', { value: bad }, ctx());
-    assert.equal(out.isError, true);
-    assert.match(out.content, /Invalid path parameter\(s\): value/);
+    assert.equal(out.ok, false);
+    assert.match(out.text, /Invalid path parameter\(s\): value/);
   }
   assert.equal(api.requests.length, 0);
-  assert.equal((await tools.callTool('get_text_value', { value: 'a/../b' }, ctx())).isError, undefined);
+  assert.equal((await tools.callTool('get_text_value', { value: 'a/../b' }, ctx())).ok, true);
   assert.equal(api.requests[0]!.path, '/v1/text/a%2F..%2Fb');
 }));
 
@@ -133,7 +133,7 @@ test('a placeholder cannot reach the host through the server URL', async () => {
   await assert.rejects(createOpenApiTools({ spec: { openapi: '3.0.0', servers: [{ url: 'http://{host}' }], paths: { '/a': { get: {} } } } }), /not in the scheme or host|absolute/);
 });
 
-test('static header values and the token are redacted from content and data', () => withApi(async (url) => {
+test('static header values and the token are redacted from text and data', () => withApi(async (url) => {
   const tools = await createOpenApiTools({ spec: sampleSpec(url), headers: { 'x-api-key': '${env:KEY}', 'x-team': 'blue-team' }, auth: { audience: 'a' } }, { env: { KEY: 'key-from-env-123' } });
   const out = await tools.callTool('echoQuery', { message: 'x', 'x-trace': 'trace-secret-9' }, ctx({ credentials: { token: async () => 'tok-xyz-789' } }));
   const everything = JSON.stringify(out);
@@ -148,6 +148,23 @@ test('a secret echoed as \\u escapes is masked in text and data, for successes a
   for (const secret of ['key-from-env-123', 'tok-xyz-789']) assert.equal(JSON.stringify(ok).includes(secret), false, secret);
   assert.deepEqual(ok.data, { key: '[redacted]', bearer: 'Bearer [redacted]' });
   const bad = await tools.callTool('bad', {}, ctx({ credentials: { token: async () => 'tok-xyz-789' } }));
-  assert.equal(bad.isError, true);
-  assert.equal(bad.content.includes('key-from-env-123') || bad.content.includes('tok-xyz-789'), false);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.text.includes('key-from-env-123') || bad.text.includes('tok-xyz-789'), false);
 }));
+
+test('in mapping rules shape the specs from the operation object; name and request stay the operation\'s', async () => {
+  const spec = {
+    openapi: '3.0.3', info: { title: 't', version: '1' }, servers: [{ url: 'http://127.0.0.1:9' }],
+    paths: { '/items/{id}': { delete: { operationId: 'removeItem', 'x-owner': 'ops', 'x-risk': 'exec', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 204: { description: 'gone' } } } } },
+  };
+  const mappings = createMappings('tools.items', { in: [
+    { from: '/x-owner', to: '/attrs/owner' },
+    { from: '/x-risk', to: '/risk' },
+    { from: '/path', to: '/attrs/path' },
+    { from: '/operationId', to: '/name', default: 'ignored' },
+  ] });
+  const [s] = await (await createOpenApiTools({ spec }, { mappings })).listTools({ runId: 'r', agent: 'a' });
+  assert.equal(s!.name, 'removeItem');
+  assert.equal(s!.risk, 'exec');
+  assert.deepEqual(s!.attrs, { owner: 'ops', path: '/items/{id}' });
+});

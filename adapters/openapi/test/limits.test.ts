@@ -14,13 +14,13 @@ test('maxResultChars, errorBodyChars and minSecretChars take effect when set', a
   const api = await startApi();
   try {
     const tools = await createOpenApiTools({ spec: sampleSpec(api.url), maxResultChars: 10, errorBodyChars: 3 });
-    assert.equal((await tools.callTool('getStatus', { code: 500 }, call)).content, 'HTTP 500 Internal Server Error: sta…');
+    assert.equal((await tools.callTool('getStatus', { code: 500 }, call)).text, 'HTTP 500 Internal Server Error: sta…');
     const keyed = await createOpenApiTools({ spec: sampleSpec(api.url), headers: { 'x-api-key': 'abc' } });
     assert.equal(((await keyed.callTool('echoQuery', { message: 'hi' }, call)).data as { headers: Record<string, string> }).headers['x-api-key'], 'abc'); // below the default minimum of 4
     const masked = await createOpenApiTools({ spec: sampleSpec(api.url), headers: { 'x-api-key': 'abc' }, minSecretChars: 3 });
     assert.equal(((await masked.callTool('echoQuery', { message: 'hi' }, call)).data as { headers: Record<string, string> }).headers['x-api-key'], '[redacted]');
     const short = await createOpenApiTools({ spec: sampleSpec(api.url), maxResultChars: 10 });
-    assert.match((await short.callTool('echoQuery', { message: 'hi' }, call)).content, /\n\[truncated: \d+ chars in total\]$/);
+    assert.match((await short.callTool('echoQuery', { message: 'hi' }, call)).text, /\n\[truncated: \d+ chars in total\]$/);
   } finally {
     await api.close();
   }
@@ -39,10 +39,10 @@ test('maxDescriptionChars and maxRefDepth take effect when set', async () => {
   };
   const full = await find({});
   assert.equal(full.echoQuery.description, 'z'.repeat(50));
-  assert.equal(depth(full.echoJson.inputSchema), 7); // L1..L7 below the merged top level
+  assert.equal(depth(full.echoJson.params), 7); // L1..L7 below the merged top level
   const cut = await find({ maxDescriptionChars: 10, maxRefDepth: 3 });
   assert.equal(cut.echoQuery.description, `${'z'.repeat(10)}…`);
-  assert.ok(depth(cut.echoJson.inputSchema) < 7);
+  assert.ok(depth(cut.echoJson.params) < 7);
 });
 
 test('specTimeoutMs stops a spec fetch that never answers', async () => {

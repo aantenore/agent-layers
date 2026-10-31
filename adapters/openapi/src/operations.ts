@@ -1,4 +1,4 @@
-import { limitValue, matchesAny, type JsonSchema, type LimitValue, type ToolRisk } from '@agent-layers/core';
+import { limitValue, matchesAny, type JsonSchema, type LimitValue, type Risk } from '@agent-layers/core';
 import { LIMITS } from './limits.ts';
 import { baseUrlOf, deref, type OpenApiDocument } from './spec.ts';
 import { checkRequestSpec, defaultRisk, type HttpMethod, type RequestSpec } from './request.ts';
@@ -11,9 +11,11 @@ export interface Operation {
   /** Tool name: the operationId, or `<method>_<path>` when there is none. */
   name: string;
   description: string;
-  inputSchema: JsonSchema;
-  risk: ToolRisk;
+  params: JsonSchema;
+  risk: Risk;
   request: RequestSpec & { method: HttpMethod };
+  /** The operation object as the document has it (`$ref`s inlined), with `method` and `path`: the source of `in` mapping rules. */
+  operation: Record<string, unknown>;
 }
 
 export interface OperationOptions {
@@ -21,7 +23,7 @@ export interface OperationOptions {
   /** Globs of operationIds to import (default: all). */
   include?: string[];
   /** Risk by HTTP method (upper case), over the default of read for GET and HEAD and write otherwise. */
-  risk?: Partial<Record<string, ToolRisk>>;
+  risk?: Partial<Record<string, Risk>>;
   auth?: RequestSpec['auth'];
   headers?: Record<string, string>;
   timeoutMs?: LimitValue;
@@ -114,9 +116,10 @@ export function operationsOf(spec: OpenApiDocument, specUrl: string | undefined,
       out.push({
         name,
         description: truncate([op.summary, op.description].filter(Boolean).join(': ') || `${upper} ${path}`, maxDescriptionChars),
-        inputSchema: { type: 'object', properties, required, additionalProperties: false },
+        params: { type: 'object', properties, required, additionalProperties: false },
         risk: opts.risk?.[upper] ?? defaultRisk(upper),
         request,
+        operation: { ...op, method: upper, path },
       });
     }
   }

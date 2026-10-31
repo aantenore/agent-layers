@@ -21,9 +21,9 @@ test('live: the reference OpenAPI document against httpbin', { timeout: 60_000 }
     options,
     fixtures: {
       calls: [
-        { name: 'decodeBase64', args: { value: 'cmVpbmxvb3A=' }, expect: 'reinloop', isError: false },
-        { name: 'getStatus', args: { code: 418 }, isError: true },
-        { name: 'echoQuery', args: { message: 'hello' }, expect: 'hello', isError: false },
+        { name: 'decodeBase64', args: { value: 'cmVpbmxvb3A=' }, expect: 'reinloop', ok: true },
+        { name: 'getStatus', args: { code: 418 }, ok: false },
+        { name: 'echoQuery', args: { message: 'hello' }, expect: 'hello', ok: true },
       ],
     },
   });
@@ -36,8 +36,8 @@ test('live: the reference OpenAPI document against httpbin', { timeout: 60_000 }
   const post = await tools.callTool('echoJson', { title: 'hi', tags: ['a'] }, ctx({ credentials: { token: async () => 'tok' } }));
   assert.deepEqual((post.data as { json: unknown }).json, { title: 'hi', tags: ['a'] });
   // go-httpbin echoes request headers: the bearer token must be redacted in what comes back.
-  assert.equal(post.content.includes('tok"'), false);
-  assert.equal((await tools.callTool('checkBearer', {}, ctx())).isError, true); // no credentials: not sent
+  assert.equal(post.text.includes('tok"'), false);
+  assert.equal((await tools.callTool('checkBearer', {}, ctx())).ok, false); // no credentials: not sent
   const bearer = await tools.callTool('checkBearer', {}, ctx({ credentials: { token: async () => 'tok' } }));
-  assert.equal(bearer.isError, undefined);
+  assert.equal(bearer.ok, true);
 });

@@ -1,4 +1,4 @@
-import { anySignal, limitValue, timeoutSignal, validate, type CallContext, type LimitValue, type ToolOutcome, type ToolRisk } from '@agent-layers/core';
+import { anySignal, limitValue, timeoutSignal, validate, type CallContext, type LimitValue, type Risk, type ToolResult } from '@agent-layers/core';
 import { LIMITS } from './limits.ts';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
@@ -34,7 +34,7 @@ export interface RequestSpec {
   auth?: { audience: string; scopes?: string[] };
 }
 
-export const defaultRisk = (method: string): ToolRisk => (method === 'GET' || method === 'HEAD' ? 'read' : 'write');
+export const defaultRisk = (method: string): Risk => (method === 'GET' || method === 'HEAD' ? 'read' : 'write');
 
 export function checkRequestSpec(name: string, spec: RequestSpec): HttpMethod {
   const method = String(spec.method).toUpperCase() as HttpMethod;
@@ -51,7 +51,7 @@ export const pathArgs = (url: string): string[] => [...url.matchAll(PLACEHOLDER)
 
 const plain = (value: unknown): string => (typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value));
 const truncate = (text: string, max: number): string => (text.length <= max ? text : `${text.slice(0, max)}…`);
-const failure = (content: string): ToolOutcome => ({ content, isError: true });
+const failure = (text: string): ToolResult => ({ ok: false, text });
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 const REDACTED = '[redacted]';
@@ -91,7 +91,7 @@ function templateGuard(url: string): { origin: string; prefix: string } {
 }
 
 /** Sends one request built from `args`. Non-2xx answers are error results; network failures reject. */
-export async function sendRequest(name: string, spec: RequestSpec & { method: HttpMethod }, args: Record<string, unknown>, ctx: CallContext): Promise<ToolOutcome> {
+export async function sendRequest(name: string, spec: RequestSpec & { method: HttpMethod }, args: Record<string, unknown>, ctx: CallContext): Promise<ToolResult> {
   const headers = new Headers(spec.headers);
   const queryArgs = spec.query ?? [];
   const headerArgs = spec.headerArgs ?? [];
@@ -150,7 +150,7 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
   const res = await fetch(target, { method: spec.method, headers, ...(body !== undefined ? { body } : {}), signal: anySignal(ctx.signal, timeoutSignal(timeoutMs)) });
   const type = res.headers.get('content-type') ?? '';
   if (res.ok && type && !TEXTUAL.test(type)) {
-    return { content: `HTTP ${res.status}: ${(await res.arrayBuffer()).byteLength} bytes of ${type.split(';')[0]} (not shown)` };
+    return { ok: true, text: `HTTP ${res.status}: ${(await res.arrayBuffer()).byteLength} bytes of ${type.split(';')[0]} (not shown)` };
   }
   // A server may echo request headers back; secrets must not reach the model, in the text or in `data`. Mask the raw
   // body, normalise the JSON (which decodes \u escapes), then mask the normalised form: serialize, redact, parse.
@@ -167,13 +167,13 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
     }
   }
   if (!res.ok) return failure(redact(`HTTP ${res.status} ${res.statusText}`, forms).trim() + (text ? `: ${truncate(text, errorBodyChars)}` : ''));
-  if (!text) return { content: `HTTP ${res.status} (no content)` };
-  if (text.length > maxChars) return { content: `${text.slice(0, maxChars)}\n[truncated: ${text.length} chars in total]` };
-  return { content: text, ...(data !== undefined ? { data } : {}) };
+  if (!text) return { ok: true, text: `HTTP ${res.status} (no content)` };
+  if (text.length > maxChars) return { ok: true, text: `${text.slice(0, maxChars)}\n[truncated: ${text.length} chars in total]` };
+  return { ok: true, text, ...(data !== undefined ? { data } : {}) };
 }
 
 /** Validates arguments against the tool schema; returns an error result or undefined. */
-export function checkArgs(schema: Record<string, unknown>, args: Record<string, unknown>): ToolOutcome | undefined {
+export function checkArgs(schema: Record<string, unknown>, args: Record<string, unknown>): ToolResult | undefined {
   const errors = validate(schema, args, 'args');
   return errors.length ? failure(`Invalid arguments: ${errors.join('; ')}`) : undefined;
 }

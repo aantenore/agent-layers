@@ -1,4 +1,7 @@
-import { defineAdapter, limitProperties, PORT_VERSIONS, type CallContext, type JsonSchema, type LimitValue, type ToolOutcome, type ToolPort, type ToolRisk } from '@agent-layers/core';
+import {
+  defineAdapter, limitProperties, noMappings, PORT_VERSIONS, type CallContext, type JsonSchema, type LimitValue, type Mappings, type Risk, type ToolPort, type ToolResult,
+  type ToolSpec,
+} from '@agent-layers/core';
 import { interpolate } from './env.ts';
 import { LIMITS } from './limits.ts';
 import { operationsOf, type Operation } from './operations.ts';
@@ -16,7 +19,7 @@ export interface OpenApiOptions {
   /** Globs of operationIds to import (default: all). */
   include?: string[];
   /** Risk by HTTP method (upper case); default `read` for GET and HEAD, `write` otherwise. */
-  risk?: Partial<Record<'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', ToolRisk>>;
+  risk?: Partial<Record<'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', Risk>>;
   /** Bearer token from the caller's credentials for every operation. */
   auth?: { audience: string; scopes?: string[] };
   /** Static headers sent with every call. `${env:NAME}` is resolved when the tools are built. */
@@ -43,10 +46,15 @@ export interface OpenApiDeps {
   cwd?: string;
   env?: Record<string, string | undefined>;
   signal?: AbortSignal;
+  /** `in` rules on `ToolSpec`, run over each operation object (for example `x-*` extensions to `attrs` or `risk`). */
+  mappings?: Mappings;
 }
 
 /** Factory: usable directly from code, without the registry. Reads the spec, so it is asynchronous. */
-export async function createOpenApiTools(options: OpenApiOptions, { name = 'openapi', cwd = process.cwd(), env = process.env, signal }: OpenApiDeps = {}): Promise<ToolPort> {
+export async function createOpenApiTools(
+  options: OpenApiOptions,
+  { name = 'openapi', cwd = process.cwd(), env = process.env, signal, mappings = noMappings() }: OpenApiDeps = {},
+): Promise<ToolPort> {
   const loaded = typeof options.spec === 'string' ? await readSpec(interpolate(options.spec, env, 'spec'), cwd, signal, options.specTimeoutMs) : { spec: options.spec, url: undefined };
   const { spec: _spec, baseUrl, headers, ...rest } = options;
   const operations = operationsOf(loaded.spec, loaded.url, {
@@ -54,20 +62,26 @@ export async function createOpenApiTools(options: OpenApiOptions, { name = 'open
     ...(baseUrl ? { baseUrl: interpolate(baseUrl, env, 'baseUrl') } : {}),
     ...(headers ? { headers: interpolate(headers, env, 'headers') } : {}),
   });
-  const byName = new Map(operations.map((o) => [o.name, o]));
+  const tools = operations.map((o) => {
+    const spec: ToolSpec = mappings.in(o.operation, {
+      name: o.name, description: o.description, params: o.params, risk: o.risk, layer: 'tool',
+      ...(o.request.auth ? { audience: o.request.auth.audience } : {}),
+    } satisfies ToolSpec);
+    // The name and the request stay the operation's; rules may only reshape what the model and the policy see.
+    return { op: o, spec: { ...spec, name: o.name } };
+  });
+  const byName = new Map(tools.map((t) => [t.op.name, t]));
   return {
     name,
     async listTools() {
-      return operations.map((o) => ({
-        name: o.name, description: o.description, inputSchema: o.inputSchema, risk: o.risk, layer: 'tool' as const,
-        ...(o.request.auth ? { audience: o.request.auth.audience } : {}),
-      }));
+      return tools.map((t) => t.spec);
     },
-    async callTool(tool: string, args: Record<string, unknown>, ctx: CallContext): Promise<ToolOutcome> {
-      const op = byName.get(tool);
-      if (!op) return { content: `Unknown tool: ${tool}`, isError: true };
+    async callTool(tool: string, args: Record<string, unknown>, ctx: CallContext): Promise<ToolResult> {
+      const t = byName.get(tool);
+      if (!t) return { ok: false, text: `Unknown tool: ${tool}` };
+      const op = t.op;
       const input = args ?? {};
-      const invalid = checkArgs(op.inputSchema, input);
+      const invalid = checkArgs(t.spec.params, input);
       if (invalid) return invalid;
       ctx.signal?.throwIfAborted();
       return sendRequest(tool, op.request, input, ctx);
@@ -76,7 +90,7 @@ export async function createOpenApiTools(options: OpenApiOptions, { name = 'open
 }
 
 const strings: JsonSchema = { type: 'array', items: { type: 'string', minLength: 1 } };
-const risk: JsonSchema = { enum: ['read', 'write', 'exec'] };
+const risk: JsonSchema = { type: 'string', minLength: 1 };
 
 /** Descriptor: what the registry and the CLI see. */
 export const adapter = defineAdapter<'ToolPort', OpenApiOptions>({
@@ -117,7 +131,9 @@ export const adapter = defineAdapter<'ToolPort', OpenApiOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
-  create: (options, ctx) => createOpenApiTools(options, { name: ctx.name, cwd: ctx.cwd, env: ctx.env }),
+  ext: { produces: [] },
+  mappingDefaults: { in: { shape: 'ToolSpec' } },
+  create: (options, ctx) => createOpenApiTools(options, { name: ctx.name, cwd: ctx.cwd, env: ctx.env, mappings: ctx.mappings }),
 });
 
 export const adapters = [adapter];
