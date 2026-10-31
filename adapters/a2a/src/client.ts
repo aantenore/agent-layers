@@ -6,6 +6,12 @@ import { A2A_VERSION, INTERRUPTED, LEGACY_VERSION, messageWire, METHOD_OF, readR
 export interface A2ARuntimeOptions {
   /** Agent card URL (`.../agent-card.json`) or the agent's JSON-RPC endpoint. */
   url: string;
+  /** The JSON-RPC endpoint, when the card is not to be trusted for it; the card is then not read. */
+  endpoint?: string;
+  /** Endpoints (URLs or origins) a card may point to besides its own origin. */
+  allowedEndpoints?: string[];
+  /** Allow plain http to hosts that are not loopback (default false). */
+  allowHttp?: boolean;
   /** Protocol version spoken to the remote agent (default `1.0`). */
   version?: WireVersion;
   /** Bearer token for `audience` from the stack's credentials, on behalf of the caller of the run. */
@@ -19,6 +25,23 @@ export interface A2ARuntimeOptions {
 }
 
 const RUN_FAILED = 'remote agent call failed';
+
+/** Loopback, private, link-local and unspecified addresses, and `localhost` names, written literally in a URL. */
+export function isPrivateHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h.replace(/^::ffff:/, ''));
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  return h === '::1' || h === '::' || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe[89ab][0-9a-f]:/.test(h);
+}
+
+const isLoopback = (hostname: string) => {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return h === 'localhost' || h.endsWith('.localhost') || h === '::1' || /^127\./.test(h);
+};
 
 /** Last user text of a run input: the message the remote agent receives. */
 function inputText(input: RunInput): string {
@@ -43,17 +66,38 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a'): Runt
   const version: WireVersion = options.version ?? A2A_VERSION;
   const timeoutMs = options.timeoutMs ?? 300_000;
   let endpoint: Promise<string> | undefined;
+  // Origins the operator configured: only these may be private or loopback targets.
+  const configured = new Set([options.url, options.endpoint, ...(options.allowedEndpoints ?? [])].filter((u): u is string => !!u).map((u) => new URL(u).origin));
 
-  /** The JSON-RPC endpoint: the URL itself, or the interface of the agent card that speaks this version. */
+  /** A target the runtime may send to: https (or loopback, or `allowHttp`), and private only when configured. */
+  function checkTarget(raw: string, what: string): URL {
+    let url: URL;
+    try { url = new URL(raw); } catch { throw new Error(`${what} is not a URL`); }
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (options.allowHttp || isLoopback(url.hostname)))) throw new Error(`${what} must use https`);
+    if (url.username || url.password) throw new Error(`${what} must not carry credentials`);
+    if (isPrivateHost(url.hostname) && !configured.has(url.origin)) throw new Error(`${what} is a private address that is not configured`);
+    return url;
+  }
+
+  /**
+   * The JSON-RPC endpoint: `endpoint`, the URL itself, or the interface of the agent card for this version. A card may
+   * point only to its own origin or to `allowedEndpoints`: a card cannot send the caller's credentials elsewhere.
+   */
   async function resolveEndpoint(signal: AbortSignal): Promise<string> {
-    if (!/agent-card\.json$|agent\.json$/.test(new URL(options.url).pathname)) return options.url;
-    const res = await fetch(options.url, { headers: { accept: 'application/json', ...options.headers }, signal });
+    if (options.endpoint) return checkTarget(options.endpoint, 'endpoint').href;
+    const cardUrl = checkTarget(options.url, 'url');
+    if (!/agent-card\.json$|agent\.json$/.test(cardUrl.pathname)) return cardUrl.href;
+    const res = await fetch(cardUrl, { headers: { accept: 'application/json', ...options.headers }, signal, redirect: 'error' });
     if (!res.ok) throw new Error(`agent card HTTP ${res.status}`);
     const card = await res.json() as { url?: string; supportedInterfaces?: { url?: string; protocolBinding?: string; protocolVersion?: string }[] };
     const match = (card.supportedInterfaces ?? []).find((i) => i.protocolBinding === 'JSONRPC' && (i.protocolVersion ?? '').startsWith(version));
-    const url = match?.url ?? (version === LEGACY_VERSION ? card.url : undefined);
-    if (!url) throw new Error(`the agent card offers no JSON-RPC interface for A2A ${version}`);
-    return url;
+    const found = match?.url ?? (version === LEGACY_VERSION ? card.url : undefined);
+    if (typeof found !== 'string') throw new Error(`the agent card offers no JSON-RPC interface for A2A ${version}`);
+    const target = checkTarget(found, 'the endpoint of the agent card');
+    const allowed = target.origin === cardUrl.origin
+      || (options.allowedEndpoints ?? []).some((e) => e === target.href || e === target.origin || new URL(e).origin === target.origin && target.href.startsWith(e));
+    if (!allowed) throw new Error('the agent card points to an endpoint outside its origin and allowedEndpoints');
+    return target.href;
   }
 
   return {
@@ -74,7 +118,9 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a'): Runt
 
       async function call(method: string, params: unknown, ctx: CallContext, signal: AbortSignal): Promise<unknown> {
         endpoint ??= resolveEndpoint(signal).catch((err: unknown) => { endpoint = undefined; throw err; });
-        const res = await fetch(await endpoint, { method: 'POST', headers: await headers(ctx), body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params }), signal });
+        // The target is validated before any credential is minted for it; redirects are not followed.
+        const target = await endpoint;
+        const res = await fetch(target, { method: 'POST', headers: await headers(ctx), body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params }), signal, redirect: 'error' });
         // The body is not read on errors: it could echo the token.
         if (!res.ok) throw new Error(`A2A HTTP ${res.status}`);
         const body = await res.json() as { result?: unknown; error?: { code?: number } };

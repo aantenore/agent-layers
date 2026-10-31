@@ -2,6 +2,7 @@ import { defineAdapter, PORT_VERSIONS } from '@agent-layers/core';
 import { createA2ARuntime, type A2ARuntimeOptions } from './client.ts';
 import { createA2AServerChannel, type A2AServerOptions } from './server.ts';
 
+export { isPrivateHost } from './client.ts';
 export { createA2ARuntime, createA2AServerChannel, type A2ARuntimeOptions, type A2AServerOptions };
 export { A2A_VERSION, LEGACY_VERSION, partsText, readResult, stateOf, type TaskState, type WireVersion } from './wire.ts';
 
@@ -54,6 +55,9 @@ export const runtimeAdapter = defineAdapter<'RuntimePort', A2ARuntimeOptions>({
     type: 'object',
     properties: {
       url: { type: 'string', pattern: '^https?://' },
+      endpoint: { type: 'string', pattern: '^https?://' },
+      allowedEndpoints: { type: 'array', items: { type: 'string', pattern: '^https?://' } },
+      allowHttp: { type: 'boolean' },
       version: { enum: ['1.0', '0.3'] },
       auth: {
         type: 'object',

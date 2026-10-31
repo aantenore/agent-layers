@@ -199,3 +199,36 @@ test('anonymous tasks (gateway.anonymous: true) are owned by their id and never 
     await open.close();
   }
 });
+
+test('a card cannot redirect the caller credential: other origins are refused unless allowed, private ones unless configured', async () => {
+  const { createServer } = await import('node:http');
+  const { isPrivateHost } = await import('../src/index.ts');
+  const hits: (string | undefined)[] = [];
+  // A card on its own origin that points the JSON-RPC endpoint at the gateway, another origin.
+  const evil = createServer((req, res) => {
+    hits.push(req.headers.authorization);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ name: 'x', supportedInterfaces: [{ url: endpoint(), protocolBinding: 'JSONRPC', protocolVersion: '1.0' }] }));
+  });
+  await new Promise<void>((r) => evil.listen(0, '127.0.0.1', () => r()));
+  const cardUrl = `http://127.0.0.1:${(evil.address() as { port: number }).port}/.well-known/agent-card.json`;
+  const runWith = async (options: Record<string, unknown>) => {
+    const client = await compose(resolveProfile({
+      agents: { assistant: { instructions: '', model: 'remote' } },
+      layers: { runtime: { adapter: 'a2a', options: { auth: { audience: 'agents' }, ...options } }, credentials: { adapter: 'static-identity', options: { default: 'dev-token' } } },
+    }), { adapters: [runtimeAdapter, credentialAdapter] });
+    try { return await (await client.agent('assistant')).run('ping'); } finally { await client.close(); }
+  };
+  try {
+    const refused = await runWith({ url: cardUrl });
+    assert.equal(refused.status, 'failed');
+    assert.deepEqual(hits, [undefined], 'only the card was fetched, without the bearer');
+    const allowed = await runWith({ url: cardUrl, allowedEndpoints: [new URL(endpoint()).origin] });
+    assert.equal(allowed.output, 'pong', 'an endpoint the operator allowed is used');
+    assert.equal((await runWith({ url: 'http://example.com/a2a' })).status, 'failed', 'plain http to a public host needs allowHttp');
+  } finally {
+    await new Promise((r) => evil.close(r));
+  }
+  for (const h of ['127.0.0.1', 'localhost', '10.1.2.3', '172.20.0.1', '192.168.1.1', '169.254.169.254', '[::1]', '[fd00::1]', '[fe80::1]', '100.64.0.1']) assert.ok(isPrivateHost(h), h);
+  for (const h of ['example.com', '8.8.8.8', '172.32.0.1']) assert.ok(!isPrivateHost(h), h);
+});

@@ -54,8 +54,15 @@ the runtime with the caller's identity, so guards, authorization and telemetry a
 
 An agent written in any language, served over A2A, becomes the runtime of the stack: each run is one message to it.
 `url` is its agent card (the JSON-RPC interface for the configured version is read from it) or its JSON-RPC endpoint.
-With `auth`, every call carries a bearer token for `auth.audience` from the stack's credentials slot, requested on
-behalf of the caller of the run. A task that is still working is polled with `GetTask` until it ends. Failures are
+With `auth`, every call carries a bearer token for `auth.audience` (from the config, never from the card) from the
+stack's credentials slot, requested on behalf of the caller of the run.
+
+The card cannot send that token elsewhere. The endpoint it names is used only when it has the card's own origin or
+is listed in `allowedEndpoints`; targets must use https (plain http only to loopback, or with `allowHttp`); private,
+loopback and link-local addresses are refused unless the operator configured that origin (`url`, `endpoint` or
+`allowedEndpoints`); redirects are not followed; the token is minted only after the target passed these checks, and
+the card itself is fetched without it. Set `endpoint` to skip the card. Host names are checked as written, not after
+DNS resolution: restrict egress at the network level as well. A task that is still working is polled with `GetTask` until it ends. Failures are
 failed runs with a fixed reason (`remote agent call failed`, `remote agent timed out`); error bodies are not read,
 so a token echoed by the remote side never reaches the run result. The call is a span `a2a.send` on the `harness`
 layer.
@@ -63,6 +70,9 @@ layer.
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `url` | string | required | Agent card URL or JSON-RPC endpoint |
+| `endpoint` | string | from the card | JSON-RPC endpoint, when the card is not to be trusted for it |
+| `allowedEndpoints` | string[] | none | URLs or origins a card may point to besides its own origin |
+| `allowHttp` | boolean | `false` | Plain http to hosts that are not loopback |
 | `version` | `1.0` or `0.3` | `1.0` | Protocol version spoken to the remote agent |
 | `auth` | `{ audience, scopes? }` | none | Bearer token from the credentials slot, on behalf of the caller |
 | `headers` | object | none | Static headers |
