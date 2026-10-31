@@ -1,14 +1,13 @@
 // A composed stack: scripted model + basic runtime + three tool sources (declarative HTTP, OpenAPI, MCP bridge).
 // The agent's tool call reaches an API: offline a local fixture, live httpbin (make up LAYER=tool; HTTPBIN_URL, OPENAPI_MCP_URL).
-// The sibling adapters are imported from their sources until the workspace links them as packages.
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { compose, resolveProfile, type StackConfig } from '@agent-layers/core';
 import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
 import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
-import { toolAdapter as mcp } from '../../mcp/src/index.ts';
-import { adapter as openapi } from '../../openapi/src/index.ts';
+import { toolAdapter as mcp } from '@agent-layers/adapter-mcp';
+import { adapter as openapi } from '@agent-layers/adapter-openapi';
 import { adapter as httpTools } from '../src/index.ts';
 import { startApi } from './mock.ts';
 

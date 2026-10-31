@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { compose, resolveProfile, type StackConfig } from '@agent-layers/core';
 import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
 import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
-import { adapter as presidio } from '../../presidio/src/index.ts';
+import { adapter as presidio } from '@agent-layers/adapter-presidio';
 import { adapter as otlp, createOtlpTelemetry } from '../src/index.ts';
 
 // Live contract tests against the reference setups: reference/telemetry (OpenTelemetry Collector 0.164, Jaeger 2.22:

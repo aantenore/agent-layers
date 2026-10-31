@@ -48,7 +48,7 @@ test('check --profile production reports not installed and prototype-only adapte
   const { io, text } = captureIo(dir);
   assert.equal(await main(['check', '--profile', 'production', '--skip-conformance'], io), 1);
   assert.match(text(), /tier production/);
-  assert.match(text(), /identity: adapter "oidc" is not installed/);
+  assert.match(text(), /runtime: adapter "reinloop" is not installed/);
   assert.match(text(), /eval: |requires: identity, authorization, guardrails, telemetry, state/);
   assert.match(text(), /check failed/);
 });

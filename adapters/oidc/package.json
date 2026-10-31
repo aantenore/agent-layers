@@ -41,6 +41,7 @@
     "@agent-layers/adapter-basic-runtime": "0.1.0",
     "@agent-layers/adapter-functions": "0.1.0",
     "@agent-layers/adapter-mock-model": "0.1.0",
+    "@agent-layers/adapter-opa": "0.1.0",
     "@agent-layers/conformance": "0.1.0",
     "@agent-layers/core": "0.1.0",
     "@types/node": "^24.19.0",

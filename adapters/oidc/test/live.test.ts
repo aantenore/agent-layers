@@ -7,7 +7,7 @@ import { checkAdapter } from '@agent-layers/conformance';
 import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
 import { adapter as functions, defineTool } from '@agent-layers/adapter-functions';
 import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
-import { adapter as opa } from '../../opa/src/index.ts';
+import { adapter as opa } from '@agent-layers/adapter-opa';
 import { createOidcCredentials, createOidcIdentity, credentialAdapter, identityAdapter } from '../src/index.ts';
 
 const env = process.env;

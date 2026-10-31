@@ -26,6 +26,11 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
         reports.push({ entry, status: 'skip', detail: ['inbound: exercised by its own tests, not by check'] });
         continue;
       }
+      if (entry.port === 'TelemetryPort') {
+        // Probe spans would land in the configured backend or terminal as if they were real runs.
+        reports.push({ entry, status: 'skip', detail: ['telemetry: not probed live, so no test records reach the backend; covered by the adapter\'s own conformance tests'] });
+        continue;
+      }
       const instance = instanceOf(stack, entry, index);
       const fixtures = entry.port === 'RuntimePort' && stack.agents().length
         ? { stack, agent: await agentSpec(p.config, stack.agents()[0]!), input: 'hello' }

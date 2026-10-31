@@ -36,6 +36,7 @@
   "devDependencies": {
     "@agent-layers/adapter-basic-runtime": "0.1.0",
     "@agent-layers/adapter-mock-model": "0.1.0",
+    "@agent-layers/adapter-presidio": "0.1.0",
     "@agent-layers/adapter-regex-guard": "0.1.0",
     "@agent-layers/conformance": "0.1.0",
     "@agent-layers/core": "0.1.0",
