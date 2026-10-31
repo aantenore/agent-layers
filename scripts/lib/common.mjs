@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
-const SKIP_DIRS = new Set(['node_modules', '.git', '.terraform', '.claude', 'dist', '.agent-layers']);
+const SKIP_DIRS = new Set(['node_modules', '.git', '.terraform', '.claude', 'dist', '.agent-layers', '.venv', '__pycache__', '.pytest_cache']);
 
 /** Adapter packages ship TypeScript behind the `source` export condition. Re-run under it when it is missing. */
 export function ensureSourceCondition(scriptUrl) {

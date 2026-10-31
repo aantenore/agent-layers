@@ -84,7 +84,7 @@ Each layer page has a **Where it sits** diagram: its ports, what calls it and wh
 | `infra` (L0) | [infra.md](layers/infra.md#where-it-sits) | [Deploy targets](layers/infra.md#deploy-targets): compose, Kubernetes with Helm and Argo CD, OpenTofu |
 | `llm` (L1) | [llm.md](layers/llm.md#where-it-sits) | |
 | `cache` (L2) | [cache.md](layers/cache.md#where-it-sits) | [Decision flow](layers/cache.md#decision-flow): cache, route, model |
-| `harness` (L3) | [harness.md](layers/harness.md#where-it-sits) | |
+| `harness` (L3) | [harness.md](layers/harness.md#where-it-sits) | [Remote runtime over A2A](layers/harness.md#remote-pydantic-ai-over-a2a): sequence across two processes, the Python agent calls the gateway back for model and tools |
 | `knowledge` (L4) | [knowledge.md](layers/knowledge.md#where-it-sits) | [Transport and result](layers/knowledge.md#transport-and-result): MCP, HTTP or function to `Passage` |
 | `tool` (L5) | [tool.md](layers/tool.md#where-it-sits) | |
 | `identity` (L6) | [identity.md](layers/identity.md#where-it-sits) | [On-behalf-of flow](layers/identity.md#on-behalf-of-flow): sequence from caller token to user-scoped tool token |

@@ -83,18 +83,62 @@
         "router": { "adapter": "static-router", "options": { "model": "${env:LLM_MODEL:-qwen3:4b}" } }
       }
     },
+    "polyglot": {
+      "description": "Prototype whose runtime is a Pydantic AI agent in another process, reached over A2A; that agent calls this gateway back for its model and tools (runtimes/pydantic-ai).",
+      "extends": "prototype",
+      "layers": {
+        "runtime": {
+          "adapter": "a2a",
+          "options": { "url": "${env:A2A_AGENT_URL:-http://localhost:9100}", "auth": { "audience": "agent-gateway" }, "timeoutMs": 120000 }
+        },
+        "credentials": {
+          "adapter": "static-identity",
+          "options": { "tokens": { "agent-gateway": "dev-token" }, "default": "dev-downstream-token" }
+        },
+        "channels": [
+          { "adapter": "terminal-channel" },
+          { "adapter": "openai-compatible", "options": { "models": { "mock": "mock", "default": "mock" } } },
+          { "adapter": "mcp" },
+          { "adapter": "a2a" }
+        ],
+        "telemetry": [
+          { "adapter": "console-telemetry" },
+          { "adapter": "jsonl-telemetry", "options": { "path": "${env:POLYGLOT_TELEMETRY_PATH:-.agent-layers/polyglot-telemetry.jsonl}" } }
+        ]
+      }
+    },
+    "polyglot-local": {
+      "description": "Polyglot with the real model of the local profile behind the gateway.",
+      "extends": "polyglot",
+      "layers": {
+        "model": {
+          "adapter": "openai-compatible",
+          "options": { "baseUrl": "${env:LLM_BASE_URL:-http://localhost:11434/v1}", "apiKey": "${env:LLM_API_KEY:-}", "model": "${env:LLM_MODEL:-qwen3:4b}" }
+        },
+        "router": { "adapter": "static-router", "options": { "model": "${env:LLM_MODEL:-qwen3:4b}" } }
+      }
+    },
     "pilot": {
-      "description": "Shared environment: telemetry and knowledge move to their reference services (adapters not installed yet).",
+      "description": "Shared environment: telemetry to an OTLP collector; knowledge from Qdrant through its MCP server (mcp-server-qdrant over stdio, needs uv).",
       "extends": "local",
       "layers": {
         "telemetry": [{ "adapter": "otlp", "options": { "endpoint": "${env:OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4318}" } }],
         "knowledge": {
-          "docs": { "adapter": "qdrant", "options": { "url": "${env:QDRANT_URL:-http://localhost:6333}", "collection": "docs" } }
+          "docs": {
+            "adapter": "mcp",
+            "options": {
+              "command": "uvx",
+              "args": ["--python", "3.12", "mcp-server-qdrant==0.8.1"],
+              "env": { "QDRANT_URL": "${env:QDRANT_URL:-http://localhost:6333}", "COLLECTION_NAME": "docs", "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2" },
+              "tool": "qdrant-find",
+              "timeoutMs": 300000
+            }
+          }
         }
       }
     },
     "production": {
-      "description": "Enterprise systems for identity, authorization, guardrails, state and model access (adapters not installed yet).",
+      "description": "Enterprise systems for identity, authorization, guardrails, state and model access. Responses are cached by the model gateway (LiteLLM with Valkey) behind openai-compatible, so no in-process cache.",
       "extends": "pilot",
       "tier": "production",
       "gateway": { "host": "0.0.0.0" },
@@ -104,18 +148,18 @@
           "options": { "baseUrl": "${env:GATEWAY_URL:-http://localhost:4000/v1}", "apiKey": "${env:GATEWAY_KEY:-}", "model": "default" }
         },
         "router": null,
-        "cache": { "adapter": "valkey", "options": { "url": "${env:VALKEY_URL:-redis://localhost:6379}" } },
+        "cache": null,
         "runtime": { "adapter": "reinloop" },
-        "state": { "adapter": "postgres-state", "options": { "url": "${env:DATABASE_URL:-postgres://localhost:5432/agents}" } },
+        "state": { "adapter": "sqlite-state", "options": { "path": ".agent-layers/state.db" } },
         "identity": { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "audience": "${env:OIDC_AUDIENCE:-agent-runtime}" } },
         "credentials": {
           "adapter": "oidc",
-          "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "clientId": "${env:OIDC_CLIENT_ID:-agent-runtime}", "clientSecret": "${env:OIDC_CLIENT_SECRET:-}", "mode": "on-behalf-of" }
+          "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "clientId": "${env:OIDC_CLIENT_ID:-agent-runtime}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
         },
         "authorization": { "adapter": "opa", "options": { "url": "${env:OPA_URL:-http://localhost:8181}" } },
         "approval": null,
         "guardrails": [
-          { "adapter": "presidio", "options": { "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}" } },
+          { "adapter": "presidio", "options": { "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}", "anonymizerUrl": "${env:PRESIDIO_ANONYMIZER_URL:-http://localhost:5001}" } },
           { "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL:-http://localhost:8000}" } }
         ],
         "channels": [

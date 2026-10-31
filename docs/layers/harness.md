@@ -60,15 +60,87 @@ A runtime adapter implements RuntimePort: it takes the stack and an agent spec a
 `stack.modelFor` and `stack.toolsFor`. A runtime written in another language plugs in as a remote adapter (for example
 over an agent-to-agent protocol) or through the gateway's endpoints. Writing one: [guide.md](../guide.md#write-a-runtime-adapter).
 
+## Runtimes
+
+The same agent file (`examples/minimal/agents/assistant.md`) runs on a runtime in the stack's process and on one in
+another process and language. The agent file, the tools and the policies stay as they are; the profile picks the
+runtime.
+
+| Runtime | Runs | Reaches the model and tools through | Slot |
+|---|---|---|---|
+| [`reinloop`](../../adapters/reinloop) | In process (TypeScript) | `stack.modelFor` and `stack.toolsFor` | `"runtime": { "adapter": "reinloop" }` |
+| [Pydantic AI](../../runtimes/pydantic-ai/README.md) | Own process (Python), served over A2A 1.0 | The gateway: `/v1` (OpenAI-compatible, model alias) and `/mcp` | `"runtime": { "adapter": "a2a", "options": { "url": "http://localhost:9100", "auth": { "audience": "agent-gateway" } } }` |
+
+### Remote: Pydantic AI over A2A
+
+Two processes. The gateway hosts the stack; the stack's runtime is the `a2a` adapter, which sends each run to the
+Python agent; the Python agent calls the gateway back for its model and its tools, with the caller's credential. The
+loop runs in Python; guards, cache, router, authorization, credentials for the caller and telemetry run in the
+gateway, as for any other runtime. Profile `polyglot` of the minimal example; package
+[`runtimes/pydantic-ai`](../../runtimes/pydantic-ai/README.md).
+
+```mermaid
+sequenceDiagram
+  participant C as caller
+  participant I as interface (L8)
+  participant D as identity (L6)
+  participant H as harness (L3)
+  participant P as Pydantic AI agent
+  participant M as llm (L1)
+  participant T as tool (L5)
+  C->>I: A2A SendMessage to /a2a/assistant, Bearer credential
+  I->>D: verify credential
+  I->>H: run with the caller's identity
+  H->>D: token for agent-gateway, on behalf of the caller
+  H->>P: A2A SendMessage, Bearer token
+  P->>I: POST /v1/chat/completions, model alias, same token
+  I->>D: verify token
+  I->>M: chat through guards, cache, router
+  M-->>P: tool_calls
+  P->>I: POST /mcp tools/call, same token
+  I->>D: verify, then policy and authorization
+  I->>T: callTool, tool guards
+  T-->>P: tool result
+  P->>I: POST /v1/chat/completions
+  I-->>P: answer
+  H->>P: A2A GetTask until the task ends
+  P-->>H: task completed, answer as artifact
+  H-->>C: A2A task with the answer
+  Note over I,T: every gateway request and every step is a span with agent.layer
+```
+
+- **Model alias, never `agent:<name>`.** The Python agent calls `/v1` with an alias (`model` in the agent file); an
+  `agent:` model would make the gateway run the stack's agent, which is the Python agent again.
+- **Identity.** The `a2a` adapter's `auth.audience` names the gateway. In the prototype the static credentials table
+  hands out the dev token for it; in production the `oidc` credentials adapter in `on-behalf-of` mode exchanges the
+  caller's token. The gateway verifies the token on every call, so a token it rejects leaves the agent without
+  model and tools.
+- **Try it.** Start the Python agent (`uv run agent-layers-pydantic-ai` in `runtimes/pydantic-ai`, with
+  `AGENT_FILE`), then `npx agent-layers gateway --profile polyglot` in `examples/minimal`. The end-to-end test runs
+  both: `node --test runtimes/pydantic-ai/test-e2e.mjs`.
+
 ## Reference adapters
 
 | Adapter | Maps |
 |---|---|
 | `basic-runtime` | An in-process tool-calling loop (prototype) |
+| [`reinloop`](../../adapters/reinloop) | The [reinloop](https://github.com/aantenore/reinloop) (MIT) agent loop: budgets, compaction, parallel tool batches (prototype, production) |
 | `memory-state` | An in-process event log (prototype) |
+| [`sqlite-state`](../../adapters/sqlite-state) | An event log in one SQLite file through `node:sqlite` (prototype, production on a single node) |
 
-[reinloop](https://github.com/aantenore/reinloop) (MIT) is one runtime adapter; it is planned as a first full runtime
-and is used by the reference setup. LangGraph, Pydantic AI, the OpenAI Agents SDK and Google ADK are candidates.
+**Runtime.** `reinloop` runs the loop and leaves governance to the stack: its model is `stack.modelFor` wrapped as a
+reinloop provider and its tools are `stack.toolsFor`, so guards, cache, routing, knowledge, authorization, approvals,
+credentials and the `chat` and `execute_tool` spans apply as for any runtime. reinloop's own guardrails, identity,
+policy and knowledge features are not configured, so nothing runs twice. Budgets end a run `stopped` with reason
+`budget:<limit>`, a guardrail block with `guardrail:<guard>:<stage>`; run cost is a `costUsd` field of `run_end` and an
+`agent.cost.usd` metric. Pydantic AI runs as a remote runtime (see [Runtimes](#runtimes)); LangGraph, the OpenAI
+Agents SDK and Google ADK are candidates.
+
+**State.** When a call carries a `sessionId`, the stack appends the run's events to the state slot. `memory-state`
+loses them on restart. `sqlite-state` keeps them in a WAL-journaled file with a versioned schema (default
+`.agent-layers/state.db`, relative to the stack config); several processes on one host may share it, and a cluster
+needs a networked database behind another StatePort adapter.
+
 Full list: [adapters.md](../adapters.md).
 
 ## Reference setup

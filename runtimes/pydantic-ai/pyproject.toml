@@ -1,0 +1,28 @@
+[project]
+name = "agent-layers-pydantic-ai"
+version = "0.1.0"
+description = "A Pydantic AI agent served over A2A, using an agent-layers gateway for its model and tools"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Antonio Antenore" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fasta2a[pydantic-ai]==2.1.1",
+    "pydantic-ai-slim[mcp,openai]==2.64.0",
+    "uvicorn==0.54.0",
+]
+
+[project.scripts]
+agent-layers-pydantic-ai = "agent_layers_pydantic_ai.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest==9.2.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
