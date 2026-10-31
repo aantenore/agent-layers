@@ -1,5 +1,5 @@
 import type { Identity } from './identity.ts';
-import type { TelemetryPort } from './telemetry.ts';
+import type { TelemetryPort, TraceContext } from './telemetry.ts';
 
 /** Members every port instance may expose, whatever the port. */
 export interface PortBase {
@@ -25,4 +25,6 @@ export interface CallContext {
   signal?: AbortSignal;
   telemetry?: TelemetryPort;
   credentials?: BoundCredentials;
+  /** Trace context of the request that started the run, from another process (W3C Trace Context). */
+  trace?: TraceContext;
 }

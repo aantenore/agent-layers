@@ -200,6 +200,8 @@ when the model is not served.
   request is dropped, no further call is made, no result or artifact is written) and ends its stream with `canceled`;
   the reply to `CancelTask` already shows `canceled`. A task that already ended is returned unchanged. Work the gateway
   has already accepted (a tool call executing there) is not undone.
-- Spans of the gateway and of this process are not joined into one trace: the A2A call carries no trace context.
-- Each run opens its own MCP session. The MCP client first tries the stateless 2026-07-28 revision, which the
-  gateway answers with 400, then falls back to the initialize handshake: one extra request per run.
+- This process records no spans of its own. It forwards the W3C `traceparent` and `tracestate` of the A2A request
+  on every model call (`/v1`) and MCP call (`/mcp`) of the run, so the gateway records them as children of the span
+  that sent the A2A message: one trace from the gateway's request to the tool call. A malformed context is dropped.
+- Each run opens its own MCP session. The gateway serves the stateless 2026-07-28 revision the MCP client tries
+  first, so there is no fallback request.

@@ -15,6 +15,14 @@ export async function checkTelemetry(port: TelemetryPort, _f: unknown = {}, c = 
   } catch (err) {
     c.expect(err === boom, 'span: must rethrow the same error');
   }
+  // A remote parent from another process: the span still runs; an adapter that keeps ids reports the parent's trace.
+  const traceId = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const parent = { traceparent: `00-${traceId}-00f067aa0ba902b7-01` };
+  const inside = await c.attempt('span with a remote parent', () => port.span('conformance.remote', attrs, async () => port.current?.() ?? null, { parent }));
+  if (port.current) {
+    c.expect(inside !== null && inside?.traceparent.split('-')[1] === traceId, 'current: inside a span with a remote parent, the trace id must be the parent\'s');
+    c.expect(port.current() === undefined, 'current: outside any span there must be no context');
+  }
   await c.attempt('event', () => port.event('conformance.event', attrs));
   await c.attempt('metric', () => port.metric('conformance.metric', 1, attrs));
   if (port.flush) await c.attempt('flush', () => port.flush!());

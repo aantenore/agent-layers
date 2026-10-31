@@ -85,7 +85,8 @@ Every request goes through the same steps before any route runs (details in the
    types (415). An error inside a route is a 500 without its message.
 4. **Access log.** One `gateway.request` span on the `interface` layer per request: method, path without the query
    string, route, inbound adapter, status, duration, whether the caller was authenticated. Runs and tool calls nest
-   under it.
+   under it. When the request carries a W3C `traceparent` (and `tracestate`), the span joins that trace and the
+   context reaches the route as `ctx.trace`; a malformed header is ignored.
 
 Agent cards and the health endpoints are public. Sessions (MCP) and tasks (A2A) belong to the caller that created
 them: another caller presenting their id gets "not found".

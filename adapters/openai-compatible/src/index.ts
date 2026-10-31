@@ -1,4 +1,4 @@
-import { defineAdapter, PORT_VERSIONS, type CallContext, type ChatChunk, type ChatRequest, type ChatResponse, type ModelPort } from '@agent-layers/core';
+import { defineAdapter, PORT_VERSIONS, traceHeaders, type CallContext, type ChatChunk, type ChatRequest, type ChatResponse, type ModelPort } from '@agent-layers/core';
 import { createOpenAICompatibleChannel, type OpenAICompatibleChannelOptions } from './inbound.ts';
 import { sseData } from './sse.ts';
 
@@ -36,6 +36,7 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleOptions, na
         'content-type': 'application/json',
         accept: stream ? 'text/event-stream' : 'application/json',
         ...options.headers,
+        ...traceHeaders(ctx.telemetry, ctx.trace),
         ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}),
       },
       body: JSON.stringify(requestBody(req, options.model, stream, includeUsage)),

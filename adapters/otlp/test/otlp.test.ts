@@ -316,3 +316,35 @@ test('endpoints with credentials or that are not URLs are rejected at creation',
   assert.throws(() => createOtlpTelemetry({}, { env: { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://u:p@host:4318' } }), /must not carry credentials/);
   assert.throws(() => createOtlpTelemetry({ endpoint: 'collector:4318' }), /not a valid http\(s\) URL/);
 });
+
+test('a remote parent from another process: same trace, parented span, propagated flags and state', async () => {
+  const t = make();
+  const parent = { traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01', tracestate: 'vendor=a' };
+  let inside: ReturnType<typeof t.current>;
+  await t.span('gateway.request', L('telemetry'), async () => {
+    inside = t.current();
+    // A nested span keeps its local parent even when given a remote one.
+    await t.span('chat', L('llm'), async () => {}, { parent: { traceparent: '00-11111111111111111111111111111111-2222222222222222-01' } });
+  }, { parent });
+  assert.equal(t.current(), undefined, 'no context outside a span');
+  await t.flush!();
+  const spans = sink.spans();
+  const root = byName(spans, 'gateway.request');
+  assert.equal(root.traceId, '4bf92f3577b34da6a3ce929d0e0e4736');
+  assert.equal(root.parentSpanId, '00f067aa0ba902b7');
+  assert.equal(byName(spans, 'chat').parentSpanId, root.spanId);
+  assert.equal(inside?.traceparent, `00-${root.traceId}-${root.spanId}-01`);
+  assert.equal(inside?.tracestate, 'vendor=a');
+});
+
+test('a malformed remote parent starts a new trace', async () => {
+  const t = make();
+  for (const traceparent of ['garbage', '00-00000000000000000000000000000000-00f067aa0ba902b7-01', 'ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01']) {
+    await t.span('root', L('telemetry'), async () => {}, { parent: { traceparent } });
+  }
+  await t.flush!();
+  for (const s of sink.spans()) {
+    assert.equal(s.parentSpanId, undefined);
+    assert.notEqual(s.traceId, '4bf92f3577b34da6a3ce929d0e0e4736');
+  }
+});

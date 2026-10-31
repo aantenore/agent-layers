@@ -72,6 +72,10 @@ flowchart TB
   `gen_ai.client.operation.duration`, `agent.tool.calls`, `agent.cost.usd`, `agent.policy.decisions`,
   `agent.guardrail.actions`.
 - No tokens or secrets in attributes; the stack masks keys that look like secrets before adapters see them.
+- **One trace across processes.** The gateway reads the W3C `traceparent` and `tracestate` of each request and starts
+  its request span under it; the `a2a` runtime, `openai-compatible` models and `mcp` servers over HTTP send the
+  context of the active span. A remote runtime that forwards the header it received (the Pydantic AI runtime does) puts
+  its model and tool calls back at the gateway into the same trace. `otlp` and `jsonl-telemetry` keep the ids.
 - **Audit.** Denials and guard actions are visible here; see [governance](../cross-cutting/governance-compliance.md).
 
 ## How to swap

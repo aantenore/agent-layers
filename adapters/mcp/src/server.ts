@@ -147,7 +147,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
       };
 
       const callContext = (ctx: InboundContext, signal: AbortSignal): CallContext => ({
-        runId: randomUUID(), agent: name, signal, ...(ctx.identity ? { identity: ctx.identity } : {}),
+        runId: randomUUID(), agent: name, signal, ...(ctx.identity ? { identity: ctx.identity } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
       });
 
       async function dispatch(msg: RpcRequest, inflight: Session['inflight'], ctx: InboundContext): Promise<unknown> {

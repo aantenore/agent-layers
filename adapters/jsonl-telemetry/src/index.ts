@@ -7,6 +7,8 @@ export interface JsonlTelemetryOptions {
   path: string;
   /** Empty the file when the adapter starts (default false: keep appending). */
   truncate?: boolean;
+  /** Write W3C trace and span ids on each record and join the caller's trace (default true). */
+  traceIds?: boolean;
 }
 
 /** Telemetry that appends one JSON record per line to a file. Writes are synchronous, so nothing is buffered. */
@@ -23,7 +25,7 @@ export function createJsonlTelemetry(options: JsonlTelemetryOptions, deps: { cwd
       if (!warned) process.stderr.write(`jsonl-telemetry: cannot write ${file}: ${err instanceof Error ? err.message : String(err)}\n`);
       warned = true;
     }
-  }, deps.name ?? 'jsonl-telemetry');
+  }, deps.name ?? 'jsonl-telemetry', { traceIds: options.traceIds !== false });
   return { ...port, native: () => file };
 }
 
@@ -41,6 +43,7 @@ export const adapter = defineAdapter<'TelemetryPort', JsonlTelemetryOptions>({
     properties: {
       path: { type: 'string', minLength: 1 },
       truncate: { type: 'boolean' },
+      traceIds: { type: 'boolean' },
     },
     required: ['path'],
     additionalProperties: false,

@@ -24,7 +24,7 @@ A port is the contract between the stack and one kind of backend. Every port has
 | Control plane | `guardrail` (L7) | [GuardPort](GuardPort.md) | 0.1.1 | Allow, block or redact text at four stages |
 | Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 0.2.0 | Expose agents to people, apps and other agents |
 | Experience plane | `interface` (L8) | [TriggerPort](TriggerPort.md) | 0.2.0 | Start runs from events and schedules |
-| Insight plane | `telemetry` (L9) | [TelemetryPort](TelemetryPort.md) | 0.1.0 | Spans, events and metrics tagged with `agent.layer` |
+| Insight plane | `telemetry` (L9) | [TelemetryPort](TelemetryPort.md) | 0.2.0 | Spans, events and metrics tagged with `agent.layer` |
 | Insight plane | `eval` (L10) | [EvaluatorPort](EvaluatorPort.md) | 0.2.0 | Score a run of a dataset case |
 | Insight plane | `eval` (L10) | [FeedbackPort](FeedbackPort.md) | 0.1.0 | User feedback attached to runs, as evaluation data |
 
@@ -66,6 +66,7 @@ Every port instance may expose these members, whatever the port:
 | `signal?` | Signal | Cancellation. |
 | `telemetry?` | TelemetryPort | Where spans and events go. |
 | `credentials?` | BoundCredentials | `token(audience: String, scopes?: [String]) → String`: outbound tokens already bound to the caller of this run. |
+| `trace?` | TraceContext | The caller's distributed trace context, `{traceparent: String, tracestate?: String}` in the W3C Trace Context format, when the run was started by a request that carried one. See [TelemetryPort](TelemetryPort.md). |
 
 ## Composition
 

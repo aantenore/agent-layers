@@ -131,7 +131,7 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         // The session log of a context belongs to one caller: the same contextId from another caller is another session.
         const sessionId = `a2a-${createHash('sha256').update(owner).digest('hex').slice(0, 16)}-${contextId}`;
         const done = host.run(agent, text, {
-          runId: id, sessionId, signal: controller.signal, ...(ctx.identity ? { identity: ctx.identity } : {}),
+          runId: id, sessionId, signal: controller.signal, ...(ctx.identity ? { identity: ctx.identity } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
         }).then((r) => {
           value.state = value.state === 'canceled' ? 'canceled' : stateOfRun(r);
           if (value.state === 'completed') value.answer = r.output;

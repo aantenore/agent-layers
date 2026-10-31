@@ -16,7 +16,7 @@ export type {
 export { readiness, type Readiness, type ReadinessProblem } from './readiness.ts';
 export { diffProfiles, formatDiff, type DiffRow, type DiffStatus } from './diff.ts';
 export { evaluatePolicy, riskOf, subjectOf, toolAccessRequest, type PolicyEffect, type PolicyRule, type PolicySubject } from './policy.ts';
-export { createTelemetry, noopTelemetry, recordingTelemetry, sanitizeAttributes, type TelemetryRecord } from './telemetry.ts';
+export { createTelemetry, noopTelemetry, recordingTelemetry, sanitizeAttributes, traceContext, traceHeaders, type TelemetryRecord, type TraceIds } from './telemetry.ts';
 export { findRoute, routeMatches } from './inbound.ts';
 export { assembleChunks, contentText, lastUserText, newUserMessageIndexes, responseText, responseToChunks } from './chat.ts';
 export { filterTools, formatPassages, knowledgeTools, toChatTools } from './tools.ts';

@@ -1,4 +1,4 @@
-import { matchesAny, type BoundCredentials, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec } from '@agent-layers/core';
+import { matchesAny, type BoundCredentials, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec, type TelemetryPort } from '@agent-layers/core';
 import { bearer, McpSession, type McpToolInfo } from './client.ts';
 import { interpolate } from './env.ts';
 import { redact, redactStructured, scrubError, secretForms, staticSecrets } from './redact.ts';
@@ -23,6 +23,8 @@ export interface McpDeps {
   env?: Record<string, string | undefined>;
   /** Credentials for the connection requests; without them the credentials of the call that opens the connection are used. */
   credentials?: BoundCredentials;
+  /** The stack's telemetry: its active span's trace context goes with each HTTP request. */
+  telemetry?: TelemetryPort;
 }
 
 const DEFAULT_TOOLS_TTL_MS = 60_000;
@@ -43,7 +45,7 @@ interface Entry { spec: ToolSpec; mcpName: string }
 export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): ToolPort {
   const env = deps.env ?? process.env;
   const cfg = interpolate(options, env, 'mcp');
-  const session = new McpSession(cfg, { env, ...(deps.credentials ? { credentials: deps.credentials } : {}) });
+  const session = new McpSession(cfg, { env, ...(deps.credentials ? { credentials: deps.credentials } : {}), ...(deps.telemetry ? { telemetry: deps.telemetry } : {}) });
   const ttl = cfg.toolsTtlMs ?? DEFAULT_TOOLS_TTL_MS;
   const { auth } = cfg;
   const staticForms = secretForms(staticSecrets(cfg.headers));

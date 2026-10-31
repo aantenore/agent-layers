@@ -2,6 +2,7 @@ import type { CallContext, PortBase } from './base.ts';
 import type { Identity } from './identity.ts';
 import type { ModelPort } from './model.ts';
 import type { RunEvent, RunInput, RunResult } from './runtime.ts';
+import type { TelemetryPort, TraceContext } from './telemetry.ts';
 import type { ToolPort } from './tool.ts';
 
 /** What a channel can reach: the stack's agents, inbound identity and, for hosted channels, the governed ports. */
@@ -33,6 +34,8 @@ export interface InboundContext {
   signal: AbortSignal;
   /** Public origin of the host (`scheme://host:port`), for absolute URLs in documents the route returns. */
   origin: string;
+  /** Trace context the request carried (`traceparent`, `tracestate`), when valid. Pass it on as `CallContext.trace`. */
+  trace?: TraceContext;
 }
 
 /** A route of a mounted channel or trigger, on the web-standard Request and Response types. */

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { contentText, isAbort, type CallContext, type RunInput, type RunResult, type RuntimePort, type Stack } from '@agent-layers/core';
+import { contentText, isAbort, traceHeaders, type CallContext, type RunInput, type RunResult, type RuntimePort, type Stack } from '@agent-layers/core';
 import { A2A_VERSION, INTERRUPTED, LEGACY_VERSION, messageWire, METHOD_OF, readResult, TERMINAL, type TaskState, type WireVersion } from './wire.ts';
 
 /** Options of the outbound descriptor: a remote A2A agent as the stack's runtime. */
@@ -104,7 +104,8 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a'): Runt
     name,
     bind(stack: Stack, agent) {
       async function headers(ctx: CallContext): Promise<Record<string, string>> {
-        const out: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': version, ...options.headers };
+        // The remote agent joins the run's trace (W3C Trace Context of the active span).
+        const out: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': version, ...options.headers, ...traceHeaders(stack.telemetry, ctx.trace) };
         if (options.auth) {
           const provider = stack.ports.credentials;
           if (!provider) throw new Error('auth needs a credentials adapter');

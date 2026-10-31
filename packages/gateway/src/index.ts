@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
-  configuredAdapters, ConfigError, findRoute, InboundRejected, readiness,
-  type ChannelPort, type GatewayConfig, type Identity, type InboundContext, type InboundRoute, type Stack, type TelemetryPort,
+  configuredAdapters, ConfigError, findRoute, InboundRejected, readiness, traceContext,
+  type ChannelPort, type GatewayConfig, type Identity, type TraceContext, type InboundContext, type InboundRoute, type Stack, type TelemetryPort,
   type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
 import { BodyTooLarge, errorResponse, readBody, toRequest, writeResponse } from './http.ts';
@@ -177,7 +177,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     return undefined;
   }
 
-  async function exchange(req: IncomingMessage, requestId: string, signal: AbortSignal, attrs: Record<string, string | number | boolean>): Promise<Response> {
+  async function exchange(req: IncomingMessage, requestId: string, signal: AbortSignal, attrs: Record<string, string | number | boolean>, trace: TraceContext | undefined): Promise<Response> {
     const path = new URL(req.url ?? '/', 'http://gateway').pathname;
     const method = (req.method ?? 'GET').toUpperCase();
     const corsHeaders = cors(req);
@@ -223,7 +223,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
       if (err instanceof BodyTooLarge) return errorResponse(413, `request body larger than ${maxBodyBytes} bytes`, 'invalid_request_error', { connection: 'close' });
       throw err;
     }
-    const ctx: InboundContext = { requestId, signal, origin, ...(identity ? { identity } : {}) };
+    const ctx: InboundContext = { requestId, signal, origin, ...(identity ? { identity } : {}), ...(trace ? { trace } : {}) };
     // A route that does not answer within the time limit (or before the client leaves) loses the exchange.
     const lost = untilAborted(signal);
     return Promise.race([lost, route.handle(toRequest(req, origin, body, signal), ctx)]);
@@ -240,12 +240,15 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     const attrs: Record<string, string | number | boolean> = {
       'http.request.method': req.method ?? 'GET', 'url.path': new URL(req.url ?? '/', 'http://gateway').pathname, 'gateway.request_id': requestId,
     };
+    // W3C Trace Context of the caller: the request span joins its trace. Malformed values are ignored.
+    const one = (h: string | string[] | undefined) => (Array.isArray(h) ? (h.length === 1 ? h[0] : undefined) : h);
+    const trace = traceContext(one(req.headers.traceparent), Array.isArray(req.headers.tracestate) ? req.headers.tracestate.join(',') : req.headers.tracestate);
     await telemetry.span('gateway.request', { 'agent.layer': 'interface', ...attrs }, async (span) => {
       let response: Response;
       if (draining) response = errorResponse(503, 'the gateway is shutting down', 'unavailable', { connection: 'close' });
       else {
         try {
-          response = await exchange(req, requestId, signal, attrs);
+          response = await exchange(req, requestId, signal, attrs, trace);
         } catch {
           // Never the error text: it can carry upstream bodies or credentials.
           response = signal.aborted && !client.signal.aborted
@@ -256,7 +259,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
       await writeResponse(res, response, { 'x-request-id': requestId, ...cors(req) });
       span.setAttributes({ ...attrs, 'http.response.status_code': response.status, 'gateway.duration_ms': Date.now() - started });
       telemetry.metric('gateway.requests', 1, { 'agent.layer': 'interface', 'http.response.status_code': response.status, ...(attrs['gateway.inbound'] ? { 'gateway.inbound': String(attrs['gateway.inbound']) } : {}) });
-    }).catch(() => { if (!res.headersSent) { res.writeHead(500); } if (!res.writableEnded) res.end(); });
+    }, trace ? { parent: trace } : undefined).catch(() => { if (!res.headersSent) { res.writeHead(500); } if (!res.writableEnded) res.end(); });
   }
 
   const server = createServer((req, res) => { track(handle(req, res)); });

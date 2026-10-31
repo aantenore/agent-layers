@@ -183,11 +183,14 @@ export class HttpTransport implements Transport {
   #cfg: McpServerOptions;
   #timeoutMs: number;
   #connectHeaders: () => Promise<HeaderMap | undefined>;
+  #trace: () => HeaderMap;
 
-  constructor(cfg: McpServerOptions, timeoutMs: number, connectHeaders: () => Promise<HeaderMap | undefined> = async () => undefined) {
+  /** `trace` returns the trace context headers of the active span, sent with each request so the server joins the trace. */
+  constructor(cfg: McpServerOptions, timeoutMs: number, connectHeaders: () => Promise<HeaderMap | undefined> = async () => undefined, trace: () => HeaderMap = () => ({})) {
     this.#cfg = cfg;
     this.#timeoutMs = timeoutMs;
     this.#connectHeaders = connectHeaders;
+    this.#trace = trace;
   }
 
   get alive(): boolean { return true; }
@@ -212,6 +215,7 @@ export class HttpTransport implements Transport {
         accept: 'application/json, text/event-stream',
         ...(this.#session ? { 'mcp-session-id': this.#session } : {}),
         ...(this.#protocol ? { 'mcp-protocol-version': this.#protocol } : {}),
+        ...this.#trace(),
         ...withAuth(this.#cfg.headers, auth),
       },
       body: JSON.stringify(body),

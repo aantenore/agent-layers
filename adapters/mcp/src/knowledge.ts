@@ -1,4 +1,4 @@
-import type { BoundCredentials, KnowledgePort, KnowledgeQuery, Passage } from '@agent-layers/core';
+import type { BoundCredentials, KnowledgePort, KnowledgeQuery, Passage, TelemetryPort } from '@agent-layers/core';
 import { McpSession } from './client.ts';
 import { interpolate } from './env.ts';
 import { matchesFilter, parseMcpResult } from './parse.ts';
@@ -27,6 +27,8 @@ export interface McpKnowledgeDeps {
   name?: string;
   env?: Record<string, string | undefined>;
   credentials?: BoundCredentials;
+  /** The stack's telemetry: its active span's trace context goes with each HTTP request. */
+  telemetry?: TelemetryPort;
 }
 
 /** KnowledgePort over an MCP retrieval tool. The default parser covers mcp-server-qdrant. */
@@ -36,7 +38,7 @@ export function createMcpKnowledge(options: McpKnowledgeOptions, deps: McpKnowle
   const cfg = interpolate(rest, env, 'mcp');
   const name = deps.name ?? 'mcp';
   const forms = secretForms(staticSecrets(cfg.headers));
-  const session = new McpSession(cfg, { env, ...(deps.credentials ? { credentials: deps.credentials } : {}) });
+  const session = new McpSession(cfg, { env, ...(deps.credentials ? { credentials: deps.credentials } : {}), ...(deps.telemetry ? { telemetry: deps.telemetry } : {}) });
 
   return {
     name,

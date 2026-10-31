@@ -17,7 +17,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.tools import RunContext, ToolDefinition
 
-from .caller import CallerBearer, caller_token
+from .caller import CallerBearer, caller_token, trace_headers
 from .settings import Settings, SettingsError
 from .spec import AgentSpec
 
@@ -48,7 +48,10 @@ def gateway_tools(settings: Settings, spec: AgentSpec) -> Any:
     def allowed(_ctx: RunContext[None], tool: ToolDefinition) -> bool:
         return spec.allows_tool(tool.name)
 
-    return MCPToolset(f'{settings.gateway_url}/mcp', id='gateway', auth=auth).filtered(allowed)
+    def headers(_ctx: RunContext[None]) -> dict[str, str] | None:
+        return trace_headers() or None
+
+    return MCPToolset(f'{settings.gateway_url}/mcp', id='gateway', auth=auth, headers=headers).filtered(allowed)
 
 
 def model_http_client(settings: Settings) -> httpx2.AsyncClient:

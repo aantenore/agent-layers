@@ -122,7 +122,7 @@ export function createOpenAICompatibleChannel(options: OpenAICompatibleChannelOp
         return Array.isArray(options.agents) ? all.filter((a) => (options.agents as string[]).includes(a)) : all;
       };
       const context = (ctx: InboundContext): CallContext => ({
-        runId: randomUUID(), agent: name, signal: ctx.signal, ...(ctx.identity ? { identity: ctx.identity } : {}),
+        runId: randomUUID(), agent: name, signal: ctx.signal, ...(ctx.identity ? { identity: ctx.identity } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
       });
 
       const listModels: InboundRoute = {
@@ -172,7 +172,7 @@ export function createOpenAICompatibleChannel(options: OpenAICompatibleChannelOp
         const created = now();
         const model = `${AGENT_PREFIX}${agent}`;
         const input = { messages: p.req.messages };
-        const run = { runId: call.runId, signal: ctx.signal, ...(ctx.identity ? { identity: ctx.identity } : {}) };
+        const run = { runId: call.runId, signal: ctx.signal, ...(ctx.identity ? { identity: ctx.identity } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}) };
         const headers = { 'x-agent-run-id': call.runId };
         const finish = (status: string) => (status === 'completed' ? 'stop' : status === 'stopped' ? 'content_filter' : 'error');
         if (!p.stream || !host.stream) {

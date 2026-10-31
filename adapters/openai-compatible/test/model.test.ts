@@ -181,3 +181,19 @@ test('timeout rejects a stalled request', async () => {
     await mock.close();
   }
 });
+
+test('trace context: the active span of the run telemetry, else the run context, goes out as traceparent', async () => {
+  const mock = await startMock();
+  try {
+    const model = createOpenAICompatibleModel({ baseUrl: mock.url });
+    const active = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    const inbound = '00-11111111111111111111111111111111-2222222222222222-01';
+    const telemetry = { span: (_n: string, _a: unknown, fn: (s: never) => Promise<unknown>) => fn({} as never), event() {}, metric() {}, current: () => ({ traceparent: active, tracestate: 'v=1' }) };
+    await model.chat(req, { ...ctx, telemetry: telemetry as never, trace: { traceparent: inbound } });
+    await model.chat(req, { ...ctx, trace: { traceparent: inbound } });
+    await model.chat(req, ctx);
+    assert.deepEqual(mock.seen.map((s) => [s.headers.traceparent, s.headers.tracestate]), [[active, 'v=1'], [inbound, undefined], [undefined, undefined]]);
+  } finally {
+    await mock.close();
+  }
+});

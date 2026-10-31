@@ -27,7 +27,7 @@ carries only `error.type` by default. Export failures never reach the run: the f
 `process.emitWarning`: the origin and one of `HTTP <status>`, `timeout`, `invalid response`, `network error`, never error
 text. An endpoint with credentials in the URL is rejected at creation; put them in `headers`. Spans of a failed batch are dropped; metrics are re-sent with the next export.
 
-`native()` returns `{ traceparent() }`, the W3C header of the active span, for outbound HTTP calls.
+`current()` (and `native().traceparent()`) return the W3C context of the active span, which the stack's HTTP adapters send on outbound calls. A span started outside any other with a remote `parent` (the gateway passes the request's `traceparent`) joins that trace; flags and `tracestate` are kept.
 
 Tested live against OpenTelemetry Collector 0.164 and Jaeger 2.22 (`reference/telemetry`): nested spans found through
 `/api/v3/traces`, metrics on the collector's Prometheus endpoint (`:8889`).

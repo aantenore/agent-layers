@@ -209,7 +209,7 @@ async function bindAgent(stack: Stack, name: string, context: Stack['context']):
         span.setAttributes({ 'run.status': String(result.status), ...(result.reason ? { 'run.reason': result.reason } : {}) });
         if (state && ctx.sessionId && result.events?.length) await state.append(ctx.sessionId, result.events);
         return result;
-      });
+      }, ctx.trace ? { parent: ctx.trace } : undefined);
     },
     ...(inner.stream ? { stream: (input: RunInput, init = {}) => inner.stream!(input, context({ ...init, agent: name })) } : {}),
   };

@@ -1,5 +1,7 @@
 // A2A through the gateway: agent cards, JSON-RPC 1.0 and 0.3, streaming, tasks; then a remote A2A agent as a runtime.
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { compose, resolveProfile, type Stack, type StackConfig } from '@agent-layers/core';
 import { checkAdapter, inboundFetch } from '@agent-layers/conformance';
@@ -234,4 +236,32 @@ test('a card cannot redirect the caller credential: other origins are refused un
   }
   for (const h of ['127.0.0.1', 'localhost', '10.1.2.3', '172.20.0.1', '192.168.1.1', '169.254.169.254', '[::1]', '[fd00::1]', '[fe80::1]', '100.64.0.1']) assert.ok(isPrivateHost(h), h);
   for (const h of ['example.com', '8.8.8.8', '172.32.0.1']) assert.ok(!isPrivateHost(h), h);
+});
+
+test('the remote agent receives the trace context of the run, and the task usage comes back', async () => {
+  const seen: (string | undefined)[] = [];
+  const remote = createServer(async (req, res) => {
+    for await (const _ of req) { /* drain */ }
+    seen.push(req.headers.traceparent as string | undefined);
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+      jsonrpc: '2.0', id: 1,
+      result: { task: { id: 't1', contextId: 'c1', status: { state: 'TASK_STATE_COMPLETED' }, artifacts: [{ artifactId: 'a', parts: [{ text: 'done' }] }], metadata: { usage: { prompt_tokens: 5, completion_tokens: 2 }, costUsd: 'not a number' } } },
+    }));
+  });
+  await new Promise<void>((r) => remote.listen(0, '127.0.0.1', r));
+  const client = await compose(resolveProfile({
+    agents: { assistant: { instructions: '', model: 'remote' } },
+    layers: { runtime: { adapter: 'a2a', options: { url: `http://127.0.0.1:${(remote.address() as AddressInfo).port}/` } } },
+  }), { adapters: [runtimeAdapter] });
+  try {
+    const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    const r = await (await client.agent('assistant')).run('hi', { trace: { traceparent } });
+    assert.equal(r.output, 'done');
+    assert.deepEqual(seen, [traceparent]);
+    assert.deepEqual(r.usage, { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 });
+    assert.equal(r.costUsd, undefined, 'a malformed cost is ignored');
+  } finally {
+    await client.close();
+    remote.close();
+  }
 });

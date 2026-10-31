@@ -1,7 +1,10 @@
-import type { BoundCredentials } from '@agent-layers/core';
+import { traceHeaders, type BoundCredentials, type TelemetryPort } from '@agent-layers/core';
 import { HttpTransport, McpHttpError, StdioTransport, type HeaderMap, type McpServerOptions, type Transport } from './transport.ts';
 
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
+
+/** What a connection needs besides its config: environment, connection credentials, and telemetry for trace context. */
+export interface McpConnectDeps { env?: Record<string, string | undefined>; credentials?: BoundCredentials; telemetry?: TelemetryPort }
 export const DEFAULT_TIMEOUT_MS = 60_000;
 const CLIENT_INFO = { name: 'agent-layers-mcp', version: '0.1.0' };
 
@@ -35,12 +38,12 @@ export class McpClient {
   }
 
   /** `credentials` authorize the connection requests (initialize, tools/list, session close) when `auth` is set. */
-  static async connect(cfg: McpServerOptions, deps: { env?: Record<string, string | undefined>; credentials?: BoundCredentials } = {}): Promise<McpClient> {
+  static async connect(cfg: McpServerOptions, deps: McpConnectDeps = {}): Promise<McpClient> {
     const problem = serverProblem(cfg);
     if (problem) throw new Error(`MCP server: ${problem}`);
     const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const connectHeaders = async () => (cfg.auth && deps.credentials ? bearer(await deps.credentials.token(cfg.auth.audience, cfg.auth.scopes ? { scopes: cfg.auth.scopes } : {})) : undefined);
-    const transport = cfg.command ? new StdioTransport(cfg, deps.env ?? process.env, timeoutMs) : new HttpTransport(cfg, timeoutMs, connectHeaders);
+    const transport = cfg.command ? new StdioTransport(cfg, deps.env ?? process.env, timeoutMs) : new HttpTransport(cfg, timeoutMs, connectHeaders, () => traceHeaders(deps.telemetry));
     try {
       const init = await transport.request('initialize', { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO });
       if (transport instanceof HttpTransport) transport.setProtocol(init?.protocolVersion ?? MCP_PROTOCOL_VERSION);
@@ -87,10 +90,10 @@ export class McpClient {
  */
 export class McpSession {
   #cfg: McpServerOptions;
-  #deps: { env?: Record<string, string | undefined>; credentials?: BoundCredentials };
+  #deps: McpConnectDeps;
   #client: Promise<McpClient> | undefined;
 
-  constructor(cfg: McpServerOptions, deps: { env?: Record<string, string | undefined>; credentials?: BoundCredentials } = {}) {
+  constructor(cfg: McpServerOptions, deps: McpConnectDeps = {}) {
     this.#cfg = cfg;
     this.#deps = deps;
   }

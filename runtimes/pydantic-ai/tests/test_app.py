@@ -92,6 +92,23 @@ async def test_a2a_1_0_run_carries_the_caller_token_to_the_model(server, caplog)
     assert TOKEN not in json.dumps(task)
 
 
+TRACEPARENT = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'
+
+
+async def test_the_callers_trace_context_reaches_the_model_calls(server):
+    client, gateway = server
+    message = {'messageId': 'm-trace', 'role': 'ROLE_USER', 'parts': [{'text': 'Hello'}]}
+    headers = {'authorization': f'Bearer {TOKEN}', 'a2a-version': '1.0', 'traceparent': TRACEPARENT, 'tracestate': 'vendor=a'}
+    await run_to_end(client, 'SendMessage', 'GetTask', message, headers)
+    assert gateway.requests[-1].headers['traceparent'] == TRACEPARENT
+    assert gateway.requests[-1].headers['tracestate'] == 'vendor=a'
+    # A malformed context is not forwarded.
+    count = len(gateway.requests)
+    bad = {**headers, 'traceparent': '00-zz-00f067aa0ba902b7-01'}
+    await run_to_end(client, 'SendMessage', 'GetTask', {**message, 'messageId': 'm-bad'}, bad)
+    assert len(gateway.requests) > count and 'traceparent' not in gateway.requests[-1].headers
+
+
 async def test_a2a_0_3_shapes_are_accepted(server):
     client, _ = server
     message = {'kind': 'message', 'messageId': 'm2', 'role': 'user', 'parts': [{'kind': 'text', 'text': 'Hello'}]}

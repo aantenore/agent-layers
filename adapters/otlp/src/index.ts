@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
-import { defineAdapter, PORT_VERSIONS, type Attributes, type LayerAttributes, type Span, type TelemetryPort } from '@agent-layers/core';
+import { defineAdapter, PORT_VERSIONS, traceContext, type Attributes, type LayerAttributes, type Span, type SpanOptions, type TelemetryPort, type TraceContext } from '@agent-layers/core';
 import { MetricsAggregator } from './metrics.ts';
 import { createClock, toAttributes, type KeyValue } from './otlp-json.ts';
 import { scrub, spanKind, spanName } from './semconv.ts';
@@ -39,6 +39,9 @@ interface OpenSpan {
   traceId: string;
   spanId: string;
   parentSpanId?: string;
+  /** Trace flags and vendor state inherited from a remote parent, propagated unchanged. */
+  flags: string;
+  tracestate?: string;
   name: string;
   attributes: Attributes;
   events: { time: string; name: string; attributes: Attributes }[];
@@ -90,7 +93,7 @@ function errorInfo(err: unknown): { type: string; message: string } {
  * becomes its parent (AsyncLocalStorage), so the spans of one run form a tree: run, then model, tool, guard and
  * knowledge work beneath it. Works with any collector, and with backends that take OTLP JSON directly.
  */
-export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = {}): Omit<TelemetryPort, 'native'> & { native(): { traceparent(): string | undefined } } {
+export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = {}): Omit<TelemetryPort, 'native'> & { native(): { traceparent(): string | undefined }; current(): TraceContext | undefined } {
   const env = deps.env ?? process.env;
   const captureContent = options.captureContent === true;
   const semconvNames = options.semconvNames !== false;
@@ -150,12 +153,18 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
   const timer = setInterval(() => { void flush(); }, options.intervalMs ?? 2000);
   timer.unref();
 
-  function open(name: string, attrs: Attributes): OpenSpan {
-    const parent = context.getStore();
+  /** The local active span is the parent; without one, a valid remote parent from another process. */
+  function open(name: string, attrs: Attributes, remote?: TraceContext): OpenSpan {
+    const local = context.getStore();
+    const parsed = !local && remote ? traceContext(remote.traceparent, remote.tracestate) : undefined;
+    const [, remoteTrace, remoteSpan, remoteFlags] = parsed ? parsed.traceparent.split('-') : [];
+    const parent = local ?? (parsed ? { traceId: remoteTrace!, spanId: remoteSpan!, flags: remoteFlags!, ...(parsed.tracestate ? { tracestate: parsed.tracestate } : {}) } : undefined);
     return {
       traceId: parent?.traceId ?? hex(16),
       spanId: hex(8),
       ...(parent ? { parentSpanId: parent.spanId } : {}),
+      flags: parent?.flags ?? '01',
+      ...(parent?.tracestate ? { tracestate: parent.tracestate } : {}),
       name,
       attributes: scrub(attrs, captureContent),
       events: [],
@@ -199,10 +208,14 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
     name: deps.name ?? 'otlp',
     native: () => ({
       /** W3C `traceparent` of the active span, to propagate into outbound HTTP calls. */
-      traceparent: () => { const s = context.getStore(); return s ? `00-${s.traceId}-${s.spanId}-01` : undefined; },
+      traceparent: () => { const s = context.getStore(); return s ? `00-${s.traceId}-${s.spanId}-${s.flags}` : undefined; },
     }),
-    async span<T>(name: string, attrs: LayerAttributes, fn: (span: Span) => Promise<T>): Promise<T> {
-      const s = open(name, attrs);
+    current() {
+      const s = context.getStore();
+      return s ? { traceparent: `00-${s.traceId}-${s.spanId}-${s.flags}`, ...(s.tracestate ? { tracestate: s.tracestate } : {}) } : undefined;
+    },
+    async span<T>(name: string, attrs: LayerAttributes, fn: (span: Span) => Promise<T>, opts?: SpanOptions): Promise<T> {
+      const s = open(name, attrs, opts?.parent);
       const handle: Span = {
         setAttributes: (a) => { if (!s.ended) Object.assign(s.attributes, scrub(a, captureContent)); },
         addEvent: (n, a) => { if (!s.ended) s.events.push({ time: now(), name: n, attributes: a ? scrub(a, captureContent) : {} }); },

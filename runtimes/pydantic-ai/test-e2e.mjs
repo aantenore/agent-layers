@@ -158,6 +158,22 @@ describe('polyglot: Pydantic AI agent as the runtime of the stack', { skip: !has
     assert.match(pair.gateway.output, /\[L6 identity\] authorize .*util__convert_temperature policy\.decision=allow/);
   });
 
+  test('one trace spans gateway, A2A, the Python agent and its calls back to the gateway', async () => {
+    const before = records(pair.telemetry).length;
+    const task = await a2aRun(`${pair.gw}/a2a/assistant`, DEV_TOKEN, 'Convert 20 C to Fahrenheit');
+    assert.equal(task.status.state, 'TASK_STATE_COMPLETED');
+    const run = records(pair.telemetry).slice(before).filter((r) => r.type === 'span');
+    const send = run.find((r) => r.name === 'a2a.send');
+    assert.match(send?.traceId ?? '', /^[0-9a-f]{32}$/, 'recorded spans carry trace ids');
+    const inTrace = run.filter((r) => r.traceId === send.traceId);
+    const paths = new Set(inTrace.filter((r) => r.name === 'gateway.request').map((r) => r.attrs['url.path']));
+    for (const path of ['/a2a/assistant', '/v1/chat/completions', '/mcp']) assert.ok(paths.has(path), `${path} is in the trace (${[...paths].join(', ')})`);
+    // The Python agent's calls are children of the span that sent the A2A message.
+    const callbacks = inTrace.filter((r) => r.name === 'gateway.request' && r.attrs['url.path'] !== '/a2a/assistant');
+    assert.ok(callbacks.every((r) => r.parentSpanId === send.spanId));
+    assert.ok(inTrace.some((r) => r.name === 'execute_tool'), 'the tool call is in the same trace');
+  });
+
   test('requests without a credential are refused by the gateway and by the Python agent', async () => {
     const gw = await fetch(`${pair.gw}/a2a/assistant`, { method: 'POST', headers: json(null), body: rpc('SendMessage', message('Hello')) });
     assert.equal(gw.status, 401);

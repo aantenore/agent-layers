@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -27,6 +28,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from .settings import GATEWAY_SECRET_HEADER
 
 CALLER_TOKEN: ContextVar[str | None] = ContextVar('caller_token', default=None)
+
+CALLER_TRACE: ContextVar[dict[str, str] | None] = ContextVar('caller_trace', default=None)
+"""W3C Trace Context of the request (`traceparent`, `tracestate`), forwarded on the run's model and MCP calls."""
 
 RUN_OWNER: ContextVar[str | None] = ContextVar('run_owner', default=None)
 """The owner key of the task being run: what its writes to the conversation history are checked against."""
@@ -54,6 +58,31 @@ def owner_key() -> str | None:
     return hashlib.sha256(token.encode()).hexdigest() if token else None
 
 
+_TRACEPARENT = re.compile(r'^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$')
+_TRACESTATE = re.compile(r'^[\x20-\x7e]{1,512}$')
+
+
+def trace_of(headers: dict[str, str]) -> dict[str, str] | None:
+    """The W3C Trace Context of a request, or None when `traceparent` is missing or malformed.
+
+    This agent records no spans of its own, so it passes the caller's context on unchanged: the gateway's spans for
+    the run's model and tool calls become children of the span that sent the A2A message, in the same trace.
+    """
+    m = _TRACEPARENT.match(headers.get('traceparent', '').strip().lower())
+    if not m or m.group(1) == 'ff' or set(m.group(2)) == {'0'} or set(m.group(3)) == {'0'}:
+        return None
+    out = {'traceparent': m.group(0)}
+    state = headers.get('tracestate', '').strip()
+    if state and _TRACESTATE.match(state):
+        out['tracestate'] = state
+    return out
+
+
+def trace_headers() -> dict[str, str]:
+    """Trace headers of the current run (empty without a trace context)."""
+    return dict(CALLER_TRACE.get() or {})
+
+
 def bearer_of(header: str | None) -> str | None:
     if not header:
         return None
@@ -67,6 +96,7 @@ class CallerBearer(httpx2.Auth):
 
     def auth_flow(self, request: httpx2.Request):  # type: ignore[override]
         request.headers['Authorization'] = f'Bearer {caller_token()}'
+        request.headers.update(trace_headers())
         yield request
 
 
@@ -112,9 +142,11 @@ class CallerMiddleware:
             await _reply(send, 401, {'error': 'unauthorized'}, {'www-authenticate': 'Bearer realm="agent"'})
             return
         reset = CALLER_TOKEN.set(token)
+        reset_trace = CALLER_TRACE.set(trace_of(headers))
         try:
             await self.app(scope, receive, send)
         finally:
+            CALLER_TRACE.reset(reset_trace)
             CALLER_TOKEN.reset(reset)
 
 
@@ -134,22 +166,30 @@ async def _reply(send: Send, status: int, body: dict[str, Any], headers: dict[st
 
 @dataclass
 class CallerBroker(InMemoryBroker):
-    """An in-memory broker that keeps the credential of the request that scheduled each task, until it runs."""
+    """An in-memory broker that keeps the credential and trace context of the request that scheduled each task, until it runs."""
 
     _tokens: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _traces: dict[str, dict[str, str]] = field(default_factory=dict, init=False, repr=False)
 
     async def run_task(self, params: TaskSendParams) -> None:
         token = CALLER_TOKEN.get()
         if token:
             self._tokens[params['id']] = token
+        trace = CALLER_TRACE.get()
+        if trace:
+            self._traces[params['id']] = trace
         await super().run_task(params)
 
     async def cancel_task(self, params: TaskIdParams) -> None:
         self._tokens.pop(params['id'], None)
+        self._traces.pop(params['id'], None)
         await super().cancel_task(params)
 
     def take_token(self, task_id: str) -> str | None:
         return self._tokens.pop(task_id, None)
+
+    def take_trace(self, task_id: str) -> dict[str, str] | None:
+        return self._traces.pop(task_id, None)
 
 
 @dataclass
@@ -166,10 +206,12 @@ class CallerWorker(AgentWorker[Any, Any]):
         task_id = params['id']
         broker = self.broker
         token = broker.take_token(task_id) if isinstance(broker, CallerBroker) else None
+        trace = broker.take_trace(task_id) if isinstance(broker, CallerBroker) else None
         task = await self.storage.load_task(task_id)
         if task is not None and task['status']['state'] == 'canceled':
             return  # canceled before it started
         reset = CALLER_TOKEN.set(token)
+        reset_trace = CALLER_TRACE.set(trace)
         reset_owner = RUN_OWNER.set(owner_key())
         try:
             with anyio.CancelScope() as scope:
@@ -180,6 +222,7 @@ class CallerWorker(AgentWorker[Any, Any]):
                     self._scopes.pop(task_id, None)
         finally:
             RUN_OWNER.reset(reset_owner)
+            CALLER_TRACE.reset(reset_trace)
             CALLER_TOKEN.reset(reset)
 
     async def cancel_run(self, task_id: str) -> None:

@@ -57,7 +57,7 @@ export const toolAdapter = defineAdapter<'ToolPort', McpToolsOptions>({
     },
     additionalProperties: false,
   },
-  create: (options, ctx) => createMcpTools(checked(options), { name: ctx.name, env: ctx.env }),
+  create: (options, ctx) => createMcpTools(checked(options), { name: ctx.name, env: ctx.env, telemetry: ctx.telemetry }),
 });
 
 /** A retrieval tool of an MCP server as a knowledge source. */
@@ -84,7 +84,7 @@ export const knowledgeAdapter = defineAdapter<'KnowledgePort', McpKnowledgeOptio
     required: ['tool'],
     additionalProperties: false,
   },
-  create: (options, ctx) => createMcpKnowledge(checked(options), { name: ctx.name, env: ctx.env }),
+  create: (options, ctx) => createMcpKnowledge(checked(options), { name: ctx.name, env: ctx.env, telemetry: ctx.telemetry }),
 });
 
 /** Inbound: the stack's governed tools and knowledge sources served as an MCP server, mounted by the gateway. */
