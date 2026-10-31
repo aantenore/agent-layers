@@ -14,6 +14,13 @@ export async function startApi(files: Record<string, string> = {}): Promise<ApiM
     const seen: Seen = { method: req.method ?? '', path: url.pathname, query: url.searchParams, headers: req.headers, body };
     requests.push(seen);
     if (files[url.pathname]) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(files[url.pathname]); return; }
+    if (url.pathname === '/escaped' || url.pathname === '/escaped-error') {
+      // The API key and the bearer token echoed with every character as a \\u escape: only decoding the JSON reveals them.
+      const esc = (v: unknown) => [...String(v)].map((c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`).join('');
+      res.writeHead(url.pathname === '/escaped' ? 200 : 500, { 'content-type': 'application/json' });
+      res.end(`{"key":"${esc(req.headers['x-api-key'])}","bearer":"${esc(req.headers.authorization)}"}`);
+      return;
+    }
     const status = /^\/status\/(\d+)$/.exec(url.pathname);
     if (status) { res.writeHead(Number(status[1]), { 'content-type': 'text/plain' }); res.end(`status ${status[1]}`); return; }
     if (url.pathname === '/bytes') { res.writeHead(200, { 'content-type': 'image/png' }); res.end(Buffer.alloc(32)); return; }

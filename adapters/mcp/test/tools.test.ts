@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import type { BoundCredentials, CallContext } from '@agent-layers/core';
-import { createMcpTools, McpSession, riskOf, toolAdapter } from '../src/index.ts';
+import { createMcpTools, McpHttpError, McpSession, riskOf, toolAdapter } from '../src/index.ts';
 import { startMcpMock } from './mock.ts';
 
 const ctx = (over: Partial<CallContext> = {}): CallContext => ({ runId: 'run-1', agent: 'agent-1', ...over });
@@ -243,5 +243,24 @@ test('structured content that cannot be redacted into valid JSON is dropped, wit
   } finally {
     await tools.close?.();
     await mock.close();
+  }
+});
+
+test('every error leaving callTool carries a masked message: HTTP error bodies and JSON-RPC errors that echo credentials', async () => {
+  for (const echoErrors of ['http', 'rpc'] as const) {
+    const mock = await startMcpMock({ echoErrors });
+    const tools = createMcpTools({ url: mock.url, auth: { audience: 'a' }, headers: { 'x-api-key': 'key-from-env-123' } });
+    try {
+      const credentials = { token: async () => 'tok-xyz-789' };
+      const settled = await tools.callTool('echo', { text: 'x' }, ctx({ credentials })).then((out) => ({ out }), (err: Error) => ({ err }));
+      const text = 'err' in settled ? `${settled.err.message}\n${settled.err.stack}` : settled.out.content;
+      assert.equal(/tok-xyz-789|key-from-env-123/.test(text), false, echoErrors);
+      assert.match(text, /\[redacted\]/, echoErrors);
+      if (echoErrors === 'http') assert.ok('err' in settled && settled.err instanceof McpHttpError && settled.err.status === 500);
+      else assert.ok('out' in settled && settled.out.isError === true);
+    } finally {
+      await tools.close?.();
+      await mock.close();
+    }
   }
 });

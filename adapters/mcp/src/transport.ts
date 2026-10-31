@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { redact, secretForms, staticSecrets } from './redact.ts';
 
 export type HeaderMap = Record<string, string>;
 
@@ -22,8 +23,8 @@ export interface McpServerOptions {
 export class McpRpcError extends Error {
   override name = 'McpRpcError';
   readonly code: number | undefined;
-  constructor(error: { code?: number; message?: string } | undefined) {
-    super(`MCP error ${error?.code ?? ''}: ${error?.message ?? JSON.stringify(error)}`);
+  constructor(error: { code?: number; message?: string } | undefined, forms: readonly string[] = []) {
+    super(redact(`MCP error ${error?.code ?? ''}: ${error?.message ?? JSON.stringify(error)}`, forms));
     this.code = error?.code;
   }
 }
@@ -196,7 +197,12 @@ export class HttpTransport implements Transport {
     this.#protocol = version;
   }
 
-  async #post(body: unknown, signal?: AbortSignal, headers?: HeaderMap): Promise<Response> {
+  /** Static header values and the active credential: a server error may echo them. */
+  #secrets(auth: HeaderMap | undefined): string[] {
+    return secretForms([...staticSecrets(this.#cfg.headers), ...staticSecrets(auth)]);
+  }
+
+  async #post(body: unknown, signal?: AbortSignal, headers?: HeaderMap): Promise<{ res: Response; auth: HeaderMap | undefined }> {
     const auth = headers ?? (await this.#connectHeaders());
     const timeout = AbortSignal.timeout(this.#timeoutMs);
     const res = await fetch(this.#cfg.url!, {
@@ -212,15 +218,15 @@ export class HttpTransport implements Transport {
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     this.#session = res.headers.get('mcp-session-id') ?? this.#session;
-    if (!res.ok) throw new McpHttpError(res.status, (await res.text().catch(() => '')).slice(0, 300));
-    return res;
+    if (!res.ok) throw new McpHttpError(res.status, redact((await res.text().catch(() => '')).slice(0, 300), this.#secrets(auth)));
+    return { res, auth };
   }
 
   async request(method: string, params: unknown, signal?: AbortSignal, headers?: HeaderMap): Promise<any> {
     const id = this.#nextId++;
-    const res = await this.#post({ jsonrpc: '2.0', id, method, params }, signal, headers);
+    const { res, auth } = await this.#post({ jsonrpc: '2.0', id, method, params }, signal, headers);
     const pick = (msg: any) => {
-      if (msg.error) throw new McpRpcError(msg.error);
+      if (msg.error) throw new McpRpcError(msg.error, this.#secrets(auth));
       return msg.result;
     };
     if ((res.headers.get('content-type') ?? '').includes('text/event-stream')) {
@@ -235,7 +241,7 @@ export class HttpTransport implements Transport {
   }
 
   async notify(method: string, params?: unknown): Promise<void> {
-    const res = await this.#post({ jsonrpc: '2.0', method, ...(params !== undefined ? { params } : {}) });
+    const { res } = await this.#post({ jsonrpc: '2.0', method, ...(params !== undefined ? { params } : {}) });
     await res.body?.cancel();
   }
 

@@ -186,3 +186,20 @@ test('a secret that a server echoes JSON-escaped is redacted too', () => withApi
   assert.equal(out.content.includes('pa\\"ss'), false);
   assert.equal((out.data as { headers: Record<string, string> }).headers['x-api-key'], '[redacted]');
 }));
+
+test('a secret echoed as \\u escapes is masked in text and data, for successes and error bodies', () => withApi(async (url) => {
+  const tools = createHttpTools({
+    tools: {
+      ok: { description: 'ok', method: 'GET', url: `${url}/escaped`, headers: { 'x-api-key': 'key-from-env-123' }, auth: { audience: 'a' } },
+      bad: { description: 'bad', method: 'GET', url: `${url}/escaped-error`, headers: { 'x-api-key': 'key-from-env-123' } },
+    },
+  });
+  const ok = await tools.callTool('ok', {}, ctx({ credentials: { token: async () => 'tok-xyz-789' } }));
+  assert.equal(ok.isError, undefined);
+  for (const secret of ['key-from-env-123', 'tok-xyz-789']) assert.equal(JSON.stringify(ok).includes(secret), false, secret);
+  assert.deepEqual(ok.data, { key: '[redacted]', bearer: 'Bearer [redacted]' });
+  const bad = await tools.callTool('bad', {}, ctx());
+  assert.equal(bad.isError, true);
+  assert.equal(bad.content.includes('key-from-env-123'), false);
+  assert.match(bad.content, /\[redacted\]/);
+}));

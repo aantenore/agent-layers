@@ -1,7 +1,7 @@
 import { matchesAny, type BoundCredentials, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec } from '@agent-layers/core';
 import { bearer, McpSession, type McpToolInfo } from './client.ts';
 import { interpolate } from './env.ts';
-import { redact, redactStructured, secretForms, staticSecrets } from './redact.ts';
+import { redact, redactStructured, scrubError, secretForms, staticSecrets } from './redact.ts';
 import { McpRpcError, type McpServerOptions } from './transport.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
@@ -51,7 +51,12 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
 
   async function load(credentials: BoundCredentials | undefined): Promise<Map<string, Entry>> {
     if (cache && Date.now() - cache.at < ttl) return cache.tools;
-    const infos = await session.run((c) => c.listTools(), credentials);
+    let infos;
+    try {
+      infos = await session.run((c) => c.listTools(), credentials);
+    } catch (err) {
+      throw scrubError(err, staticForms);
+    }
     const tools = new Map<string, Entry>();
     for (const info of infos) {
       if (cfg.include && !matchesAny(cfg.include, info.name)) continue;
@@ -108,8 +113,10 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
         }
         return { content, ...(res.isError ? { isError: true } : {}), ...(data !== undefined ? { data } : {}) };
       } catch (err) {
-        if (err instanceof McpRpcError) return failure(redact(err.message, forms));
-        throw err;
+        // Every error leaving this call carries a masked message, whatever raised it.
+        const clean = scrubError(err, forms);
+        if (clean instanceof McpRpcError) return failure(clean.message);
+        throw clean;
       }
     },
     native: () => session,

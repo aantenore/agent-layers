@@ -146,19 +146,21 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
   if (res.ok && type && !TEXTUAL.test(type)) {
     return { content: `HTTP ${res.status}: ${(await res.arrayBuffer()).byteLength} bytes of ${type.split(';')[0]} (not shown)` };
   }
-  let text = await res.text();
-  // A server may echo request headers back; secrets must not reach the model, in the text or in `data`.
-  text = redact(text, secretForms(secrets));
-  if (!res.ok) return failure(`HTTP ${res.status} ${res.statusText}`.trim() + (text ? `: ${truncate(text, ERROR_BODY_CHARS)}` : ''));
+  // A server may echo request headers back; secrets must not reach the model, in the text or in `data`. Mask the raw
+  // body, normalise the JSON (which decodes \u escapes), then mask the normalised form: serialize, redact, parse.
+  const forms = secretForms(secrets);
+  let text = redact(await res.text(), forms);
   let data: unknown;
   if (/json/i.test(type) && text) {
     try {
-      data = JSON.parse(text);
-      text = JSON.stringify(data, null, 2);
+      const normalised = redact(JSON.stringify(JSON.parse(text), null, res.ok ? 2 : undefined), forms);
+      text = normalised;
+      try { data = JSON.parse(normalised); } catch { data = undefined; } // masking broke the structure: keep the text only
     } catch {
       data = undefined; // not valid JSON: keep the raw text
     }
   }
+  if (!res.ok) return failure(redact(`HTTP ${res.status} ${res.statusText}`, forms).trim() + (text ? `: ${truncate(text, ERROR_BODY_CHARS)}` : ''));
   if (!text) return { content: `HTTP ${res.status} (no content)` };
   if (text.length > maxChars) return { content: `${text.slice(0, maxChars)}\n[truncated: ${text.length} chars in total]` };
   return { content: text, ...(data !== undefined ? { data } : {}) };

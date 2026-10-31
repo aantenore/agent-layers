@@ -2,6 +2,7 @@ import type { BoundCredentials, KnowledgePort, KnowledgeQuery, Passage } from '@
 import { McpSession } from './client.ts';
 import { interpolate } from './env.ts';
 import { matchesFilter, parseMcpResult } from './parse.ts';
+import { redact, scrubError, secretForms, staticSecrets } from './redact.ts';
 import type { McpServerOptions } from './transport.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
@@ -34,6 +35,7 @@ export function createMcpKnowledge(options: McpKnowledgeOptions, deps: McpKnowle
   const { parse, ...rest } = options;
   const cfg = interpolate(rest, env, 'mcp');
   const name = deps.name ?? 'mcp';
+  const forms = secretForms(staticSecrets(cfg.headers));
   const session = new McpSession(cfg, { env, ...(deps.credentials ? { credentials: deps.credentials } : {}) });
 
   return {
@@ -46,8 +48,13 @@ export function createMcpKnowledge(options: McpKnowledgeOptions, deps: McpKnowle
         ...(cfg.kArg ? { [cfg.kArg]: k } : {}),
         ...(cfg.filterArg && q.filter ? { [cfg.filterArg]: q.filter } : {}),
       };
-      const res = await session.run((c) => c.callTool(cfg.tool, args, q.signal));
-      if (res.isError) throw new Error(`MCP tool ${cfg.tool} failed: ${res.content.slice(0, 300)}`);
+      let res;
+      try {
+        res = await session.run((c) => c.callTool(cfg.tool, args, q.signal));
+      } catch (err) {
+        throw scrubError(err, forms);
+      }
+      if (res.isError) throw new Error(redact(`MCP tool ${cfg.tool} failed: ${res.content.slice(0, 300)}`, forms));
       const passages = parse ? parse(res, q) : parseMcpResult(res, name);
       const kept = cfg.filterArg ? passages : passages.filter((p) => matchesFilter(p.metadata, q.filter));
       return kept.slice(0, Math.max(0, k));

@@ -31,3 +31,11 @@ export function redactStructured(value: unknown, forms: readonly string[]): { va
   if (clean === text) return { value, dropped: false };
   try { return { value: JSON.parse(clean), dropped: false }; } catch { return { dropped: true }; }
 }
+
+/** Masks secrets in an error's message and stack, keeping its class and properties. */
+export function scrubError(err: unknown, forms: readonly string[]): unknown {
+  if (!(err instanceof Error) || !forms.length) return err;
+  err.message = redact(err.message, forms);
+  if (err.stack) err.stack = redact(err.stack, forms);
+  return err;
+}

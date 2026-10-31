@@ -140,3 +140,14 @@ test('static header values and the token are redacted from content and data', ()
   for (const secret of ['key-from-env-123', 'blue-team', 'trace-secret-9', 'tok-xyz-789']) assert.equal(everything.includes(secret), false, secret);
   assert.equal((out.data as { headers: Record<string, string> }).headers['x-api-key'], '[redacted]');
 }));
+
+test('a secret echoed as \\u escapes is masked in text and data, for successes and error bodies', () => withApi(async (url) => {
+  const doc = { openapi: '3.0.3', servers: [{ url }], paths: { '/escaped': { get: { operationId: 'ok' } }, '/escaped-error': { get: { operationId: 'bad' } } } };
+  const tools = await createOpenApiTools({ spec: doc, headers: { 'x-api-key': 'key-from-env-123' }, auth: { audience: 'a' } });
+  const ok = await tools.callTool('ok', {}, ctx({ credentials: { token: async () => 'tok-xyz-789' } }));
+  for (const secret of ['key-from-env-123', 'tok-xyz-789']) assert.equal(JSON.stringify(ok).includes(secret), false, secret);
+  assert.deepEqual(ok.data, { key: '[redacted]', bearer: 'Bearer [redacted]' });
+  const bad = await tools.callTool('bad', {}, ctx({ credentials: { token: async () => 'tok-xyz-789' } }));
+  assert.equal(bad.isError, true);
+  assert.equal(bad.content.includes('key-from-env-123') || bad.content.includes('tok-xyz-789'), false);
+}));

@@ -13,7 +13,7 @@ export interface McpMock {
 }
 
 /** Streamable-HTTP MCP fixture server on a random port. */
-export async function startMcpMock(opts: { sse?: boolean; requireAuth?: string } = {}): Promise<McpMock> {
+export async function startMcpMock(opts: { sse?: boolean; requireAuth?: string; /** Answer tools/call with an error that echoes the credentials it received. */ echoErrors?: 'http' | 'rpc' } = {}): Promise<McpMock> {
   const requests: Seen[] = [];
   let session = 0;
   let expired = new Set<string>();
@@ -27,6 +27,12 @@ export async function startMcpMock(opts: { sse?: boolean; requireAuth?: string }
     const sid = req.headers['mcp-session-id'] as string | undefined;
     if (sid && expired.has(sid)) { res.writeHead(404).end('unknown session'); return; }
     if (msg.method === 'notifications/initialized') { res.writeHead(202).end(); return; }
+    if (opts.echoErrors && msg.method === 'tools/call') {
+      const echoed = `${req.headers.authorization} ${req.headers['x-api-key']}`;
+      if (opts.echoErrors === 'http') { res.writeHead(500, { 'content-type': 'text/plain' }).end(`upstream failed for ${echoed}`); return; }
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32000, message: `rejected ${echoed}` } }));
+      return;
+    }
     const out = handleRpc(msg, { authorization: req.headers.authorization, 'x-api-key': req.headers['x-api-key'] as string | undefined });
     const payload = JSON.stringify({ jsonrpc: '2.0', id: msg.id, ...out });
     const headers: Record<string, string> = msg.method === 'initialize' ? { 'mcp-session-id': `s${++session}` } : {};
