@@ -1,7 +1,9 @@
-import { defineAdapter, PORT_VERSIONS, type AuthorizationPort } from '@agent-layers/core';
+import { defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type AuthorizationPort, type LimitValue } from '@agent-layers/core';
+import { LIMITS } from './limits.ts';
 import { PdpError, pdpRequest, postJson, reasonText, secureUrl, type FetchLike } from './pdp.ts';
 
-export { PdpError, pdpRequest, reasonText, MAX_RESPONSE_BYTES, type FetchLike } from './pdp.ts';
+export { PdpError, pdpRequest, reasonText, type FetchLike } from './pdp.ts';
+export { LIMITS } from './limits.ts';
 
 export interface OpaOptions {
   /** Base URL of the OPA server. */
@@ -13,7 +15,11 @@ export interface OpaOptions {
   /** Send the tool-call arguments in `input.context.args` (default false: arguments stay inside the stack). */
   includeArgs?: boolean;
   /** Request timeout (default 5 s). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
+  /** Largest decision document read (default 1000000 bytes). */
+  maxResponseBytes?: LimitValue;
+  /** Longest reason passed on to the stack, in characters; the model sees it (default 200). */
+  maxReasonChars?: number;
   /** Accept a plain-HTTP URL on a non-loopback host (default false). */
   allowHttp?: boolean;
 }
@@ -34,18 +40,21 @@ export function createOpa(options: OpaOptions, hooks: { fetch?: FetchLike } = {}
   const endpoint = new URL(`${base.pathname.replace(/\/+$/, '')}/v1/data/${path}`, base.origin).href;
   const rule = `data.${path.replaceAll('/', '.')}`;
   const fetchImpl = hooks.fetch ?? fetch;
+  const timeoutMs = limitValue(LIMITS.timeoutMs, options.timeoutMs);
+  const maxResponseBytes = limitValue(LIMITS.maxResponseBytes, options.maxResponseBytes);
+  const maxReasonChars = limitValue(LIMITS.maxReasonChars, options.maxReasonChars);
   return {
     name,
     native: () => ({ endpoint, rule }),
     async evaluate(req, opts) {
       const body = await postJson(fetchImpl, endpoint, { input: pdpRequest(req, options.includeArgs === true) }, {
-        ...(options.headers ? { headers: options.headers } : {}), timeoutMs: options.timeoutMs ?? 5000, what: 'OPA', ...(opts?.signal ? { signal: opts.signal } : {}),
+        ...(options.headers ? { headers: options.headers } : {}), timeoutMs, maxResponseBytes, what: 'OPA', ...(opts?.signal ? { signal: opts.signal } : {}),
       });
       const result = body.result;
       if (typeof result === 'boolean') return { decision: result };
       if (result && typeof result === 'object' && !Array.isArray(result) && typeof (result as { allow?: unknown }).allow === 'boolean') {
         const r = result as { allow: boolean; reason?: unknown };
-        const reason = reasonText(r.reason);
+        const reason = reasonText(r.reason, maxReasonChars);
         return { decision: r.allow, ...(reason ? { context: { reason } } : {}) };
       }
       throw new PdpError(`OPA: ${rule} is ${result === undefined ? 'undefined' : 'not a boolean decision'}`);
@@ -69,12 +78,13 @@ export const adapter = defineAdapter<'AuthorizationPort', OpaOptions>({
       path: { type: 'string', minLength: 1 },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
       includeArgs: { type: 'boolean' },
-      timeoutMs: { type: 'integer', minimum: 1 },
       allowHttp: { type: 'boolean' },
+      ...limitProperties(LIMITS, { timeoutMs: 'Time limit per request', maxResponseBytes: 'Largest decision document read', maxReasonChars: 'Longest reason passed on to the stack' }),
     },
     required: ['url'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createOpa(options, {}, ctx.name),
 });
 

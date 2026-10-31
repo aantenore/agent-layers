@@ -15,6 +15,9 @@ the answer into word chunks. Token usage is estimated at four characters per tok
 | `model` | string | `mock` | Model id reported in responses |
 | `rules` | object[] | `[]` | `{ match, tool?, args?, reply? }`: `match` is a case-insensitive regex tested on the last user message; `tool` matches an offered function by full name or by the part after the last `__`; `args` and `reply` may use `{{1}}`, `{{2}}` for capture groups |
 | `latencyMs` | integer | `0` | Delay before each answer |
+| `toolResultChars` | integer | `500` | Characters of a tool result the model repeats as its answer |
+
+Limits accept `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 {

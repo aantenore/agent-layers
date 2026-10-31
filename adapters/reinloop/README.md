@@ -49,10 +49,14 @@ Agent `params`: `temperature`, `max_tokens` and `stop` go to the model; other ke
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `budget` | object | `{ maxTurns: 50 }` | `maxTurns`, `maxToolCalls`, `maxInputTokens`, `maxOutputTokens`, `maxTotalTokens`, `maxCostUsd`, `maxDurationMs` |
+| `budget` | object | `{ maxTurns: 50 }` | `maxTurns`, `maxToolCalls`, `maxInputTokens`, `maxOutputTokens`, `maxTotalTokens`, `maxCostUsd`, `maxDurationMs`; the ones not listed have no limit |
 | `compaction` | object | none | `strategy` (`window` or `summarize`), `thresholdTokens` (required), `keepFirst`, `keepLast`, `maxTokens`, `prompt` |
 | `pricing` | object | built-in table | Per model id: `inputPerMTok`, `outputPerMTok`, `cacheReadPerMTok` (USD per million tokens) |
 | `tools` | object | reinloop defaults | `concurrency` (8), `timeoutMs` (none), `maxResultChars` (32000) |
+
+Limits accept `${env:NAME}`. The budgets, `tools.timeoutMs` and `tools.maxResultChars` also accept `"unbounded"`;
+`agent-layers check` fails it for `maxTurns` and `tools.maxResultChars` on the production tier and warns for the
+others. Without `budget`, reinloop's default `{ maxTurns: 50 }` applies; a `budget` limits only what it lists. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 {

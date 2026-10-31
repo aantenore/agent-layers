@@ -1,13 +1,11 @@
-import { validate, type CallContext, type ToolOutcome, type ToolRisk } from '@agent-layers/core';
+import { anySignal, limitValue, timeoutSignal, validate, type CallContext, type LimitValue, type ToolOutcome, type ToolRisk } from '@agent-layers/core';
+import { LIMITS } from './limits.ts';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
 export const METHODS: readonly string[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'];
 
 const PLACEHOLDER = /\{([A-Za-z0-9_.-]+)\}/g;
 const TEXTUAL = /^(text\/|application\/(json|xml|yaml|javascript|x-www-form-urlencoded)|[^;]*\+(json|xml))/i;
-const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_RESULT_CHARS = 16_000;
-const ERROR_BODY_CHARS = 500;
 
 /** A request built from tool arguments. */
 export interface RequestSpec {
@@ -24,9 +22,14 @@ export interface RequestSpec {
   body?: 'json' | 'none';
   /** With `body: 'json'`: the argument that holds the whole body. */
   bodyArg?: string;
-  timeoutMs?: number;
+  /** Time limit per request (default 30000). */
+  timeoutMs?: LimitValue;
   /** Response text cap (default 16000). */
-  maxResultChars?: number;
+  maxResultChars?: LimitValue;
+  /** Characters of an error body kept in the error result (default 500). */
+  errorBodyChars?: number;
+  /** Secrets shorter than this are not masked (default 4). */
+  minSecretChars?: number;
   /** Send `Authorization: Bearer <token>` from the caller's credentials; without credentials nothing is sent. */
   auth?: { audience: string; scopes?: string[] };
 }
@@ -51,20 +54,21 @@ const truncate = (text: string, max: number): string => (text.length <= max ? te
 const failure = (content: string): ToolOutcome => ({ content, isError: true });
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** Secrets shorter than this are not worth masking and would mangle ordinary text. */
-const MIN_SECRET_CHARS = 4;
 const REDACTED = '[redacted]';
 
-/** Every form a secret may take when a server echoes it: raw, JSON-escaped, URL-encoded; longest first. */
-function secretForms(values: Iterable<string>): string[] {
+/**
+ * Every form a secret may take when a server echoes it: raw, JSON-escaped, URL-encoded; longest first. Secrets shorter
+ * than `minChars` are not worth masking and would mangle ordinary text.
+ */
+function secretForms(values: Iterable<string>, minChars: number): string[] {
   const forms = new Set<string>();
   for (const v of values) {
-    if (v.length < MIN_SECRET_CHARS) continue;
+    if (v.length < minChars) continue;
     forms.add(v);
     forms.add(JSON.stringify(v).slice(1, -1));
     forms.add(encodeURIComponent(v));
   }
-  return [...forms].filter((f) => f.length >= MIN_SECRET_CHARS).sort((x, y) => y.length - x.length);
+  return [...forms].filter((f) => f.length >= minChars).sort((x, y) => y.length - x.length);
 }
 
 const redact = (text: string, forms: readonly string[]): string => forms.reduce((t, f) => t.split(f).join(REDACTED), text);
@@ -92,7 +96,10 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
   const queryArgs = spec.query ?? [];
   const headerArgs = spec.headerArgs ?? [];
   const consumed = new Set([...pathArgs(spec.url), ...queryArgs, ...headerArgs]);
-  const maxChars = spec.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
+  const maxChars = limitValue(LIMITS.maxResultChars, spec.maxResultChars);
+  const timeoutMs = limitValue(LIMITS.timeoutMs, spec.timeoutMs);
+  const errorBodyChars = limitValue(LIMITS.errorBodyChars, spec.errorBodyChars);
+  const minSecretChars = limitValue(LIMITS.minSecretChars, spec.minSecretChars);
   for (const h of headerArgs) if (args[h] !== undefined && args[h] !== null) headers.set(h, plain(args[h]));
 
   const missing: string[] = [];
@@ -140,15 +147,14 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
     secrets.push(token);
   }
 
-  const timeout = AbortSignal.timeout(spec.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const res = await fetch(target, { method: spec.method, headers, ...(body !== undefined ? { body } : {}), signal: ctx.signal ? AbortSignal.any([ctx.signal, timeout]) : timeout });
+  const res = await fetch(target, { method: spec.method, headers, ...(body !== undefined ? { body } : {}), signal: anySignal(ctx.signal, timeoutSignal(timeoutMs)) });
   const type = res.headers.get('content-type') ?? '';
   if (res.ok && type && !TEXTUAL.test(type)) {
     return { content: `HTTP ${res.status}: ${(await res.arrayBuffer()).byteLength} bytes of ${type.split(';')[0]} (not shown)` };
   }
   // A server may echo request headers back; secrets must not reach the model, in the text or in `data`. Mask the raw
   // body, normalise the JSON (which decodes \u escapes), then mask the normalised form: serialize, redact, parse.
-  const forms = secretForms(secrets);
+  const forms = secretForms(secrets, minSecretChars);
   let text = redact(await res.text(), forms);
   let data: unknown;
   if (/json/i.test(type) && text) {
@@ -160,7 +166,7 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
       data = undefined; // not valid JSON: keep the raw text
     }
   }
-  if (!res.ok) return failure(redact(`HTTP ${res.status} ${res.statusText}`, forms).trim() + (text ? `: ${truncate(text, ERROR_BODY_CHARS)}` : ''));
+  if (!res.ok) return failure(redact(`HTTP ${res.status} ${res.statusText}`, forms).trim() + (text ? `: ${truncate(text, errorBodyChars)}` : ''));
   if (!text) return { content: `HTTP ${res.status} (no content)` };
   if (text.length > maxChars) return { content: `${text.slice(0, maxChars)}\n[truncated: ${text.length} chars in total]` };
   return { content: text, ...(data !== undefined ? { data } : {}) };

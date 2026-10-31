@@ -1,11 +1,11 @@
-import { matchesAny, type JsonSchema, type ToolRisk } from '@agent-layers/core';
+import { limitValue, matchesAny, type JsonSchema, type LimitValue, type ToolRisk } from '@agent-layers/core';
+import { LIMITS } from './limits.ts';
 import { baseUrlOf, deref, type OpenApiDocument } from './spec.ts';
 import { checkRequestSpec, defaultRisk, type HttpMethod, type RequestSpec } from './request.ts';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head'] as const;
 /** Headers OpenAPI defines as handled by the transport, not as parameters. */
 const RESERVED_HEADERS = new Set(['accept', 'content-type', 'authorization']);
-const MAX_DESCRIPTION_CHARS = 1000;
 
 export interface Operation {
   /** Tool name: the operationId, or `<method>_<path>` when there is none. */
@@ -24,8 +24,14 @@ export interface OperationOptions {
   risk?: Partial<Record<string, ToolRisk>>;
   auth?: RequestSpec['auth'];
   headers?: Record<string, string>;
-  timeoutMs?: number;
-  maxResultChars?: number;
+  timeoutMs?: LimitValue;
+  maxResultChars?: LimitValue;
+  errorBodyChars?: number;
+  minSecretChars?: number;
+  /** Characters kept of a tool description (default 1000). */
+  maxDescriptionChars?: number;
+  /** Nesting depth at which `$ref`s are cut (default 24). */
+  maxRefDepth?: number;
 }
 
 const truncate = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max)}…`);
@@ -43,9 +49,11 @@ export function operationsOf(spec: OpenApiDocument, specUrl: string | undefined,
   const base = baseUrlOf(spec, opts.baseUrl, specUrl);
   const out: Operation[] = [];
   const used = new Set<string>();
+  const maxDescriptionChars = limitValue(LIMITS.maxDescriptionChars, opts.maxDescriptionChars);
+  const maxRefDepth = limitValue(LIMITS.maxRefDepth, opts.maxRefDepth);
 
   for (const [path, rawItem] of Object.entries<any>(spec.paths ?? {})) {
-    const item = deref(spec, rawItem);
+    const item = deref(spec, rawItem, [], maxRefDepth);
     for (const method of HTTP_METHODS) {
       const op = item[method];
       if (!op) continue;
@@ -98,12 +106,14 @@ export function operationsOf(spec: OpenApiDocument, specUrl: string | undefined,
         ...(bodyArg ? { bodyArg } : {}),
         ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
         ...(opts.maxResultChars ? { maxResultChars: opts.maxResultChars } : {}),
+        ...(opts.errorBodyChars !== undefined ? { errorBodyChars: opts.errorBodyChars } : {}),
+        ...(opts.minSecretChars ? { minSecretChars: opts.minSecretChars } : {}),
         ...(opts.auth ? { auth: opts.auth } : {}),
       };
       checkRequestSpec(name, request);
       out.push({
         name,
-        description: truncate([op.summary, op.description].filter(Boolean).join(': ') || `${upper} ${path}`, MAX_DESCRIPTION_CHARS),
+        description: truncate([op.summary, op.description].filter(Boolean).join(': ') || `${upper} ${path}`, maxDescriptionChars),
         inputSchema: { type: 'object', properties, required, additionalProperties: false },
         risk: opts.risk?.[upper] ?? defaultRisk(upper),
         request,

@@ -1,10 +1,11 @@
 /** Minimal JSON-over-HTTP client for the guard adapters: fetch, a timeout, no response bodies in errors. */
+import { anySignal, timeoutSignal } from '@agent-layers/core';
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 export interface HttpOptions {
   headers?: Record<string, string>;
-  /** Per-request timeout in milliseconds. */
+  /** Per-request timeout in milliseconds; `Infinity` for none. */
   timeoutMs: number;
   fetch?: FetchLike;
 }
@@ -29,12 +30,11 @@ export class HttpStatusError extends Error {
  * error messages: services often echo the text they were sent.
  */
 export async function postJson(url: string, body: unknown, what: string, o: HttpOptions, signal?: AbortSignal): Promise<unknown> {
-  const timeout = AbortSignal.timeout(o.timeoutMs);
   const res = await (o.fetch ?? fetch)(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json', ...o.headers },
     body: JSON.stringify(body),
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    signal: anySignal(signal, timeoutSignal(o.timeoutMs)),
   });
   if (!res.ok) {
     await res.body?.cancel().catch(() => {});

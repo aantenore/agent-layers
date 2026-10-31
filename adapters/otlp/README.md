@@ -44,9 +44,14 @@ Tested live against OpenTelemetry Collector 0.164 and Jaeger 2.22 (`reference/te
 | `metrics` | boolean | `true` | Export metrics |
 | `intervalMs` | integer | 2000 | Export interval; the rest is sent on `flush` and `close` |
 | `maxBatch` | integer | 512 | Export early when this many spans wait |
+| `maxQueue` | integer | `maxBatch * 8` | Spans kept while the collector is slow or down; the oldest are dropped beyond it (at least `maxBatch`) |
 | `timeoutMs` | integer | 10000 | Per-request timeout |
+| `errorMessageChars` | integer | 200 | Characters of an error message exported with `captureContent` |
 | `semconvNames` | boolean | `true` | Name spans `<operation> <target>` |
 | `orphanEvents` | `"span"` \| `"drop"` | `"span"` | What to do with an event outside any span |
+
+Limits accept `${env:NAME}`; `maxQueue` and `timeoutMs` also accept `"unbounded"`, which `agent-layers check` fails on the
+production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 {

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import type { CredentialPort, Identity } from '@agent-layers/core';
-import { abortable, discover, OidcError, requestJson, secureUrl, type FetchLike } from './http.ts';
+import { limitValue, type CredentialPort, type Identity, type LimitValue } from '@agent-layers/core';
+import { abortable, discover, OidcError, requestJson, secureUrl, type FetchLike, type HttpLimits } from './http.ts';
 import { unverifiedExpiry } from './jwt.ts';
+import { CREDENTIAL_LIMITS as LIMITS } from './limits.ts';
 
 export const TOKEN_EXCHANGE_GRANT = 'urn:ietf:params:oauth:grant-type:token-exchange';
 export const ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
@@ -24,9 +25,15 @@ export interface OidcCredentialsOptions {
   /** Lifetime assumed when the response has no `expires_in` and the token is not a JWT (default 60 s). */
   defaultTtlSec?: number;
   /** Most tokens cached at once (default 1000). */
-  maxCacheEntries?: number;
+  maxCacheEntries?: LimitValue;
   /** Timeout of token requests (default 10 s). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
+  /** Longest compact JWT read for its expiry, in characters (default 16384). */
+  maxTokenChars?: LimitValue;
+  /** Largest discovery or token response read (default 1000000 bytes). */
+  maxResponseBytes?: LimitValue;
+  /** Characters of a provider `error_description` kept in an error message (default 200). */
+  errorDescriptionChars?: number;
   /** Accept plain-HTTP URLs on non-loopback hosts (default false). */
   allowHttp?: boolean;
 }
@@ -47,9 +54,9 @@ function expiresInSec(v: unknown): number | undefined {
 }
 
 /** Expiry of the caller's token in seconds: the verified `exp` claim when present, else the unverified one. */
-function callerExpiry(identity: Identity): number | undefined {
+function callerExpiry(identity: Identity, maxTokenChars: number): number | undefined {
   const verified = identity.claims?.exp;
-  const unverified = unverifiedExpiry(identity.token!);
+  const unverified = unverifiedExpiry(identity.token!, maxTokenChars);
   const values = [verified, unverified].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   return values.length ? Math.min(...values) : undefined;
 }
@@ -69,9 +76,15 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
   else secureUrl(opts.issuer!, 'issuer', opts.allowHttp);
   const fetchImpl: FetchLike = hooks.fetch ?? fetch;
   const now = hooks.now ?? Date.now;
-  const timeoutMs = opts.timeoutMs ?? 10_000;
-  const skewMs = (opts.refreshSkewSec ?? 30) * 1000;
-  const maxEntries = Math.max(1, opts.maxCacheEntries ?? 1000);
+  const http: HttpLimits = {
+    timeoutMs: limitValue(LIMITS.timeoutMs, opts.timeoutMs),
+    maxResponseBytes: limitValue(LIMITS.maxResponseBytes, opts.maxResponseBytes),
+    errorDescriptionChars: limitValue(LIMITS.errorDescriptionChars, opts.errorDescriptionChars),
+  };
+  const maxTokenChars = limitValue(LIMITS.maxTokenChars, opts.maxTokenChars);
+  const defaultTtlSec = limitValue(LIMITS.defaultTtlSec, opts.defaultTtlSec);
+  const skewMs = limitValue(LIMITS.refreshSkewSec, opts.refreshSkewSec) * 1000;
+  const maxEntries = Math.max(1, limitValue(LIMITS.maxCacheEntries, opts.maxCacheEntries));
   const audienceParam = opts.audienceParam ?? 'audience';
   const cache = new Map<string, Cached>();
   const inflight = new Map<string, Promise<string>>();
@@ -79,7 +92,7 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
 
   const tokenEndpoint = () => {
     if (!endpoint) {
-      const p = discover(fetchImpl, opts.issuer!, timeoutMs, opts.allowHttp).then((doc) => {
+      const p = discover(fetchImpl, opts.issuer!, http, opts.allowHttp).then((doc) => {
         if (typeof doc.token_endpoint !== 'string') throw new OidcError('config', 'OIDC discovery: no "token_endpoint"');
         return secureUrl(doc.token_endpoint, 'token_endpoint', opts.allowHttp).href;
       });
@@ -111,7 +124,7 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
     }
     const exchange = params.grant_type === TOKEN_EXCHANGE_GRANT;
     const what = exchange ? 'token exchange' : 'client credentials';
-    const res = await requestJson(fetchImpl, await tokenEndpoint(), { method: 'POST', headers, body: body.toString(), timeoutMs, what });
+    const res = await requestJson(fetchImpl, await tokenEndpoint(), { method: 'POST', headers, body: body.toString(), ...http, what });
     const token = res.access_token;
     if (typeof token !== 'string' || !token || /\s/.test(token)) throw new OidcError('response', `${what}: no valid access_token in the response`);
     const type = typeof res.token_type === 'string' ? res.token_type.toLowerCase() : undefined;
@@ -137,7 +150,7 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
       if (opts.mode === 'on-behalf-of') {
         // Never fall back to the agent's own token: a call without a caller token gets no token at all.
         if (!identity?.token) throw new OidcError('credentials', 'oidc credentials: on-behalf-of needs the caller token, and the run has none');
-        const exp = callerExpiry(identity);
+        const exp = callerExpiry(identity, maxTokenChars);
         if (exp !== undefined) {
           subjectExpMs = exp * 1000;
           if (subjectExpMs <= now()) throw new OidcError('credentials', 'oidc credentials: the caller token has expired');
@@ -159,7 +172,7 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
         // Shared by every identical caller, so it does not use any caller's signal; each caller races its own.
         const p = (async () => {
           const { token, expiresIn } = await request(params);
-          const issuedExpMs = expiresIn !== undefined ? now() + expiresIn * 1000 : (unverifiedExpiry(token) ?? now() / 1000 + (opts.defaultTtlSec ?? 60)) * 1000;
+          const issuedExpMs = expiresIn !== undefined ? now() + expiresIn * 1000 : (unverifiedExpiry(token, maxTokenChars) ?? now() / 1000 + defaultTtlSec) * 1000;
           const expiresAt = Math.min(issuedExpMs, subjectExpMs) - skewMs;
           if (expiresAt > now()) remember(key, { token, expiresAt });
           return token;

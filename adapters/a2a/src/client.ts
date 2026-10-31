@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { contentText, isAbort, traceHeaders, type CallContext, type RunInput, type RunResult, type RuntimePort, type Stack } from '@agent-layers/core';
+import { anySignal, contentText, defineLimits, isAbort, limitValue, timeoutSignal, traceHeaders, type CallContext, type LimitValue, type RunInput, type RunResult, type RuntimePort, type Stack } from '@agent-layers/core';
 import { A2A_VERSION, INTERRUPTED, LEGACY_VERSION, messageWire, METHOD_OF, readResult, TERMINAL, type TaskState, type WireVersion } from './wire.ts';
 
 /** Options of the outbound descriptor: a remote A2A agent as the stack's runtime. */
@@ -19,10 +19,16 @@ export interface A2ARuntimeOptions {
   /** Static headers (for example an API key header of the remote platform). */
   headers?: Record<string, string>;
   /** Time limit of a whole run, polling included (default 300000). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
   /** Interval between GetTask calls while a task is still working (default 500). */
   pollMs?: number;
 }
+
+/** Configurable limits of the outbound descriptor; see docs/limits.md. */
+export const RUNTIME_LIMITS = defineLimits({
+  timeoutMs: { path: 'options.timeoutMs', default: 300_000, unit: 'ms', min: 1, unbounded: 'fail', safe: { max: 3_600_000 } },
+  pollMs: { path: 'options.pollMs', default: 500, unit: 'ms', min: 10, safe: { min: 100, max: 10_000 } },
+});
 
 const RUN_FAILED = 'remote agent call failed';
 
@@ -64,7 +70,8 @@ function runStatus(state: TaskState): Pick<RunResult, 'status' | 'reason'> {
  */
 export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a'): RuntimePort {
   const version: WireVersion = options.version ?? A2A_VERSION;
-  const timeoutMs = options.timeoutMs ?? 300_000;
+  const timeoutMs = limitValue(RUNTIME_LIMITS.timeoutMs, options.timeoutMs);
+  const pollMs = limitValue(RUNTIME_LIMITS.pollMs, options.pollMs);
   let endpoint: Promise<string> | undefined;
   // Origins the operator configured: only these may be private or loopback targets.
   const configured = new Set([options.url, options.endpoint, ...(options.allowedEndpoints ?? [])].filter((u): u is string => !!u).map((u) => new URL(u).origin));
@@ -133,14 +140,14 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a'): Runt
         name: agent.name,
         async run(input, init = {}) {
           const ctx = stack.context({ ...init, agent: agent.name });
-          const signal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(ctx.signal ? [ctx.signal] : [])]);
+          const signal = anySignal(timeoutSignal(timeoutMs), ctx.signal) ?? new AbortController().signal;
           return stack.telemetry.span('a2a.send', { 'agent.layer': 'harness', 'gen_ai.agent.name': agent.name, 'run.id': ctx.runId, 'a2a.version': version }, async (span) => {
             const message = messageWire({ messageId: randomUUID(), role: 'user', text: inputText(input), ...(ctx.sessionId ? { contextId: ctx.sessionId } : {}) }, version);
             try {
               let read = readResult(await call(METHOD_OF[version].send, { message }, ctx, signal));
               if (read.message !== undefined) return { runId: ctx.runId, status: 'completed', output: read.message };
               while (read.task && !TERMINAL.includes(read.task.state) && !INTERRUPTED.includes(read.task.state)) {
-                await new Promise((r) => setTimeout(r, options.pollMs ?? 500));
+                await new Promise((r) => setTimeout(r, pollMs));
                 signal.throwIfAborted();
                 read = readResult(await call(METHOD_OF[version].get, { id: read.task.id }, ctx, signal));
               }

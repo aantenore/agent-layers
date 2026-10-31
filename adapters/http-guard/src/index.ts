@@ -1,5 +1,6 @@
-import { defineAdapter, GUARD_STAGES, PORT_VERSIONS, type GuardInput, type GuardPort, type GuardStage, type GuardVerdict } from '@agent-layers/core';
+import { defineAdapter, GUARD_STAGES, limitProperties, limitValue, PORT_VERSIONS, type GuardInput, type GuardPort, type GuardStage, type GuardVerdict, type LimitValue } from '@agent-layers/core';
 import { assertPlainUrl, failure, InvalidResponseError, postJson, type FetchLike, type HttpOptions } from './http.ts';
+import { LIMITS } from './limits.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface HttpGuardOptions {
@@ -13,7 +14,7 @@ export interface HttpGuardOptions {
   /** When the service cannot be reached or answers badly: `block` (default, fail closed) or `allow`. */
   onError?: 'block' | 'allow';
   /** Per-request timeout in milliseconds (default 10000). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
 }
 
 export interface HttpGuardDeps { fetch?: FetchLike; name?: string }
@@ -44,7 +45,7 @@ function requestBody(input: GuardInput): GuardInput {
 export function createHttpGuard(options: HttpGuardOptions, deps: HttpGuardDeps = {}): GuardPort {
   assertPlainUrl(options.url, 'http-guard url');
   const http: HttpOptions = {
-    timeoutMs: options.timeoutMs ?? 10_000,
+    timeoutMs: limitValue(LIMITS.timeoutMs, options.timeoutMs),
     headers: { ...(options.token ? { authorization: `Bearer ${options.token}` } : {}), ...options.headers },
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
   };
@@ -79,11 +80,12 @@ export const adapter = defineAdapter<'GuardPort', HttpGuardOptions>({
       headers: { type: 'object', additionalProperties: { type: 'string' } },
       stages: { type: 'array', minItems: 1, items: { enum: [...GUARD_STAGES] } },
       onError: { enum: ['block', 'allow'] },
-      timeoutMs: { type: 'integer', minimum: 1 },
+      ...limitProperties(LIMITS, { timeoutMs: 'Time limit per request' }),
     },
     required: ['url'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createHttpGuard(options, { name: ctx.name }),
 });
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { governedTools, type ToolPort } from '@agent-layers/core';
 import { checkAdapter, sampleAccess } from '@agent-layers/conformance';
-import { adapter, createAuthzen, MAX_RESPONSE_BYTES } from '../src/index.ts';
+import { adapter, createAuthzen, LIMITS } from '../src/index.ts';
 import { pdp, referencePolicy, request, send } from './helpers.ts';
 
 const authzenPdp = () => pdp((body, _h, res) => {
@@ -83,7 +83,7 @@ test('fails closed: missing or non-boolean decisions, errors, redirects, large o
       [500, { decision: true }, /HTTP 500/],
       [403, { decision: true }, /HTTP 403/],
       [302, '', /redirect|request failed/],
-      [200, { decision: true, pad: 'x'.repeat(MAX_RESPONSE_BYTES) }, /too large/],
+      [200, { decision: true, pad: 'x'.repeat(LIMITS.maxResponseBytes.default as number) }, /too large/],
     ];
     for (const [status, body, pattern] of replies) {
       s.state.reply = (_b, _h, res) => (status === 302 ? res.writeHead(302, { location: '/elsewhere' }).end() : send(res, status, body));

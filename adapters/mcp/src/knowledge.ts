@@ -1,6 +1,7 @@
-import type { BoundCredentials, KnowledgePort, KnowledgeQuery, Passage, TelemetryPort } from '@agent-layers/core';
+import { limitValue, type BoundCredentials, type KnowledgePort, type KnowledgeQuery, type Passage, type TelemetryPort } from '@agent-layers/core';
 import { McpSession } from './client.ts';
 import { interpolate } from './env.ts';
+import { KNOWLEDGE_LIMITS } from './limits.ts';
 import { matchesFilter, parseMcpResult } from './parse.ts';
 import { redact, scrubError, secretForms, staticSecrets } from './redact.ts';
 import type { McpServerOptions } from './transport.ts';
@@ -37,13 +38,14 @@ export function createMcpKnowledge(options: McpKnowledgeOptions, deps: McpKnowle
   const { parse, ...rest } = options;
   const cfg = interpolate(rest, env, 'mcp');
   const name = deps.name ?? 'mcp';
-  const forms = secretForms(staticSecrets(cfg.headers));
+  const errorBodyChars = limitValue(KNOWLEDGE_LIMITS.errorBodyChars, cfg.errorBodyChars);
+  const forms = secretForms(staticSecrets(cfg.headers), limitValue(KNOWLEDGE_LIMITS.minSecretChars, cfg.minSecretChars));
   const session = new McpSession(cfg, { env, ...(deps.credentials ? { credentials: deps.credentials } : {}), ...(deps.telemetry ? { telemetry: deps.telemetry } : {}) });
 
   return {
     name,
     async search(q) {
-      const k = q.k ?? cfg.k ?? 4;
+      const k = q.k ?? limitValue(KNOWLEDGE_LIMITS.k, cfg.k);
       const args: Record<string, unknown> = {
         ...cfg.toolArgs,
         [cfg.queryArg ?? 'query']: q.query,
@@ -56,7 +58,7 @@ export function createMcpKnowledge(options: McpKnowledgeOptions, deps: McpKnowle
       } catch (err) {
         throw scrubError(err, forms);
       }
-      if (res.isError) throw new Error(`MCP tool ${cfg.tool} failed: ${redact(res.content, forms).slice(0, 300)}`);
+      if (res.isError) throw new Error(`MCP tool ${cfg.tool} failed: ${redact(res.content, forms).slice(0, errorBodyChars)}`);
       const passages = parse ? parse(res, q) : parseMcpResult(res, name);
       const kept = cfg.filterArg ? passages : passages.filter((p) => matchesFilter(p.metadata, q.filter));
       return kept.slice(0, Math.max(0, k));

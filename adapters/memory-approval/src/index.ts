@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { defineAdapter, PORT_VERSIONS, type Approval, type ApprovalPort } from '@agent-layers/core';
+import { defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type Approval, type ApprovalPort, type LimitValue } from '@agent-layers/core';
+import { LIMITS } from './limits.ts';
 
 export interface MemoryApprovalOptions {
-  /** Time a pending approval stays open before it reports `expired`. Open indefinitely when unset. */
-  ttlMs?: number;
+  /** Time a pending approval stays open before it reports `expired`. Open indefinitely when unset or `"unbounded"`. */
+  ttlMs?: LimitValue;
 }
 
 interface Entry { approval: Approval; expiresAt: number | undefined; listeners: Set<() => void> }
@@ -11,6 +12,7 @@ interface Entry { approval: Approval; expiresAt: number | undefined; listeners: 
 /** Approval store kept in memory; `wait` is driven by listeners, not polling. */
 export function createMemoryApproval(options: MemoryApprovalOptions = {}, name = 'memory-approval'): ApprovalPort {
   const entries = new Map<string, Entry>();
+  const ttlMs = limitValue(LIMITS.ttlMs, options.ttlMs);
 
   const view = (e: Entry): Approval =>
     structuredClone(e.approval.status === 'pending' && e.expiresAt !== undefined && e.expiresAt <= Date.now()
@@ -26,7 +28,7 @@ export function createMemoryApproval(options: MemoryApprovalOptions = {}, name =
     name,
     native: () => entries,
     async request(req) {
-      const expiresAt = req.expiresAt ? Date.parse(req.expiresAt) : options.ttlMs === undefined ? undefined : Date.now() + options.ttlMs;
+      const expiresAt = req.expiresAt ? Date.parse(req.expiresAt) : Number.isFinite(ttlMs) ? Date.now() + ttlMs : undefined;
       const request = structuredClone(req);
       if (expiresAt !== undefined && !request.expiresAt) request.expiresAt = new Date(expiresAt).toISOString();
       const entry: Entry = { approval: { id: randomUUID(), status: 'pending', request }, expiresAt, listeners: new Set() };
@@ -90,9 +92,10 @@ export const adapter = defineAdapter<'ApprovalPort', MemoryApprovalOptions>({
   description: 'Keeps approvals in memory and wakes waiters when one is decided. Lost on restart; for development and demos.',
   optionsSchema: {
     type: 'object',
-    properties: { ttlMs: { type: 'integer', minimum: 1 } },
+    properties: limitProperties(LIMITS, { ttlMs: 'Time a pending approval stays open before it expires' }),
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createMemoryApproval(options, ctx.name),
 });
 

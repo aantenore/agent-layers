@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { AdapterError, defineAdapter, errorMessage, PORT_VERSIONS, type RunEvent, type StatePort } from '@agent-layers/core';
+import { AdapterError, defineAdapter, defineLimits, errorMessage, limitProperties, limitValue, PORT_VERSIONS, type LimitValue, type RunEvent, type StatePort } from '@agent-layers/core';
 import { migrate, schemaVersion, SCHEMA_VERSION, transaction } from './migrations.ts';
 
 export { MIGRATIONS, SCHEMA_VERSION } from './migrations.ts';
@@ -10,9 +10,17 @@ export { MIGRATIONS, SCHEMA_VERSION } from './migrations.ts';
 export interface SqliteStateOptions {
   /** Database file, relative to the stack config folder (default `.agent-layers/state.db`); `:memory:` for tests. */
   path?: string;
-  /** How long a write waits for another process holding the database lock (default 5000 ms). */
-  busyTimeoutMs?: number;
+  /** How long a write waits for another process holding the database lock (default 5000 ms; 0 fails at once). */
+  busyTimeoutMs?: LimitValue;
 }
+
+/** Configurable limits; see docs/limits.md. */
+export const LIMITS = defineLimits({
+  busyTimeoutMs: { path: 'options.busyTimeoutMs', default: 5000, unit: 'ms', min: 0, unbounded: 'fail', safe: { max: 60_000 } },
+});
+
+/** Largest wait SQLite takes (a 32-bit count of milliseconds): what "unbounded" comes to. */
+const SQLITE_MAX_WAIT_MS = 2 ** 31 - 1;
 
 export const DEFAULT_PATH = '.agent-layers/state.db';
 
@@ -41,7 +49,7 @@ export function createSqliteState(options: SqliteStateOptions = {}, ctx: { cwd?:
   try {
     if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
     db = new (sqlite().DatabaseSync)(file);
-    db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.trunc(options.busyTimeoutMs ?? 5000))}`);
+    db.exec(`PRAGMA busy_timeout = ${Math.min(Math.trunc(limitValue(LIMITS.busyTimeoutMs, options.busyTimeoutMs)), SQLITE_MAX_WAIT_MS)}`);
     if (file !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA synchronous = NORMAL');
     migrate(db);
@@ -114,10 +122,11 @@ export const adapter = defineAdapter<'StatePort', SqliteStateOptions>({
     type: 'object',
     properties: {
       path: { type: 'string', minLength: 1 },
-      busyTimeoutMs: { type: 'integer', minimum: 0 },
+      ...limitProperties(LIMITS, { busyTimeoutMs: 'How long a write waits for another process holding the database lock' }),
     },
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createSqliteState(options, ctx, ctx.name),
 });
 

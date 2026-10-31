@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { ChannelHost, ChannelPort, InboundContext, InboundRoute, RunResult } from '@agent-layers/core';
+import { defineLimits, limitValue, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type RunResult } from '@agent-layers/core';
 import {
   A2A_VERSION, ERRORS, getResult, LEGACY_VERSION, METHODS, partsText, sendResult, streamEvent, TERMINAL,
   runMetadata, type TaskState, type TaskValue, type WireVersion,
@@ -20,12 +20,19 @@ export interface A2AServerOptions {
   /** `provider` of the cards. */
   provider?: { organization: string; url: string };
   /** Tasks kept per authenticated caller, and of all anonymous callers together (default 100; at most a quarter of `maxTasks`). */
-  maxTasksPerCaller?: number;
+  maxTasksPerCaller?: LimitValue;
   /** Tasks kept in total (default 10000). */
-  maxTasks?: number;
+  maxTasks?: LimitValue;
   /** How long a finished task stays readable with GetTask (default 3600000). */
   taskTtlMs?: number;
 }
+
+/** Configurable limits of the inbound descriptor; see docs/limits.md. */
+export const SERVER_LIMITS = defineLimits({
+  maxTasksPerCaller: { path: 'options.maxTasksPerCaller', default: 100, unit: 'count', min: 1, unbounded: 'fail', safe: { max: 1000 } },
+  maxTasks: { path: 'options.maxTasks', default: 10_000, unit: 'count', min: 4, unbounded: 'fail', safe: { max: 100_000 } },
+  taskTtlMs: { path: 'options.taskTtlMs', default: 3_600_000, unit: 'ms', min: 1000, safe: { max: 86_400_000 } },
+});
 
 interface StoredTask { value: TaskValue; owner: string; anonymous: boolean; finishedAt?: number; controller: AbortController; done: Promise<void> }
 interface Rpc { jsonrpc: '2.0'; id?: string | number | null; method?: string; params?: Record<string, any> }
@@ -58,9 +65,9 @@ function stateOfRun(r: RunResult): TaskState {
  */
 export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a2a'): ChannelPort {
   const base = `/${(options.basePath ?? '/a2a').replace(/^\/+|\/+$/g, '')}`;
-  const perCaller = options.maxTasksPerCaller ?? 100;
-  const maxTasks = options.maxTasks ?? 10_000;
-  const taskTtl = options.taskTtlMs ?? 60 * 60_000;
+  const perCaller = limitValue(SERVER_LIMITS.maxTasksPerCaller, options.maxTasksPerCaller);
+  const maxTasks = limitValue(SERVER_LIMITS.maxTasks, options.maxTasks);
+  const taskTtl = limitValue(SERVER_LIMITS.taskTtlMs, options.taskTtlMs);
   if (perCaller > maxTasks / 4) throw new Error('maxTasksPerCaller must be at most a quarter of maxTasks');
 
   return {

@@ -32,10 +32,16 @@ Lists the tools of the server and calls them. Tool names are the server's own, w
 | `headers` | object | none | Static headers (HTTP) |
 | `auth` | `{ audience, scopes? }` | none | Per-call bearer token from the caller credentials (HTTP) |
 | `timeoutMs` | integer | 60000 | Time limit per request |
+| `errorBodyChars` | integer | 300 | Characters of an error body kept in the error message, after masking |
+| `minSecretChars` | integer | 4 | Header and token values shorter than this are not masked in errors |
+| `stderrChars` | integer | 2000 | stdio: characters of the server's stderr kept for error messages |
 | `risk` | `read`, `write`, `exec` | derived | Risk of every tool |
 | `readOnly` | string[] | `[]` | Globs of tools that are read-only |
 | `include`, `exclude` | string[] | all, none | Globs of tool names to expose or hide |
 | `toolsTtlMs` | integer | 60000 | How long the tool list is cached |
+
+Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production
+tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 `${env:NAME}` and `${env:NAME:-default}` in the options are resolved when the instance is created.
 
@@ -72,6 +78,10 @@ is applied to the metadata of the returned passages. The result is cut to `k`. I
 | `filterArg` | string | none | Argument that receives the filter |
 | `toolArgs` | object | `{}` | Fixed arguments sent with every query |
 | `k` | integer | 4 | Passages when the query has no `k` |
+
+The transport options include `errorBodyChars`, `minSecretChars` and `stderrChars`. Limits accept `${env:NAME}`;
+`timeoutMs` also accepts `"unbounded"` (fails `agent-layers check` on the production tier). Ranges and checks:
+[docs/limits.md](../../docs/limits.md).
 
 Qdrant, Chroma and similar vector stores need no adapter of their own: run their MCP server and point this adapter at
 it. [`reference/knowledge`](../../reference/knowledge) has Qdrant with `mcp-server-qdrant==0.8.1` and the ingestion
@@ -133,6 +143,9 @@ to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge
 | `maxSessionAgeMs` | integer | `3600000` | Absolute lifetime of a session |
 | `maxSessions` | integer | `1000` | Sessions in total |
 | `maxSessionsPerCaller` | integer | `10` | Sessions per caller, and of the anonymous pool; at most a quarter of `maxSessions` |
+
+Limits accept `${env:NAME}` and `"unbounded"`, which `agent-layers check` fails on the production tier. Ranges and
+checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 { "layers": { "channels": [{ "adapter": "mcp", "options": { "exclude": ["admin__*"] } }] } }

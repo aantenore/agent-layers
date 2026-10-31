@@ -25,6 +25,11 @@ reject; the stack reports them and carries on without the source.
 | `forwardIdentityToken` | boolean | `false` | Send the caller's raw token (`identity.token`) as `Authorization: Bearer`, so the service can apply its own access rules |
 | `timeoutMs` | integer | 10000 | Time limit per query |
 | `k` | integer | 4 | Passages requested when the query has no `k` |
+| `errorBodyChars` | integer | 300 | Characters of an error body kept in the error message, after masking |
+| `minSecretChars` | integer | 4 | Header values shorter than this are not masked in error bodies |
+
+Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production
+tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 {

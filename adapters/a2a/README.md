@@ -46,6 +46,9 @@ the runtime with the caller's identity, so guards, authorization and telemetry a
 | `maxTasks` | integer | `10000` | Tasks kept in total |
 | `taskTtlMs` | integer | `3600000` | How long a finished task stays readable |
 
+Limits accept `${env:NAME}`; `maxTasksPerCaller` and `maxTasks` also accept `"unbounded"`, which `agent-layers check` fails on
+the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
+
 ```json
 { "layers": { "channels": [{ "adapter": "a2a", "options": { "agents": ["assistant"], "descriptions": { "assistant": "Answers questions about the fleet." } } }] } }
 ```
@@ -78,6 +81,9 @@ layer.
 | `headers` | object | none | Static headers |
 | `timeoutMs` | integer | `300000` | Time limit of a run, polling included |
 | `pollMs` | integer | `500` | Interval of `GetTask` while the task is working |
+
+Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production
+tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 {

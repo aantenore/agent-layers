@@ -39,6 +39,10 @@ OPA, and this adapter's live test (`test/live.test.ts`) runs against it.
 | `jwksMinRefreshMs` | integer | `30000` | Minimum interval between key fetches after an unknown `kid` or a failure |
 | `jwksMaxAgeMs` | integer | `600000` | Key set cache lifetime |
 | `timeoutMs` | integer | `5000` | Discovery and JWKS request timeout |
+| `maxKeyTries` | integer | `5` | Most keys tried for a token without `kid` |
+| `maxTokenChars` | integer | `16384` | Longest token accepted |
+| `maxResponseBytes` | integer | `1000000` | Largest discovery or JWKS document read |
+| `errorDescriptionChars` | integer | `200` | Characters of a provider error description kept in an error message |
 | `allowHttp` | boolean | `false` | Plain HTTP outside loopback hosts |
 | `agentClients` | string[] | none | Clients whose client-credentials tokens are the agent |
 | `agentSubjects` | {client: sub} | none | Service-account `sub` per agent client (Keycloak: the service-account user id) |
@@ -68,12 +72,19 @@ cancels does not cancel the others.
 | `defaultTtlSec` | integer | `60` | Lifetime when the response has no `expires_in` and the token is not a JWT |
 | `maxCacheEntries` | integer | `1000` | Cache size |
 | `timeoutMs` | integer | `10000` | Token request timeout |
+| `maxTokenChars` | integer | `16384` | Longest token read for its expiry |
+| `maxResponseBytes` | integer | `1000000` | Largest discovery or token response read |
+| `errorDescriptionChars` | integer | `200` | Characters of a provider error description kept in an error message |
 | `allowHttp` | boolean | `false` | Plain HTTP outside loopback hosts |
+
+Limits accept `${env:NAME}`. `timeoutMs`, `maxTokenChars`, `maxResponseBytes` and (credentials) `maxCacheEntries` also accept
+`"unbounded"`, which `agent-layers check` fails on the production tier; `jwksMinRefreshMs` and `jwksMaxAgeMs` outside their
+safe range are a warning there. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ## Transport rules
 
 HTTPS is required except on loopback hosts (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) or with `allowHttp`.
-URLs with embedded credentials are refused, redirects are never followed, and every response is capped at 1 MB.
+URLs with embedded credentials are refused, redirects are never followed, and every response is capped at `maxResponseBytes` (1 MB).
 Errors never contain tokens or the client secret; provider error descriptions are scrubbed of token-like strings.
 
 ### Migrating rules and policies

@@ -16,6 +16,8 @@ Files are read on the first search and cached; call `refresh()` on the instance 
 | `extensions` | string[] | `[".md"]` | File extensions to load |
 | `k` | integer | `4` | Passages returned when the query does not set `k` |
 
+Limits accept `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).
+
 ```json
 {
   "layers": {

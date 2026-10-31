@@ -26,6 +26,9 @@ Tested live against Presidio 2.2.362 (`reference/guardrail`).
 | `headers` | object | none | Extra request headers |
 | `timeoutMs` | integer | 10000 | Per-request timeout |
 
+Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production tier.
+Ranges and checks: [docs/limits.md](../../docs/limits.md).
+
 Leave `entities` unset only if you want everything: the default list includes `DATE_TIME`, `PERSON` and `URL`, which
 makes ordinary sentences ("see you today") come back redacted.
 

@@ -1,4 +1,4 @@
-import { defineAdapter, PORT_VERSIONS, traceHeaders, type CallContext, type ChatChunk, type ChatRequest, type ChatResponse, type ModelPort } from '@agent-layers/core';
+import { anySignal, defineAdapter, defineLimits, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal, traceHeaders, type CallContext, type ChatChunk, type ChatRequest, type ChatResponse, type LimitValue, type ModelPort } from '@agent-layers/core';
 import { createOpenAICompatibleChannel, type OpenAICompatibleChannelOptions } from './inbound.ts';
 import { sseData } from './sse.ts';
 
@@ -14,22 +14,34 @@ export interface OpenAICompatibleOptions {
   model?: string;
   headers?: Record<string, string>;
   /** Whole-request timeout, streams included (default 120000). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
   /** Ask streaming backends for a final usage chunk (default true). */
   includeUsage?: boolean;
+  /** Characters of an error body kept in the error message (default 300). */
+  errorBodyChars?: number;
+  /** Characters of an invalid stream event kept in the error message (default 100). */
+  streamEventChars?: number;
 }
+
+/** Configurable limits of the model descriptor; see docs/limits.md. */
+export const LIMITS = defineLimits({
+  timeoutMs: { path: 'options.timeoutMs', default: 120_000, unit: 'ms', min: 1, unbounded: 'fail', safe: { max: 600_000 } },
+  errorBodyChars: { path: 'options.errorBodyChars', default: 300, unit: 'chars', min: 0, max: 100_000, safe: { max: 2000 } },
+  streamEventChars: { path: 'options.streamEventChars', default: 100, unit: 'chars', min: 0, max: 100_000, safe: { max: 2000 } },
+});
 
 /** Factory: usable directly from code, without the registry. */
 export function createOpenAICompatibleModel(options: OpenAICompatibleOptions, name = 'openai-compatible'): ModelPort {
   const base = options.baseUrl.replace(/\/+$/, '');
   const url = `${base}/chat/completions`;
-  const timeoutMs = options.timeoutMs ?? 120_000;
+  const timeoutMs = limitValue(LIMITS.timeoutMs, options.timeoutMs);
+  const errorBodyChars = limitValue(LIMITS.errorBodyChars, options.errorBodyChars);
+  const streamEventChars = limitValue(LIMITS.streamEventChars, options.streamEventChars);
   const includeUsage = options.includeUsage ?? true;
 
   const scrub = (s: string) => (options.apiKey ? s.split(options.apiKey).join('***') : s);
 
   async function post(req: ChatRequest, ctx: CallContext, stream: boolean): Promise<Response> {
-    const signals = [AbortSignal.timeout(timeoutMs), ...(ctx.signal ? [ctx.signal] : [])];
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -40,11 +52,11 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleOptions, na
         ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}),
       },
       body: JSON.stringify(requestBody(req, options.model, stream, includeUsage)),
-      signal: AbortSignal.any(signals),
+      signal: anySignal(timeoutSignal(timeoutMs), ctx.signal),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(scrub(`HTTP ${res.status} from ${url}: ${body.slice(0, 300)}`));
+      throw new Error(scrub(`HTTP ${res.status} from ${url}: ${body.slice(0, errorBodyChars)}`));
     }
     return res;
   }
@@ -63,7 +75,7 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleOptions, na
         try {
           raw = JSON.parse(data);
         } catch {
-          throw new Error(scrub(`invalid stream event from ${url}: ${data.slice(0, 100)}`));
+          throw new Error(scrub(`invalid stream event from ${url}: ${data.slice(0, streamEventChars)}`));
         }
         if (raw.error) throw new Error(scrub(`stream error from ${url}: ${typeof raw.error === 'string' ? raw.error : raw.error.message ?? 'unknown'}`));
         yield toChunk(raw);
@@ -90,12 +102,17 @@ export const adapter = defineAdapter<'ModelPort', OpenAICompatibleOptions>({
       apiKey: { type: 'string' },
       model: { type: 'string' },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
-      timeoutMs: { type: 'integer', minimum: 1 },
       includeUsage: { type: 'boolean' },
+      ...limitProperties(LIMITS, {
+        timeoutMs: 'Whole-request time limit, streams included',
+        errorBodyChars: 'Characters of an error body kept in the error message',
+        streamEventChars: 'Characters of an invalid stream event kept in the error message',
+      }),
     },
     required: ['baseUrl'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createOpenAICompatibleModel(options, ctx.name),
 });
 

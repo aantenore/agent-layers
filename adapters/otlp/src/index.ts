@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
-import { defineAdapter, PORT_VERSIONS, traceContext, type Attributes, type LayerAttributes, type Span, type SpanOptions, type TelemetryPort, type TraceContext } from '@agent-layers/core';
+import { defineAdapter, defineLimits, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal, traceContext, type Attributes, type LayerAttributes, type LimitValue, type Span, type SpanOptions, type TelemetryPort, type TraceContext } from '@agent-layers/core';
 import { MetricsAggregator } from './metrics.ts';
 import { createClock, toAttributes, type KeyValue } from './otlp-json.ts';
 import { scrub, spanKind, spanName } from './semconv.ts';
@@ -25,13 +25,26 @@ export interface OtlpOptions {
   intervalMs?: number;
   /** Send early when this many spans are waiting (default 512). */
   maxBatch?: number;
+  /** Spans kept while the collector is slow or down; the oldest are dropped beyond it (default `maxBatch * 8`, at least `maxBatch`). */
+  maxQueue?: LimitValue;
   /** Per-request timeout (default 10000 ms). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
+  /** Characters of an error message exported with `captureContent` (default 200). */
+  errorMessageChars?: number;
   /** Name spans `chat <model>`, `invoke_agent <agent>`, `execute_tool <tool>` as the GenAI conventions do (default true). */
   semconvNames?: boolean;
   /** An event outside any span: `span` exports it as a zero-length span (default), `drop` ignores it. */
   orphanEvents?: 'span' | 'drop';
 }
+
+/** Configurable limits; see docs/limits.md. */
+export const LIMITS = defineLimits({
+  intervalMs: { path: 'options.intervalMs', default: 2000, unit: 'ms', min: 1, safe: { min: 100, max: 60_000 } },
+  maxBatch: { path: 'options.maxBatch', default: 512, unit: 'count', min: 1, safe: { max: 10_000 } },
+  maxQueue: { path: 'options.maxQueue', default: null, unit: 'count', min: 1, unbounded: 'fail', safe: { max: 100_000 }, fallback: 'options.maxBatch * 8' },
+  timeoutMs: { path: 'options.timeoutMs', default: 10_000, unit: 'ms', min: 1, unbounded: 'fail', safe: { max: 120_000 } },
+  errorMessageChars: { path: 'options.errorMessageChars', default: 200, unit: 'chars', min: 0, max: 100_000, safe: { max: 1000 } },
+});
 
 export interface OtlpDeps { fetch?: FetchLike; env?: Record<string, string | undefined>; name?: string }
 
@@ -103,7 +116,12 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
   const base = endpoint.replace(/\/+$/, '').replace(/\/v1\/(traces|metrics)$/, '');
   const tracesUrl = `${base}/v1/traces`;
   const metricsUrl = `${base}/v1/metrics`;
-  const maxBatch = options.maxBatch ?? 512;
+  const maxBatch = limitValue(LIMITS.maxBatch, options.maxBatch);
+  const maxQueue = options.maxQueue === undefined ? maxBatch * 8 : limitValue(LIMITS.maxQueue, options.maxQueue);
+  if (maxQueue < maxBatch) throw new Error('otlp: maxQueue must be at least maxBatch');
+  const timeoutMs = limitValue(LIMITS.timeoutMs, options.timeoutMs);
+  const intervalMs = limitValue(LIMITS.intervalMs, options.intervalMs);
+  const errorMessageChars = limitValue(LIMITS.errorMessageChars, options.errorMessageChars);
   const resource = { attributes: toAttributes({ 'service.name': options.serviceName ?? env.OTEL_SERVICE_NAME ?? 'agent-layers', ...options.resourceAttributes }) };
   const scope = { name: '@agent-layers/adapter-otlp' };
 
@@ -121,7 +139,7 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
         method: 'POST',
         headers: { 'content-type': 'application/json', ...options.headers },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
+        signal: timeoutSignal(timeoutMs),
       });
       if (typeof res?.ok !== 'boolean') throw new InvalidResponse();
       await res.body?.cancel().catch(() => {});
@@ -150,7 +168,7 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
   }
   const flush = () => (chain = chain.then(exportOnce));
 
-  const timer = setInterval(() => { void flush(); }, options.intervalMs ?? 2000);
+  const timer = setInterval(() => { void flush(); }, intervalMs);
   timer.unref();
 
   /** The local active span is the parent; without one, a valid remote parent from another process. */
@@ -198,9 +216,9 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
       startTimeUnixNano: s.startNanos, endTimeUnixNano: endNanos,
       attributes: toAttributes(attributes),
       events: s.events.map((e) => ({ timeUnixNano: e.time, name: e.name, attributes: toAttributes(e.attributes) })),
-      ...(s.error ? { status: { code: STATUS_ERROR, ...(captureContent ? { message: s.error.message.slice(0, 200) } : {}) } } : {}),
+      ...(s.error ? { status: { code: STATUS_ERROR, ...(captureContent ? { message: s.error.message.slice(0, errorMessageChars) } : {}) } } : {}),
     });
-    if (pending.length > maxBatch * 8) pending.splice(0, pending.length - maxBatch * 8);
+    if (pending.length > maxQueue) pending.splice(0, pending.length - maxQueue);
     if (pending.length >= maxBatch) void flush();
   }
 
@@ -270,14 +288,19 @@ export const adapter = defineAdapter<'TelemetryPort', OtlpOptions>({
       resourceAttributes: { type: 'object', additionalProperties: { type: ['string', 'number', 'boolean'] } },
       captureContent: { type: 'boolean' },
       metrics: { type: 'boolean' },
-      intervalMs: { type: 'integer', minimum: 1 },
-      maxBatch: { type: 'integer', minimum: 1 },
-      timeoutMs: { type: 'integer', minimum: 1 },
+      ...limitProperties(LIMITS, {
+        intervalMs: 'Export interval for finished spans and changed metrics',
+        maxBatch: 'Send early when this many spans are waiting',
+        maxQueue: 'Spans kept while the collector is slow or down; the oldest are dropped beyond it',
+        timeoutMs: 'Per-request timeout',
+        errorMessageChars: 'Characters of an error message exported with captureContent',
+      }),
       semconvNames: { type: 'boolean' },
       orphanEvents: { enum: ['span', 'drop'] },
     },
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createOtlpTelemetry(options, { env: ctx.env, name: ctx.name }),
 });
 

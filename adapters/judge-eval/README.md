@@ -36,8 +36,11 @@ const judge = createJudgeEval({ model: 'gpt-4o-mini', criteria: 'Answers in one 
 | `metric` | string | `"judge"` | Metric name of the score |
 | `temperature` | number | 0 | Sampling temperature |
 | `maxTokens` | integer | backend default | Limit for the judge answer |
+| `maxReasonChars` | integer | `300` | Characters of the judge reason kept in the score |
 | `extra` | object | none | Passed to the backend, e.g. `{ "response_format": { "type": "json_object" } }` |
 | `onError` | `"score"` \| `"throw"` | `"score"` | Score 0 on the `eval` layer, or reject |
+
+Limits accept `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 {

@@ -1,7 +1,7 @@
-import { defineAdapter, PORT_VERSIONS, type RunEvent, type RuntimePort } from '@agent-layers/core';
-import { runLoop, type LoopOptions, type ModelPrice } from './loop.ts';
+import { defineAdapter, limitProperties, PORT_VERSIONS, type RunEvent, type RuntimePort } from '@agent-layers/core';
+import { LIMITS, runLoop, type LoopOptions, type ModelPrice } from './loop.ts';
 
-export { runLoop, type LoopOptions, type ModelPrice };
+export { LIMITS, runLoop, type LoopOptions, type ModelPrice };
 
 /** Factory: an in-process loop over the stack's model and tools. */
 export function createBasicRuntime(options: LoopOptions = {}, name = 'basic-runtime'): RuntimePort {
@@ -52,7 +52,7 @@ export const adapter = defineAdapter<'RuntimePort', LoopOptions>({
   optionsSchema: {
     type: 'object',
     properties: {
-      maxTurns: { type: 'integer', minimum: 1, maximum: 100 },
+      ...limitProperties(LIMITS, { maxTurns: 'Model calls per run' }),
       pricing: {
         type: 'object',
         additionalProperties: {
@@ -64,6 +64,7 @@ export const adapter = defineAdapter<'RuntimePort', LoopOptions>({
     },
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createBasicRuntime(options, ctx.name),
 });
 

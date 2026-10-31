@@ -10,7 +10,9 @@ restart: use it for development and demos.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `ttlMs` | integer | none | Time a pending approval stays open; afterwards it reports `expired` and `expiresAt` is set on the request |
+| `ttlMs` | integer or `"unbounded"` | `"unbounded"` | Time a pending approval stays open; afterwards it reports `expired` and `expiresAt` is set on the request |
+
+`ttlMs` accepts `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 { "layers": { "approval": { "adapter": "memory-approval", "options": { "ttlMs": 600000 } } } }

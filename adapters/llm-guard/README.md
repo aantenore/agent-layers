@@ -32,6 +32,9 @@ downloads a model and takes a few minutes).
 | `headers` | object | none | Extra request headers |
 | `timeoutMs` | integer | 30000 | Per-request timeout (scanners run models) |
 
+Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production tier.
+Ranges and checks: [docs/limits.md](../../docs/limits.md).
+
 ```json
 {
   "layers": {

@@ -1,5 +1,5 @@
 import {
-  GuardrailBlocked, toChatTools, type AgentSpec, type CallContext, type ChatMessage, type RunEvent, type RunInput, type RunResult,
+  defineLimits, GuardrailBlocked, limitValue, toChatTools, type AgentSpec, type CallContext, type ChatMessage, type RunEvent, type RunInput, type RunResult,
   type Stack, type Usage,
 } from '@agent-layers/core';
 
@@ -13,10 +13,16 @@ export interface LoopOptions {
   pricing?: Record<string, ModelPrice>;
 }
 
+/** Configurable limits; see docs/limits.md. */
+export const LIMITS = defineLimits({
+  maxTurns: { path: 'options.maxTurns', default: 8, unit: 'count', min: 1, max: 100, safe: { max: 25 } },
+});
+
 const PARAM_KEYS = ['temperature', 'max_tokens', 'stop'] as const;
 
 /** Runs one agent: model call → tool calls → model call … until a final answer or the turn limit. */
 export async function* runLoop(stack: Stack, agent: AgentSpec, input: RunInput, ctx: CallContext, opts: LoopOptions): AsyncGenerator<RunEvent, RunResult> {
+  const maxTurns = limitValue(LIMITS.maxTurns, opts.maxTurns);
   const model = stack.modelFor(agent);
   const tools = stack.toolsFor(agent);
   const messages: ChatMessage[] = [
@@ -34,7 +40,7 @@ export async function* runLoop(stack: Stack, agent: AgentSpec, input: RunInput, 
   yield { type: 'run_start', runId: ctx.runId, agent: agent.name };
   try {
     const specs = agent.tools.length ? await tools.listTools(ctx) : [];
-    for (let turn = 1; turn <= (opts.maxTurns ?? 8); turn++) {
+    for (let turn = 1; turn <= maxTurns; turn++) {
       if (ctx.signal?.aborted) return end('stopped', '', 'aborted');
       const res = await model.chat({
         model: agent.model, messages, ...(specs.length ? { tools: toChatTools(specs) } : {}), ...params,

@@ -1,6 +1,7 @@
-import { defineAdapter, PORT_VERSIONS, type JsonSchema } from '@agent-layers/core';
+import { defineAdapter, limitProperties, PORT_VERSIONS, type JsonSchema } from '@agent-layers/core';
 import { serverProblem } from './client.ts';
 import { createMcpKnowledge, type McpKnowledgeOptions } from './knowledge.ts';
+import { CONNECTION_LIMITS, KNOWLEDGE_LIMITS, SERVER_LIMITS, TOOLS_LIMITS } from './limits.ts';
 import { createMcpServerChannel, type McpServerChannelOptions } from './server.ts';
 import { createMcpTools, type McpToolsOptions } from './tools.ts';
 
@@ -8,11 +9,17 @@ export { createMcpKnowledge, createMcpServerChannel, createMcpTools, type McpKno
 export { McpClient, McpSession, MCP_PROTOCOL_VERSION, type McpCallResult, type McpToolInfo } from './client.ts';
 export { hashId, matchesFilter, parseMcpResult, toPassage } from './parse.ts';
 export { riskOf } from './tools.ts';
+export { CONNECTION_LIMITS, KNOWLEDGE_LIMITS, SERVER_LIMITS, TOOLS_LIMITS };
 export { McpHttpError, McpRpcError, type McpServerOptions } from './transport.ts';
 
 const strings = { type: 'array', items: { type: 'string', minLength: 1 } };
 
-/** Connection options shared by both descriptors. */
+const connectionDescriptions = {
+  timeoutMs: 'Time limit per request', errorBodyChars: 'Characters of an error body kept in the error message',
+  minSecretChars: 'Shortest header or token value masked in errors', stderrChars: 'Characters of a stdio server\'s stderr kept for error messages',
+};
+
+/** Connection options shared by both outbound descriptors. */
 const serverProperties: Record<string, JsonSchema> = {
   command: { type: 'string', minLength: 1 },
   args: { type: 'array', items: { type: 'string' } },
@@ -26,7 +33,7 @@ const serverProperties: Record<string, JsonSchema> = {
     required: ['audience'],
     additionalProperties: false,
   },
-  timeoutMs: { type: 'integer', minimum: 1 },
+  ...limitProperties(CONNECTION_LIMITS, connectionDescriptions),
 };
 
 function checked<O extends { command?: string; url?: string; auth?: unknown }>(options: O): O {
@@ -53,10 +60,11 @@ export const toolAdapter = defineAdapter<'ToolPort', McpToolsOptions>({
       readOnly: strings,
       include: strings,
       exclude: strings,
-      toolsTtlMs: { type: 'integer', minimum: 0 },
+      ...limitProperties(TOOLS_LIMITS, { toolsTtlMs: 'How long the tool list is cached' }),
     },
     additionalProperties: false,
   },
+  limits: TOOLS_LIMITS,
   create: (options, ctx) => createMcpTools(checked(options), { name: ctx.name, env: ctx.env, telemetry: ctx.telemetry }),
 });
 
@@ -79,11 +87,12 @@ export const knowledgeAdapter = defineAdapter<'KnowledgePort', McpKnowledgeOptio
       kArg: { type: 'string', minLength: 1 },
       filterArg: { type: 'string', minLength: 1 },
       toolArgs: { type: 'object' },
-      k: { type: 'integer', minimum: 1 },
+      ...limitProperties(KNOWLEDGE_LIMITS, { k: 'Passages returned when the query has no k' }),
     },
     required: ['tool'],
     additionalProperties: false,
   },
+  limits: KNOWLEDGE_LIMITS,
   create: (options, ctx) => createMcpKnowledge(checked(options), { name: ctx.name, env: ctx.env, telemetry: ctx.telemetry }),
 });
 
@@ -105,13 +114,14 @@ export const channelAdapter = defineAdapter<'ChannelPort', McpServerChannelOptio
       exclude: strings,
       serverName: { type: 'string', minLength: 1 },
       sse: { type: 'boolean' },
-      sessionTtlMs: { type: 'integer', minimum: 1000 },
-      maxSessions: { type: 'integer', minimum: 1 },
-      maxSessionsPerCaller: { type: 'integer', minimum: 1 },
-      maxSessionAgeMs: { type: 'integer', minimum: 1000 },
+      ...limitProperties(SERVER_LIMITS, {
+        sessionTtlMs: 'Idle time after which a session is forgotten', maxSessionAgeMs: 'Absolute lifetime of a session',
+        maxSessions: 'Sessions in total', maxSessionsPerCaller: 'Sessions per authenticated caller and for the anonymous pool',
+      }),
     },
     additionalProperties: false,
   },
+  limits: SERVER_LIMITS,
   create: (options, ctx) => createMcpServerChannel(options, ctx.name),
 });
 

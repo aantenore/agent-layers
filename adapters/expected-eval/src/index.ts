@@ -1,4 +1,5 @@
-import { defineAdapter, LAYERS, PORT_VERSIONS, type EvalScore, type EvaluatorPort, type Layer } from '@agent-layers/core';
+import { defineAdapter, LAYERS, limitProperties, limitValue, PORT_VERSIONS, type EvalScore, type EvaluatorPort, type Layer } from '@agent-layers/core';
+import { LIMITS } from './limits.ts';
 
 export interface ExpectedEvalOptions {
   /** How the output is compared with an expected answer (default `contains`). */
@@ -9,6 +10,8 @@ export interface ExpectedEvalOptions {
   metric?: string;
   /** Layer id attached to the scores. */
   layer?: Layer;
+  /** Characters of an expected answer quoted in a score reason (default 60). */
+  maxQuoteChars?: number;
 }
 
 type Expectation = { kind: 'any' | 'all'; answers: string[] };
@@ -25,12 +28,12 @@ function expectation(expected: unknown): Expectation | undefined {
   return all ? { kind: 'all', answers: all } : undefined;
 }
 
-const short = (s: string) => (s.length > 60 ? `${s.slice(0, 57)}...` : s);
-
 /** Evaluator that checks a run's output against the expected answer of its dataset case. */
 export function createExpectedEval(options: ExpectedEvalOptions = {}, name = 'expected-eval'): EvaluatorPort {
   const mode = options.mode ?? 'contains';
   const metric = options.metric ?? 'expected';
+  const maxQuote = limitValue(LIMITS.maxQuoteChars, options.maxQuoteChars);
+  const short = (s: string) => (s.length > maxQuote ? `${s.slice(0, maxQuote - 3)}...` : s);
   const fold = options.caseSensitive ? (s: string) => s : (s: string) => s.toLowerCase();
   const score = (value: number, reason: string): EvalScore[] => [{ metric, value, ...(options.layer ? { layer: options.layer } : {}), reason }];
 
@@ -77,9 +80,11 @@ export const adapter = defineAdapter<'EvaluatorPort', ExpectedEvalOptions>({
       caseSensitive: { type: 'boolean' },
       metric: { type: 'string', minLength: 1 },
       layer: { enum: LAYERS.map((l) => l.layer) },
+      ...limitProperties(LIMITS, { maxQuoteChars: 'Characters of an expected answer quoted in a score reason' }),
     },
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createExpectedEval(options, ctx.name),
 });
 

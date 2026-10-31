@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
-  AdapterRegistry, defineAdapter, noopTelemetry, packageLoader, PORT_VERSIONS,
+  AdapterRegistry, defineAdapter, limitProperties, limitValue, noopTelemetry, packageLoader, PORT_VERSIONS,
   type AdapterContext, type CallContext, type ChatRequest, type EvalScore, type EvaluatorPort, type ModelPort, type TelemetryPort,
 } from '@agent-layers/core';
+import { LIMITS } from './limits.ts';
 
 /** The model that judges, as a ModelPort adapter resolved like any other adapter of the stack. */
 export interface JudgeBackend {
@@ -26,7 +27,10 @@ export interface JudgeEvalOptions {
   metric?: string;
   /** Sampling temperature (default 0). */
   temperature?: number;
+  /** Limit for the judge answer, in tokens (default: the backend's). */
   maxTokens?: number;
+  /** Characters of the judge's reason kept in the score (default 300). */
+  maxReasonChars?: number;
   /** Passed through to the backend, e.g. `{ "response_format": { "type": "json_object" } }`. */
   extra?: Record<string, unknown>;
   /** When the judge fails or answers unusably: score 0 on the `eval` layer (default), or reject. */
@@ -58,7 +62,7 @@ const truncate = (s: string, max: number) => (s.length > max ? `${s.slice(0, max
  * and `reason` (a string). Text around it, code fences, several objects, extra fields and out-of-range scores are
  * rejected: a reply that was steered by the graded material is a failure, not a score.
  */
-export function parseJudgement(text: string): { score: number; reason: string } | undefined {
+export function parseJudgement(text: string, maxReasonChars = limitValue(LIMITS.maxReasonChars, undefined)): { score: number; reason: string } | undefined {
   let value: unknown;
   try { value = JSON.parse(text.trim()); } catch { return undefined; }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -66,7 +70,7 @@ export function parseJudgement(text: string): { score: number; reason: string } 
   if (keys.length !== 2 || !keys.includes('score') || !keys.includes('reason')) return undefined;
   const { score, reason } = value as { score: unknown; reason: unknown };
   if (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 1 || typeof reason !== 'string') return undefined;
-  return { score, reason: truncate(reason, 300) };
+  return { score, reason: truncate(reason, maxReasonChars) };
 }
 
 const newFence = () => `fence-${randomUUID().replaceAll('-', '')}`;
@@ -74,6 +78,7 @@ const newFence = () => `fence-${randomUUID().replaceAll('-', '')}`;
 /** Factory: LLM-as-judge over any ModelPort. Scores 0 to 1 with a one-sentence reason. */
 export function createJudgeEval(options: JudgeEvalOptions, deps: JudgeEvalDeps): EvaluatorPort {
   const metric = options.metric ?? 'judge';
+  const maxReasonChars = limitValue(LIMITS.maxReasonChars, options.maxReasonChars);
   const telemetry = deps.telemetry ?? noopTelemetry;
   const failed = (reason: string): EvalScore[] => [{ metric, value: 0, layer: 'eval', reason }];
 
@@ -110,7 +115,7 @@ export function createJudgeEval(options: JudgeEvalOptions, deps: JudgeEvalDeps):
           span.setAttributes({ 'gen_ai.response.model': res.model });
           return res.choices[0]?.message.content ?? '';
         });
-        const judgement = parseJudgement(text);
+        const judgement = parseJudgement(text, maxReasonChars);
         if (!judgement) {
           if (options.onError === 'throw') throw new Error('judge gave no usable verdict');
           return failed('judge gave no usable verdict');
@@ -147,13 +152,14 @@ export const adapter = defineAdapter<'EvaluatorPort', JudgeEvalOptions>({
       criteria: { type: 'string', minLength: 1 },
       metric: { type: 'string', minLength: 1 },
       temperature: { type: 'number', minimum: 0 },
-      maxTokens: { type: 'integer', minimum: 1 },
       extra: { type: 'object' },
       onError: { enum: ['score', 'throw'] },
+      ...limitProperties(LIMITS, { maxTokens: 'Limit for the judge answer', maxReasonChars: 'Characters of the judge reason kept in the score' }),
     },
     required: ['model'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   async create(options, ctx) {
     const fallback = options.backend ? await backendModel(options.backend, ctx) : undefined;
     if (!fallback && !ctx.stack) throw new Error('backend is required outside a composed stack');

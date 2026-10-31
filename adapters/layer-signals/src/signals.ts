@@ -1,4 +1,4 @@
-import type { EvalScore, Layer, RunEvent, TelemetryRecord } from '@agent-layers/core';
+import { defineLimits, limitValue, type EvalScore, type Layer, type RunEvent, type TelemetryRecord } from '@agent-layers/core';
 
 /**
  * What the scoring reads. Two kinds of items can be mixed in `EvalRun.events`:
@@ -14,6 +14,23 @@ import type { EvalScore, Layer, RunEvent, TelemetryRecord } from '@agent-layers/
  */
 export type SignalItem = RunEvent | TelemetryRecord;
 export interface SignalRun { runId?: string; status: string; reason?: string }
+
+/** How much of a reason or a list the score reasons keep. */
+export interface SignalLimitOptions {
+  /** Characters of a run reason kept in the reason of the llm and harness scores (default 160). */
+  reasonChars?: number;
+  /** Characters of a run reason kept in the reason of the guardrail score (default 80). */
+  guardReasonChars?: number;
+  /** Names listed in a score reason: guards, denied tools, failed tools (default 3). */
+  previewItems?: number;
+}
+
+/** Configurable limits; see docs/limits.md. */
+export const LIMITS = defineLimits({
+  reasonChars: { path: 'options.reasonChars', default: 160, unit: 'chars', min: 1, max: 100_000, safe: { max: 1000 } },
+  guardReasonChars: { path: 'options.guardReasonChars', default: 80, unit: 'chars', min: 1, max: 100_000, safe: { max: 1000 } },
+  previewItems: { path: 'options.previewItems', default: 3, unit: 'count', min: 1, max: 1000, safe: { max: 20 } },
+});
 
 const SPAN_TYPES = new Set(['span', 'event', 'metric']);
 /** Run failures that come from the model side: provider errors, network, truncated or unusable answers. */
@@ -36,7 +53,10 @@ const isSpan = (e: SignalItem): e is SpanRecord => e.type === 'span' && typeof (
 const isTelemetry = (e: SignalItem) => SPAN_TYPES.has(e.type) && typeof (e as { attrs?: unknown }).attrs === 'object';
 
 /** Per-layer health from what the SDK exposes after a run. A layer without any signal gets no score. */
-export function scoreLayers(items: readonly SignalItem[], run: SignalRun): EvalScore[] {
+export function scoreLayers(items: readonly SignalItem[], run: SignalRun, limits: SignalLimitOptions = {}): EvalScore[] {
+  const reasonChars = limitValue(LIMITS.reasonChars, limits.reasonChars);
+  const guardReasonChars = limitValue(LIMITS.guardReasonChars, limits.guardReasonChars);
+  const preview = limitValue(LIMITS.previewItems, limits.previewItems);
   const spans = items.filter(isSpan);
   const events = items.filter((e) => !isTelemetry(e)) as RunEvent[];
   const named = (n: string) => spans.filter((s) => s.name === n);
@@ -53,10 +73,10 @@ export function scoreLayers(items: readonly SignalItem[], run: SignalRun): EvalS
   if (checks.length || guardrailStop) {
     const blocks = Math.max(checks.filter((s) => action(s) === 'block').length, guardrailStop ? 1 : 0);
     const redactions = checks.filter((s) => action(s) === 'redact').length;
-    const where = [...new Set(checks.filter((s) => action(s) !== 'allow').map((s) => `${str(s.attrs['guard.name']) ?? 'guard'}@${str(s.attrs['guard.stage']) ?? '?'}`))].slice(0, 3).join(', ');
+    const where = [...new Set(checks.filter((s) => action(s) !== 'allow').map((s) => `${str(s.attrs['guard.name']) ?? 'guard'}@${str(s.attrs['guard.stage']) ?? '?'}`))].slice(0, preview).join(', ');
     const parts = [blocks && `${blocks} blocked`, redactions && `${redactions} redacted`].filter(Boolean).join(', ');
     scores.set('guardrail', score('guardrail', blocks ? 0 : redactions ? REDACTED_VALUE : 1,
-      `${parts || `${checks.length} checks passed`}${where ? ` (${where})` : ''}${guardrailStop ? `; run ${truncate(reason, 80)}` : ''}`));
+      `${parts || `${checks.length} checks passed`}${where ? ` (${where})` : ''}${guardrailStop ? `; run ${truncate(reason, guardReasonChars)}` : ''}`));
   }
 
   // identity: authorization decisions.
@@ -64,7 +84,7 @@ export function scoreLayers(items: readonly SignalItem[], run: SignalRun): EvalS
   if (decisions.length) {
     const denied = decisions.filter((s) => str(s.attrs['policy.decision']) === 'deny');
     scores.set('identity', score('identity', 1 - denied.length / decisions.length,
-      denied.length ? `${denied.length}/${decisions.length} denied: ${denied.slice(0, 3).map((s) => str(s.attrs['gen_ai.tool.name']) ?? 'tool').join(', ')}` : `${decisions.length} calls allowed`));
+      denied.length ? `${denied.length}/${decisions.length} denied: ${denied.slice(0, preview).map((s) => str(s.attrs['gen_ai.tool.name']) ?? 'tool').join(', ')}` : `${decisions.length} calls allowed`));
   }
 
   // tool and knowledge: execute_tool spans by the layer they carry. A denied call is identity's, a blocked one the guard's.
@@ -78,7 +98,7 @@ export function scoreLayers(items: readonly SignalItem[], run: SignalRun): EvalS
     const bad = toolExecs.length
       ? toolExecs.filter(failedExec).map((s) => str(s.attrs['gen_ai.tool.name']))
       : toolResults.filter((e) => e.isError === true).map((e) => str(e.name));
-    const names = bad.slice(0, 3).map((n) => n ?? 'tool').join(', ');
+    const names = bad.slice(0, preview).map((n) => n ?? 'tool').join(', ');
     scores.set('tool', score('tool', 1 - bad.length / total, bad.length ? `${bad.length}/${total} calls failed: ${names}` : `${total} calls ok`));
   }
 
@@ -104,7 +124,7 @@ export function scoreLayers(items: readonly SignalItem[], run: SignalRun): EvalS
     const f = s.attrs['gen_ai.response.finish_reasons'];
     return Array.isArray(f) ? (f as unknown[]).map(String) : f === undefined ? [] : [String(f)];
   };
-  if (llmFailed) scores.set('llm', score('llm', 0, `run ${run.status}: ${truncate(reason, 160)}`));
+  if (llmFailed) scores.set('llm', score('llm', 0, `run ${run.status}: ${truncate(reason, reasonChars)}`));
   else if (chats.length) {
     const bad = chats.filter((s) => s.status === 'error' || finishOf(s).some((f) => BAD_FINISH.has(f))).length;
     scores.set('llm', score('llm', 1 - bad / chats.length, bad ? `${bad}/${chats.length} model calls failed or were cut off` : `${chats.length} model calls ok`));
@@ -123,7 +143,7 @@ export function scoreLayers(items: readonly SignalItem[], run: SignalRun): EvalS
 
   // harness: the run itself. Failures already blamed on a guard or the model are not blamed twice.
   if (run.status === 'completed') scores.set('harness', score('harness', 1, 'completed'));
-  else if (!llmFailed && !guardrailStop) scores.set('harness', score('harness', 0, `run ${run.status}${reason ? `: ${truncate(reason, 160)}` : ''}`));
+  else if (!llmFailed && !guardrailStop) scores.set('harness', score('harness', 0, `run ${run.status}${reason ? `: ${truncate(reason, reasonChars)}` : ''}`));
 
   return [...scores.values()];
 }

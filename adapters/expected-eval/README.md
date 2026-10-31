@@ -14,6 +14,9 @@ match). A run that did not complete scores 0 with the reason `run <status>`.
 | `caseSensitive` | boolean | `false` | Case-sensitive comparison |
 | `metric` | string | `expected` | Metric name of the score |
 | `layer` | layer id | none | Layer attached to the scores, for example `knowledge` |
+| `maxQuoteChars` | integer | `60` | Characters of an expected answer quoted in a score reason |
+
+Limits accept `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 { "layers": { "eval": [{ "adapter": "expected-eval", "options": { "mode": "contains", "layer": "knowledge" } }] } }

@@ -1,10 +1,10 @@
-import { defineAdapter, LAYERS, PORT_VERSIONS, type EvaluatorPort, type Layer } from '@agent-layers/core';
-import { scoreLayers, type SignalItem } from './signals.ts';
+import { defineAdapter, LAYERS, limitProperties, PORT_VERSIONS, type EvaluatorPort, type Layer } from '@agent-layers/core';
+import { LIMITS, scoreLayers, type SignalItem, type SignalLimitOptions } from './signals.ts';
 
-export { scoreLayers, type SignalItem, type SignalRun } from './signals.ts';
+export { LIMITS, scoreLayers, type SignalItem, type SignalLimitOptions, type SignalRun } from './signals.ts';
 export { createSignalRecorder, type SignalRecorder } from './recorder.ts';
 
-export interface LayerSignalsOptions {
+export interface LayerSignalsOptions extends SignalLimitOptions {
   /** Report only these layers (default all that have a signal). */
   layers?: Layer[];
 }
@@ -16,7 +16,7 @@ export function createLayerSignals(options: LayerSignalsOptions = {}, name = 'la
     name,
     async score(_c, run) {
       const reason = (run as { reason?: unknown }).reason;
-      const scores = scoreLayers((run.events ?? []) as SignalItem[], { runId: run.runId, status: run.status, ...(typeof reason === 'string' ? { reason } : {}) });
+      const scores = scoreLayers((run.events ?? []) as SignalItem[], { runId: run.runId, status: run.status, ...(typeof reason === 'string' ? { reason } : {}) }, options);
       return only ? scores.filter((s) => s.layer && only.has(s.layer)) : scores;
     },
   };
@@ -33,9 +33,17 @@ export const adapter = defineAdapter<'EvaluatorPort', LayerSignalsOptions>({
   description: 'Scores each layer from the run result, its events and its telemetry, so a failing case points at the layer to fix.',
   optionsSchema: {
     type: 'object',
-    properties: { layers: { type: 'array', minItems: 1, items: { enum: LAYERS.map((l) => l.layer) } } },
+    properties: {
+      layers: { type: 'array', minItems: 1, items: { enum: LAYERS.map((l) => l.layer) } },
+      ...limitProperties(LIMITS, {
+        reasonChars: 'Characters of a run reason kept in the llm and harness score reasons',
+        guardReasonChars: 'Characters of a run reason kept in the guardrail score reason',
+        previewItems: 'Names listed in a score reason',
+      }),
+    },
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createLayerSignals(options, ctx.name),
 });
 

@@ -1,5 +1,6 @@
-import { defineAdapter, GUARD_STAGES, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict } from '@agent-layers/core';
+import { defineAdapter, GUARD_STAGES, limitProperties, limitValue, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict, type LimitValue } from '@agent-layers/core';
 import { assertPlainUrl, failure, HttpStatusError, InvalidResponseError, postJson, trimSlash, type FetchLike, type HttpOptions } from './http.ts';
+import { LIMITS } from './limits.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface LlmGuardOptions {
@@ -20,7 +21,7 @@ export interface LlmGuardOptions {
   onError?: 'block' | 'allow';
   headers?: Record<string, string>;
   /** Per-request timeout in milliseconds (default 30000: scanners run models). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
 }
 
 export interface LlmGuardDeps { fetch?: FetchLike; name?: string }
@@ -48,7 +49,7 @@ export function createLlmGuard(options: LlmGuardOptions, deps: LlmGuardDeps = {}
   assertPlainUrl(options.url, 'llm-guard url');
   const base = trimSlash(options.url);
   const http: HttpOptions = {
-    timeoutMs: options.timeoutMs ?? 30_000,
+    timeoutMs: limitValue(LIMITS.timeoutMs, options.timeoutMs),
     headers: { ...(options.token ? { authorization: `Bearer ${options.token}` } : {}), ...options.headers },
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
   };
@@ -111,11 +112,12 @@ export const adapter = defineAdapter<'GuardPort', LlmGuardOptions>({
       stages: { type: 'array', minItems: 1, items: { enum: [...GUARD_STAGES] } },
       onError: { enum: ['block', 'allow'] },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
-      timeoutMs: { type: 'integer', minimum: 1 },
+      ...limitProperties(LIMITS, { timeoutMs: 'Time limit per request' }),
     },
     required: ['url'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createLlmGuard(options, { name: ctx.name }),
 });
 

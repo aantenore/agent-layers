@@ -1,6 +1,7 @@
-import { matchesAny, type BoundCredentials, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec, type TelemetryPort } from '@agent-layers/core';
+import { limitValue, matchesAny, type BoundCredentials, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec, type TelemetryPort } from '@agent-layers/core';
 import { bearer, McpSession, type McpToolInfo } from './client.ts';
 import { interpolate } from './env.ts';
+import { CONNECTION_LIMITS, TOOLS_LIMITS } from './limits.ts';
 import { redact, redactStructured, scrubError, secretForms, staticSecrets } from './redact.ts';
 import { McpRpcError, type McpServerOptions } from './transport.ts';
 
@@ -27,7 +28,6 @@ export interface McpDeps {
   telemetry?: TelemetryPort;
 }
 
-const DEFAULT_TOOLS_TTL_MS = 60_000;
 const SAFE_NAME = /[^A-Za-z0-9_.-]/g;
 
 /** Risk of a tool: forced value, then the `readOnly` globs, then the MCP annotations; unknown means exec. */
@@ -46,9 +46,10 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
   const env = deps.env ?? process.env;
   const cfg = interpolate(options, env, 'mcp');
   const session = new McpSession(cfg, { env, ...(deps.credentials ? { credentials: deps.credentials } : {}), ...(deps.telemetry ? { telemetry: deps.telemetry } : {}) });
-  const ttl = cfg.toolsTtlMs ?? DEFAULT_TOOLS_TTL_MS;
+  const ttl = limitValue(TOOLS_LIMITS.toolsTtlMs, cfg.toolsTtlMs);
+  const minSecretChars = limitValue(CONNECTION_LIMITS.minSecretChars, cfg.minSecretChars);
   const { auth } = cfg;
-  const staticForms = secretForms(staticSecrets(cfg.headers));
+  const staticForms = secretForms(staticSecrets(cfg.headers), minSecretChars);
   let cache: { at: number; tools: Map<string, Entry> } | undefined;
 
   async function load(credentials: BoundCredentials | undefined): Promise<Map<string, Entry>> {
@@ -103,7 +104,7 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
         headers = bearer(token);
       }
       // A server may echo request headers back; the token and static header secrets must not reach the model.
-      const forms = token ? secretForms([token, ...staticSecrets(cfg.headers)]) : staticForms;
+      const forms = token ? secretForms([token, ...staticSecrets(cfg.headers)], minSecretChars) : staticForms;
       try {
         const res = await session.run((c) => c.callTool(entry.mcpName, args, ctx.signal, headers), ctx.credentials);
         let content = redact(res.content, forms);

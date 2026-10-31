@@ -1,10 +1,11 @@
-import { defineAdapter, PORT_VERSIONS, type CallContext, type JsonSchema, type ToolOutcome, type ToolPort, type ToolRisk } from '@agent-layers/core';
+import { defineAdapter, limitProperties, PORT_VERSIONS, type CallContext, type JsonSchema, type LimitValue, type ToolOutcome, type ToolPort, type ToolRisk } from '@agent-layers/core';
 import { interpolate } from './env.ts';
+import { LIMITS } from './limits.ts';
 import { operationsOf, type Operation } from './operations.ts';
 import { checkArgs, sendRequest } from './request.ts';
 import { readSpec, type OpenApiDocument } from './spec.ts';
 
-export { operationsOf, readSpec, type Operation, type OpenApiDocument };
+export { LIMITS, operationsOf, readSpec, type Operation, type OpenApiDocument };
 
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface OpenApiOptions {
@@ -21,9 +22,19 @@ export interface OpenApiOptions {
   /** Static headers sent with every call. `${env:NAME}` is resolved when the tools are built. */
   headers?: Record<string, string>;
   /** Time limit per request (default 30000). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
   /** Response text cap (default 16000). */
-  maxResultChars?: number;
+  maxResultChars?: LimitValue;
+  /** Characters of an error body kept in the error result, after masking (default 500). */
+  errorBodyChars?: number;
+  /** Header and token values shorter than this are not masked (default 4). */
+  minSecretChars?: number;
+  /** Time limit to fetch the spec when it is a URL (default 30000). */
+  specTimeoutMs?: LimitValue;
+  /** Characters kept of a tool description (default 1000). */
+  maxDescriptionChars?: number;
+  /** Nesting depth at which `$ref`s in the spec are cut (default 24). */
+  maxRefDepth?: number;
 }
 
 export interface OpenApiDeps {
@@ -36,7 +47,7 @@ export interface OpenApiDeps {
 
 /** Factory: usable directly from code, without the registry. Reads the spec, so it is asynchronous. */
 export async function createOpenApiTools(options: OpenApiOptions, { name = 'openapi', cwd = process.cwd(), env = process.env, signal }: OpenApiDeps = {}): Promise<ToolPort> {
-  const loaded = typeof options.spec === 'string' ? await readSpec(interpolate(options.spec, env, 'spec'), cwd, signal) : { spec: options.spec, url: undefined };
+  const loaded = typeof options.spec === 'string' ? await readSpec(interpolate(options.spec, env, 'spec'), cwd, signal, options.specTimeoutMs) : { spec: options.spec, url: undefined };
   const { spec: _spec, baseUrl, headers, ...rest } = options;
   const operations = operationsOf(loaded.spec, loaded.url, {
     ...rest,
@@ -95,12 +106,17 @@ export const adapter = defineAdapter<'ToolPort', OpenApiOptions>({
         additionalProperties: false,
       },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
-      timeoutMs: { type: 'integer', minimum: 1 },
-      maxResultChars: { type: 'integer', minimum: 1 },
+      ...limitProperties(LIMITS, {
+        timeoutMs: 'Time limit per request', maxResultChars: 'Response text cap',
+        errorBodyChars: 'Characters of an error body kept in the error result', minSecretChars: 'Shortest value masked in responses',
+        specTimeoutMs: 'Time limit to fetch the spec from a URL', maxDescriptionChars: 'Characters kept of a tool description',
+        maxRefDepth: 'Nesting depth at which $ref inlining stops',
+      }),
     },
     required: ['spec'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createOpenApiTools(options, { name: ctx.name, cwd: ctx.cwd, env: ctx.env }),
 });
 

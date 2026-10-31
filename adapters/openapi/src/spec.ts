@@ -1,10 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { anySignal, limitValue, timeoutSignal, type LimitValue } from '@agent-layers/core';
+import { LIMITS } from './limits.ts';
 
 export type OpenApiDocument = { openapi?: string; [key: string]: any };
-
-const MAX_DEPTH = 24;
-const FETCH_TIMEOUT_MS = 30_000;
 
 function pointer(spec: OpenApiDocument, ref: string): unknown {
   if (!ref.startsWith('#/')) throw new Error(`unsupported $ref "${ref}" (only local "#/..." references are resolved)`);
@@ -16,17 +15,20 @@ function pointer(spec: OpenApiDocument, ref: string): unknown {
   return node;
 }
 
-/** Inlines local `$ref`s; a reference that points back into itself is cut to an unconstrained schema. */
-export function deref(spec: OpenApiDocument, node: unknown, stack: string[] = []): any {
-  if (Array.isArray(node)) return node.map((n) => deref(spec, n, stack));
+/**
+ * Inlines local `$ref`s; a reference that points back into itself, or nests deeper than `maxDepth` (option
+ * `maxRefDepth`), is cut to an unconstrained schema.
+ */
+export function deref(spec: OpenApiDocument, node: unknown, stack: string[] = [], maxDepth: number = limitValue(LIMITS.maxRefDepth, undefined)): any {
+  if (Array.isArray(node)) return node.map((n) => deref(spec, n, stack, maxDepth));
   if (typeof node !== 'object' || node === null) return node;
   const obj = node as Record<string, unknown>;
   if (typeof obj.$ref === 'string') {
-    if (stack.includes(obj.$ref) || stack.length > MAX_DEPTH) return {};
-    return deref(spec, pointer(spec, obj.$ref), [...stack, obj.$ref]);
+    if (stack.includes(obj.$ref) || stack.length > maxDepth) return {};
+    return deref(spec, pointer(spec, obj.$ref), [...stack, obj.$ref], maxDepth);
   }
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) out[k] = deref(spec, v, stack);
+  for (const [k, v] of Object.entries(obj)) out[k] = deref(spec, v, stack, maxDepth);
   // OpenAPI 3.0 `nullable` becomes a JSON Schema type union.
   if (out.nullable === true && typeof out.type === 'string') out.type = [out.type, 'null'];
   delete out.nullable;
@@ -42,13 +44,12 @@ export function serverUrl(spec: OpenApiDocument): string | undefined {
 
 export interface LoadedSpec { spec: OpenApiDocument; url?: string }
 
-/** Reads an OpenAPI 3 document from a file path (relative to `baseDir`) or an http(s) URL. JSON only. */
-export async function readSpec(source: string, baseDir: string = process.cwd(), signal?: AbortSignal): Promise<LoadedSpec> {
+/** Reads an OpenAPI 3 document from a file path (relative to `baseDir`) or an http(s) URL, with `timeoutMs` for the fetch (default 30000). JSON only. */
+export async function readSpec(source: string, baseDir: string = process.cwd(), signal?: AbortSignal, timeoutMs?: LimitValue): Promise<LoadedSpec> {
   const isUrl = /^https?:\/\//i.test(source);
   let text: string;
   if (isUrl) {
-    const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-    const res = await fetch(source, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+    const res = await fetch(source, { signal: anySignal(signal, timeoutSignal(limitValue(LIMITS.specTimeoutMs, timeoutMs))) });
     if (!res.ok) throw new Error(`cannot fetch OpenAPI spec ${source}: HTTP ${res.status}`);
     text = await res.text();
   } else {

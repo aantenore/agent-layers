@@ -1,6 +1,6 @@
 import {
-  defineAdapter, errorMessage, noopTelemetry, PORT_VERSIONS, publicIdentity, type AgentSpec, type CallContext, type RunEvent, type RunInput,
-  type RunResult, type RuntimePort, type Stack,
+  defineAdapter, defineLimits, errorMessage, limitSchema, limitValue, noopTelemetry, PORT_VERSIONS, publicIdentity, type AgentSpec, type CallContext,
+  type LimitValue, type RunEvent, type RunInput, type RunResult, type RuntimePort, type Stack,
 } from '@agent-layers/core';
 import {
   memoryStore, pricingFor, stream, summarizeCompaction, windowCompaction, type Agent, type Budget, type CompactionSettings, type Message,
@@ -13,6 +13,35 @@ import { governedProvider, governedTool } from './governed.ts';
 export { fromChatMessages, fromChatResponse, toChatMessages, toChatRequest } from './convert.ts';
 export { governedProvider, governedTool } from './governed.ts';
 export { mapEvent } from './events.ts';
+
+/** Configurable limits; see docs/limits.md. Paths are nested objects of `options`, so the keys are short names. */
+export const LIMITS = defineLimits({
+  maxTurns: { path: 'options.budget.maxTurns', default: null, fallback: '50 when `budget` is absent (reinloop default), none otherwise', unit: 'count', min: 1, unbounded: 'fail', safe: { max: 100 } },
+  maxToolCalls: { path: 'options.budget.maxToolCalls', default: null, fallback: 'no limit', unit: 'count', min: 1, unbounded: 'warn' },
+  maxInputTokens: { path: 'options.budget.maxInputTokens', default: null, fallback: 'no limit', unit: 'tokens', min: 1, unbounded: 'warn' },
+  maxOutputTokens: { path: 'options.budget.maxOutputTokens', default: null, fallback: 'no limit', unit: 'tokens', min: 1, unbounded: 'warn' },
+  maxTotalTokens: { path: 'options.budget.maxTotalTokens', default: null, fallback: 'no limit', unit: 'tokens', min: 1, unbounded: 'warn' },
+  maxCostUsd: { path: 'options.budget.maxCostUsd', default: null, fallback: 'no limit', unit: 'usd', min: 0, integer: false, unbounded: 'warn' },
+  maxDurationMs: { path: 'options.budget.maxDurationMs', default: null, fallback: 'no limit', unit: 'ms', min: 1, unbounded: 'warn' },
+  compactionThresholdTokens: { path: 'options.compaction.thresholdTokens', default: null, unit: 'tokens', min: 1, fallback: 'required when compaction is set' },
+  compactionKeepFirst: { path: 'options.compaction.keepFirst', default: 1, unit: 'count', min: 0 },
+  compactionKeepLast: { path: 'options.compaction.keepLast', default: null, unit: 'count', min: 1, fallback: 'reinloop: 20 for window, 10 for summarize' },
+  compactionSummaryTokens: { path: 'options.compaction.maxTokens', default: 2048, unit: 'tokens', min: 1, safe: { max: 16_384 } },
+  toolConcurrency: { path: 'options.tools.concurrency', default: 8, unit: 'count', min: 1, safe: { max: 64 } },
+  toolTimeoutMs: { path: 'options.tools.timeoutMs', default: 'unbounded', unit: 'ms', min: 1, unbounded: 'warn', safe: { max: 300_000 } },
+  toolMaxResultChars: { path: 'options.tools.maxResultChars', default: 32_000, unit: 'chars', min: 1, unbounded: 'fail', safe: { max: 200_000 } },
+});
+
+/** reinloop budgets; each accepts `"unbounded"`. */
+export interface BudgetOptions {
+  maxTurns?: LimitValue;
+  maxToolCalls?: LimitValue;
+  maxInputTokens?: LimitValue;
+  maxOutputTokens?: LimitValue;
+  maxTotalTokens?: LimitValue;
+  maxCostUsd?: LimitValue;
+  maxDurationMs?: LimitValue;
+}
 
 export interface CompactionOptions {
   /** `window` drops the middle of the conversation; `summarize` replaces it with a summary written by the model. */
@@ -29,14 +58,49 @@ export interface CompactionOptions {
   prompt?: string;
 }
 
+/** Tool batch settings. */
+export interface ToolOptions {
+  /** Parallel calls in a batch (default 8). */
+  concurrency?: number;
+  /** Time limit per call (default unbounded). */
+  timeoutMs?: LimitValue;
+  /** Result size before truncation (default 32000). */
+  maxResultChars?: LimitValue;
+}
+
 export interface ReinloopOptions {
-  /** reinloop budgets; the run ends `stopped` with reason `budget:<limit>`. Default `{ maxTurns: 50 }`. */
-  budget?: Budget;
+  /** reinloop budgets; the run ends `stopped` with reason `budget:<limit>`. Default `{ maxTurns: 50 }`, the others unbounded. */
+  budget?: BudgetOptions;
   compaction?: CompactionOptions;
   /** Prices per model id (USD per million tokens), over reinloop's built-in table; used for `costUsd` and `maxCostUsd`. */
   pricing?: Record<string, Partial<Pricing>>;
   /** Tool batch settings: parallel calls, time limit per call, result size before truncation. */
-  tools?: Pick<ToolSettings, 'concurrency' | 'timeoutMs' | 'maxResultChars'>;
+  tools?: ToolOptions;
+}
+
+/**
+ * Budgets to enforce, or undefined to keep reinloop's default (`{ maxTurns: 50 }`). Only the configured ones are passed;
+ * an unbounded one is left out, as reinloop reads absence as no limit.
+ */
+function budgetOf(o?: BudgetOptions): Budget | undefined {
+  if (!o) return undefined;
+  const out: Budget = {};
+  for (const key of ['maxTurns', 'maxToolCalls', 'maxInputTokens', 'maxOutputTokens', 'maxTotalTokens', 'maxCostUsd', 'maxDurationMs'] as const) {
+    if (o[key] === undefined) continue;
+    const v = limitValue(LIMITS[key], o[key]);
+    if (Number.isFinite(v)) out[key] = v;
+  }
+  return out;
+}
+
+/** Tool settings to enforce; the time limit is left out when unbounded (reinloop would pass Infinity to a timer). */
+function toolSettingsOf(o: ToolOptions = {}): ToolSettings {
+  const timeoutMs = limitValue(LIMITS.toolTimeoutMs, o.timeoutMs);
+  return {
+    concurrency: limitValue(LIMITS.toolConcurrency, o.concurrency),
+    maxResultChars: limitValue(LIMITS.toolMaxResultChars, o.maxResultChars),
+    ...(Number.isFinite(timeoutMs) ? { timeoutMs } : {}),
+  };
 }
 
 /**
@@ -113,9 +177,9 @@ async function* execute(stack: Stack, spec: AgentSpec, input: RunInput, ctx: Cal
       instructions: [spec.instructions, ...parsed.system].filter(Boolean).join('\n\n') || undefined,
       tools: specs.map((s) => governedTool(tools, s, run, halt)),
       policy: ALLOW_ALL,
-      ...(options.budget ? { budget: options.budget } : {}),
+      ...(options.budget ? { budget: budgetOf(options.budget)! } : {}),
       ...(options.compaction ? { compaction: compaction(options.compaction) } : {}),
-      ...(options.tools ? { toolSettings: options.tools } : {}),
+      toolSettings: toolSettingsOf(options.tools),
     };
   } catch (err) {
     return { ...empty, status: 'failed', reason: errorMessage(err) };
@@ -164,12 +228,11 @@ function pricingOf(model: string, options: ReinloopOptions): { pricing?: Pricing
 
 function compaction(o: CompactionOptions): CompactionSettings {
   const strategy = o.strategy === 'summarize'
-    ? summarizeCompaction({ ...(o.keepLast !== undefined ? { keepLast: o.keepLast } : {}), ...(o.maxTokens !== undefined ? { maxTokens: o.maxTokens } : {}), ...(o.prompt ? { prompt: o.prompt } : {}) })
-    : windowCompaction({ ...(o.keepFirst !== undefined ? { keepFirst: o.keepFirst } : {}), ...(o.keepLast !== undefined ? { keepLast: o.keepLast } : {}) });
+    ? summarizeCompaction({ ...(o.keepLast !== undefined ? { keepLast: o.keepLast } : {}), maxTokens: limitValue(LIMITS.compactionSummaryTokens, o.maxTokens), ...(o.prompt ? { prompt: o.prompt } : {}) })
+    : windowCompaction({ keepFirst: limitValue(LIMITS.compactionKeepFirst, o.keepFirst), ...(o.keepLast !== undefined ? { keepLast: o.keepLast } : {}) });
   return { strategy, thresholdTokens: o.thresholdTokens };
 }
 
-const count = { type: 'integer', minimum: 1 };
 const amount = { type: 'number', minimum: 0 };
 
 export const adapter = defineAdapter<'RuntimePort', ReinloopOptions>({
@@ -187,16 +250,25 @@ export const adapter = defineAdapter<'RuntimePort', ReinloopOptions>({
       budget: {
         type: 'object',
         properties: {
-          maxTurns: count, maxToolCalls: count, maxInputTokens: count, maxOutputTokens: count, maxTotalTokens: count,
-          maxCostUsd: amount, maxDurationMs: count,
+          maxTurns: limitSchema(LIMITS.maxTurns, { description: 'Turns before the run stops' }),
+          maxToolCalls: limitSchema(LIMITS.maxToolCalls, { description: 'Tool calls before the run stops' }),
+          maxInputTokens: limitSchema(LIMITS.maxInputTokens, { description: 'Input tokens before the run stops' }),
+          maxOutputTokens: limitSchema(LIMITS.maxOutputTokens, { description: 'Output tokens before the run stops' }),
+          maxTotalTokens: limitSchema(LIMITS.maxTotalTokens, { description: 'Input and output tokens before the run stops' }),
+          maxCostUsd: limitSchema(LIMITS.maxCostUsd, { description: 'Cost before the run stops' }),
+          maxDurationMs: limitSchema(LIMITS.maxDurationMs, { description: 'Run time before the run stops' }),
         },
         additionalProperties: false,
       },
       compaction: {
         type: 'object',
         properties: {
-          strategy: { enum: ['window', 'summarize'] }, thresholdTokens: count, keepFirst: { type: 'integer', minimum: 0 }, keepLast: count,
-          maxTokens: count, prompt: { type: 'string', minLength: 1 },
+          strategy: { enum: ['window', 'summarize'] },
+          thresholdTokens: limitSchema(LIMITS.compactionThresholdTokens, { description: 'Context size from which compaction runs' }),
+          keepFirst: limitSchema(LIMITS.compactionKeepFirst, { description: 'Messages kept at the start (window)' }),
+          keepLast: limitSchema(LIMITS.compactionKeepLast, { description: 'Messages kept at the end' }),
+          maxTokens: limitSchema(LIMITS.compactionSummaryTokens, { description: 'Token limit of the summary (summarize)' }),
+          prompt: { type: 'string', minLength: 1 },
         },
         required: ['thresholdTokens'],
         additionalProperties: false,
@@ -211,12 +283,17 @@ export const adapter = defineAdapter<'RuntimePort', ReinloopOptions>({
       },
       tools: {
         type: 'object',
-        properties: { concurrency: count, timeoutMs: count, maxResultChars: count },
+        properties: {
+          concurrency: limitSchema(LIMITS.toolConcurrency, { description: 'Parallel tool calls in a batch' }),
+          timeoutMs: limitSchema(LIMITS.toolTimeoutMs, { description: 'Time limit per tool call' }),
+          maxResultChars: limitSchema(LIMITS.toolMaxResultChars, { description: 'Result size before truncation' }),
+        },
         additionalProperties: false,
       },
     },
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createReinloopRuntime(options, ctx.name),
 });
 

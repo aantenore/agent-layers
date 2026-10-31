@@ -1,9 +1,9 @@
 import {
-  contentText, defineAdapter, PORT_VERSIONS, type CallContext, type ChatChunk, type ChatRequest, type ChatResponse, type ModelPort, type Usage,
+  contentText, defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type CallContext, type ChatChunk, type ChatRequest, type ChatResponse, type ModelPort, type Usage,
 } from '@agent-layers/core';
-import { compileRules, decide, type Decision, type MockRule } from './script.ts';
+import { compileRules, decide, LIMITS, type Decision, type MockRule } from './script.ts';
 
-export type { MockRule } from './script.ts';
+export { LIMITS, type MockRule } from './script.ts';
 
 export interface MockModelOptions {
   /** Model id reported in responses (default `mock`). */
@@ -12,6 +12,8 @@ export interface MockModelOptions {
   rules?: MockRule[];
   /** Delay before each answer (default 0). */
   latencyMs?: number;
+  /** Characters of a tool result the model repeats as its answer (default 500). */
+  toolResultChars?: number;
 }
 
 const abortError = () => new DOMException('This operation was aborted', 'AbortError');
@@ -32,11 +34,13 @@ const tokens = (chars: number) => Math.ceil(chars / 4);
 export function createMockModel(options: MockModelOptions = {}, name = 'mock-model'): ModelPort {
   const model = options.model ?? 'mock';
   const rules = compileRules(options.rules);
+  const latencyMs = limitValue(LIMITS.latencyMs, options.latencyMs);
+  const toolResultChars = limitValue(LIMITS.toolResultChars, options.toolResultChars);
   let seq = 0;
 
   async function answer(req: ChatRequest, ctx: CallContext): Promise<{ decision: Decision; response: ChatResponse }> {
-    await wait(options.latencyMs ?? 0, ctx.signal);
-    const decision = decide(req, rules);
+    await wait(latencyMs, ctx.signal);
+    const decision = decide(req, rules, toolResultChars);
     const n = ++seq;
     const { call } = decision;
     const promptChars = req.messages.reduce((sum, m) => sum + contentText(m.content).length, 0);
@@ -100,10 +104,11 @@ export const adapter = defineAdapter<'ModelPort', MockModelOptions>({
           additionalProperties: false,
         },
       },
-      latencyMs: { type: 'integer', minimum: 0 },
+      ...limitProperties(LIMITS, { latencyMs: 'Delay before each answer', toolResultChars: 'Characters of a tool result the model repeats as its answer' }),
     },
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createMockModel(options, ctx.name),
 });
 

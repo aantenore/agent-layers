@@ -1,8 +1,13 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, extname, resolve, sep } from 'node:path';
-import { defineAdapter, matchesAny, PORT_VERSIONS, type KnowledgePort, type Passage } from '@agent-layers/core';
+import { defineAdapter, defineLimits, limitProperties, limitValue, matchesAny, PORT_VERSIONS, type KnowledgePort, type Passage } from '@agent-layers/core';
 import { chunkMarkdown } from './chunk.ts';
 import { Bm25, indexDoc, tokenize } from './rank.ts';
+
+/** Configurable limits; see docs/limits.md. */
+export const LIMITS = defineLimits({
+  k: { path: 'options.k', default: 4, unit: 'count', min: 1, safe: { max: 50 } },
+});
 
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface MarkdownKnowledgeOptions {
@@ -65,6 +70,7 @@ export function createMarkdownKnowledge(
   { cwd = process.cwd(), name = 'markdown-knowledge' }: { cwd?: string; name?: string } = {},
 ): MarkdownKnowledge {
   const root = resolve(cwd, options.dir);
+  const defaultK = limitValue(LIMITS.k, options.k);
   const extensions = (options.extensions ?? ['.md']).map((e) => (e.startsWith('.') ? e : `.${e}`).toLowerCase());
   let index: Promise<Index> | undefined;
 
@@ -83,7 +89,7 @@ export function createMarkdownKnowledge(
         const score = idx.bm25.score(i, terms);
         if (score > 0) scored.push({ ...e.passage, score });
       });
-      return scored.sort((a, b) => b.score! - a.score! || a.id.localeCompare(b.id)).slice(0, Math.max(0, q.k ?? options.k ?? 4));
+      return scored.sort((a, b) => b.score! - a.score! || a.id.localeCompare(b.id)).slice(0, Math.max(0, q.k ?? defaultK));
     },
     async refresh() {
       index = undefined;
@@ -107,11 +113,12 @@ export const adapter = defineAdapter<'KnowledgePort', MarkdownKnowledgeOptions>(
     properties: {
       dir: { type: 'string', minLength: 1 },
       extensions: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } },
-      k: { type: 'integer', minimum: 1 },
+      ...limitProperties(LIMITS, { k: 'Passages returned when the query has no k' }),
     },
     required: ['dir'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createMarkdownKnowledge(options, { cwd: ctx.cwd, name: ctx.name }),
 });
 

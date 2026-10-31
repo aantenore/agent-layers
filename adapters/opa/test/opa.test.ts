@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { governedTools, type ToolPort } from '@agent-layers/core';
 import { checkAdapter, sampleAccess } from '@agent-layers/conformance';
-import { adapter, createOpa, MAX_RESPONSE_BYTES } from '../src/index.ts';
+import { adapter, createOpa, LIMITS } from '../src/index.ts';
 import { pdp, referencePolicy, request, send } from './helpers.ts';
 
 /** OPA Data API: `agents/allow` is a boolean, `agents/decision` an object, anything else undefined. */
@@ -61,7 +61,7 @@ test('fails closed: undefined rules, non-boolean results, errors and slow answer
       [200, { result: null }, /not a boolean decision/],
       [400, { code: 'invalid_parameter' }, /HTTP 400/],
       [500, { result: true }, /HTTP 500/],
-      [200, { result: true, pad: 'x'.repeat(MAX_RESPONSE_BYTES) }, /too large/],
+      [200, { result: true, pad: 'x'.repeat(LIMITS.maxResponseBytes.default as number) }, /too large/],
     ];
     for (const [status, body, pattern] of replies) {
       s.state.reply = (_b, _h, res) => send(res, status, body);

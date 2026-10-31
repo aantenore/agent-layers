@@ -20,6 +20,11 @@ and the first 300 characters of the body, never the API key. `native()` returns 
 | `headers` | object | none | Extra request headers (string values) |
 | `timeoutMs` | integer | `120000` | Timeout of a whole request, streams included |
 | `includeUsage` | boolean | `true` | Ask streaming backends for a final usage chunk |
+| `errorBodyChars` | integer | `300` | Characters of an error body kept in the error message |
+| `streamEventChars` | integer | `100` | Characters of an invalid stream event kept in the error message |
+
+Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production
+tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 {

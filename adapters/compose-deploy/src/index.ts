@@ -2,16 +2,16 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import {
-  defineAdapter, PORT_VERSIONS, type DeployOptions, type DeployPlan, type DeployPort, type Endpoint, type Layer, type ServiceSpec,
+  defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type DeployOptions, type DeployPlan, type DeployPort, type Endpoint, type Layer, type ServiceSpec,
 } from '@agent-layers/core';
-import { composeFor } from './generate.ts';
+import { composeFor, LIMITS, type HealthOptions } from './generate.ts';
 import { layerFile } from './resolve.ts';
 import { shellLine, spawnRun, type Run } from './run.ts';
 
 export type { Run, RunOptions, RunResult } from './run.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
-export interface ComposeDeployOptions {
+export interface ComposeDeployOptions extends HealthOptions {
   /** Directory commands run in and paths resolve against (default: the stack config directory). */
   root?: string;
   /** Compose project name (default `agent-layers`). */
@@ -26,6 +26,8 @@ export interface ComposeDeployOptions {
   command?: string[];
   /** Wait for services to be running or healthy on `up` (default true). */
   wait?: boolean;
+  /** Characters of the command output kept in the error message when Compose fails (default 500). */
+  errorOutputChars?: number;
 }
 
 export const GENERATED_FILE = '.agent-layers/compose.generated.yml';
@@ -42,6 +44,7 @@ export function createComposeDeploy(
   const command = options.command ?? ['docker', 'compose'];
   const searchDirs = options.searchDirs ?? ['reference'];
   const wait = options.wait ?? true;
+  const errorOutputChars = limitValue(LIMITS.errorOutputChars, options.errorOutputChars);
 
   /** One Compose invocation per file: relative paths inside a reference file keep resolving against its own folder. */
   async function prepare(services: ServiceSpec[], verb: 'up' | 'down'): Promise<Prepared> {
@@ -58,7 +61,7 @@ export function createComposeDeploy(
     }
     const envFile = options.envFile ?? (existsSync(resolve(root, '.env')) ? '.env' : undefined);
     const files = [...new Set([...layers.values()].filter((f): f is string => !!f))];
-    const generated = own.length ? { path: GENERATED_FILE, content: composeFor(own) } : undefined;
+    const generated = own.length ? { path: GENERATED_FILE, content: composeFor(own, options) } : undefined;
     if (generated) files.push(generated.path);
     const tail = verb === 'up' ? ['up', '-d', ...(wait ? ['--wait'] : [])] : ['down'];
     const lines = files.map((f) => [...command, '-p', project, '-f', f, ...(envFile ? ['--env-file', envFile] : []), ...tail]);
@@ -82,7 +85,7 @@ export function createComposeDeploy(
     }
     for (const [cmd, ...args] of p.lines) {
       const res = await run(cmd!, args, { cwd: root, ...(opts.signal ? { signal: opts.signal } : {}) });
-      if (res.code !== 0) throw new Error(`compose ${verb} failed (exit ${res.code}): ${(res.stderr || res.stdout).trim().slice(0, 500)}`);
+      if (res.code !== 0) throw new Error(`compose ${verb} failed (exit ${res.code}): ${(res.stderr || res.stdout).trim().slice(0, errorOutputChars)}`);
     }
     return p.endpoints;
   }
@@ -120,9 +123,16 @@ export const adapter = defineAdapter<'DeployPort', ComposeDeployOptions>({
       searchDirs: { type: 'array', items: { type: 'string' } },
       command: { type: 'array', minItems: 1, items: { type: 'string' } },
       wait: { type: 'boolean' },
+      ...limitProperties(LIMITS, {
+        healthIntervalS: 'Seconds between health checks of the generated services',
+        healthTimeoutS: 'Seconds a health check may take',
+        healthRetries: 'Failed health checks before a service counts as unhealthy',
+        errorOutputChars: 'Characters of the command output kept in the error message when Compose fails',
+      }),
     },
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createComposeDeploy(options, { cwd: ctx.cwd, name: ctx.name }),
 });
 

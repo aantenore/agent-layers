@@ -1,11 +1,12 @@
-import { defineAdapter, PORT_VERSIONS, type JsonSchema, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec } from '@agent-layers/core';
+import { defineAdapter, limitProperties, limitSchema, limitValue, PORT_VERSIONS, type JsonSchema, type LimitValue, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec } from '@agent-layers/core';
 import { interpolate } from './env.ts';
+import { LIMITS } from './limits.ts';
 import { checkArgs, checkRequestSpec, defaultRisk, pathArgs, sendRequest, type HttpMethod, type RequestSpec } from './request.ts';
 
-export { sendRequest, type HttpMethod, type RequestSpec };
+export { LIMITS, sendRequest, type HttpMethod, type RequestSpec };
 
 /** One declarative HTTP tool. `${env:NAME}` in `url` and `headers` is resolved when the tool is built. */
-export interface HttpToolDef extends Omit<RequestSpec, 'method'> {
+export interface HttpToolDef extends Omit<RequestSpec, 'method' | 'errorBodyChars' | 'minSecretChars'> {
   description: string;
   method: HttpMethod | Lowercase<HttpMethod>;
   /** JSON Schema of the arguments (default: derived from the path, query and header arguments). */
@@ -19,9 +20,13 @@ export interface HttpToolsOptions {
   /** Tools by name. */
   tools: Record<string, HttpToolDef>;
   /** Default time limit per request (default 30000). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
   /** Default response text cap (default 16000). */
-  maxResultChars?: number;
+  maxResultChars?: LimitValue;
+  /** Characters of an error body kept in the error result, after masking (default 500). */
+  errorBodyChars?: number;
+  /** Header and token values shorter than this are not masked (default 4). */
+  minSecretChars?: number;
 }
 
 const NAME = /^[A-Za-z0-9_.-]+$/;
@@ -47,8 +52,10 @@ export function createHttpTools(options: HttpToolsOptions, { name = 'http-tools'
       ...(def.body ? { body: def.body } : {}),
       ...(def.bodyArg ? { bodyArg: def.bodyArg } : {}),
       ...(def.auth ? { auth: def.auth } : {}),
-      timeoutMs: def.timeoutMs ?? options.timeoutMs ?? 30_000,
-      maxResultChars: def.maxResultChars ?? options.maxResultChars ?? 16_000,
+      timeoutMs: limitValue(LIMITS.timeoutMs, def.timeoutMs ?? options.timeoutMs),
+      maxResultChars: limitValue(LIMITS.maxResultChars, def.maxResultChars ?? options.maxResultChars),
+      errorBodyChars: limitValue(LIMITS.errorBodyChars, options.errorBodyChars),
+      minSecretChars: limitValue(LIMITS.minSecretChars, options.minSecretChars),
     };
     const schema = def.schema ?? defaultSchema(def);
     tools.set(toolName, {
@@ -106,8 +113,8 @@ export const adapter = defineAdapter<'ToolPort', HttpToolsOptions>({
             bodyArg: { type: 'string', minLength: 1 },
             schema: { type: 'object' },
             risk: { enum: ['read', 'write', 'exec'] },
-            timeoutMs: { type: 'integer', minimum: 1 },
-            maxResultChars: { type: 'integer', minimum: 1 },
+            timeoutMs: limitSchema(LIMITS.toolTimeoutMs, { description: 'Time limit per request of this tool' }),
+            maxResultChars: limitSchema(LIMITS.toolMaxResultChars, { description: 'Response text cap of this tool' }),
             auth: {
               type: 'object',
               properties: { audience: { type: 'string', minLength: 1 }, scopes: strings },
@@ -119,12 +126,15 @@ export const adapter = defineAdapter<'ToolPort', HttpToolsOptions>({
           additionalProperties: false,
         },
       },
-      timeoutMs: { type: 'integer', minimum: 1 },
-      maxResultChars: { type: 'integer', minimum: 1 },
+      ...limitProperties(LIMITS, {
+        timeoutMs: 'Default time limit per request', maxResultChars: 'Default response text cap',
+        errorBodyChars: 'Characters of an error body kept in the error result', minSecretChars: 'Shortest value masked in responses',
+      }),
     },
     required: ['tools'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createHttpTools(options, { name: ctx.name, env: ctx.env }),
 });
 

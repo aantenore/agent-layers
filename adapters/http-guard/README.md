@@ -59,6 +59,9 @@ createServer((req, res) => {
 | `onError` | `"block"` \| `"allow"` | `"block"` | Fail closed or open when the service fails |
 | `timeoutMs` | integer | 10000 | Per-request timeout |
 
+Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production tier.
+Ranges and checks: [docs/limits.md](../../docs/limits.md).
+
 ```json
 {
   "layers": {

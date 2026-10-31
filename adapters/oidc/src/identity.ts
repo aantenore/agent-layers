@@ -1,6 +1,7 @@
-import type { Identity, IdentityPort } from '@agent-layers/core';
-import { abortable, discover, OidcError, requestJson, secureUrl, type FetchLike } from './http.ts';
+import { limitValue, type Identity, type IdentityPort, type LimitValue } from '@agent-layers/core';
+import { abortable, discover, OidcError, requestJson, secureUrl, type FetchLike, type HttpLimits } from './http.ts';
 import { candidateKeys, checkAlgorithm, decodeJwt, importKey, verifySignature, type Jwk } from './jwt.ts';
+import { IDENTITY_LIMITS as LIMITS } from './limits.ts';
 
 export interface OidcIdentityOptions {
   /** Expected `iss`, exactly as the provider publishes it; also the discovery base URL. */
@@ -24,7 +25,15 @@ export interface OidcIdentityOptions {
   /** JWKS cache lifetime (default 10 min). The previous key set keeps serving while the provider is down. */
   jwksMaxAgeMs?: number;
   /** Timeout of discovery and JWKS requests (default 5 s). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
+  /** Most keys tried for a token without a `kid` (default 5). */
+  maxKeyTries?: number;
+  /** Longest compact JWT accepted, in characters (default 16384). */
+  maxTokenChars?: LimitValue;
+  /** Largest discovery or JWKS document read (default 1000000 bytes). */
+  maxResponseBytes?: LimitValue;
+  /** Characters of a provider `error_description` kept in an error message (default 200). */
+  errorDescriptionChars?: number;
   /** Accept plain-HTTP issuer and JWKS URLs on non-loopback hosts (default false). */
   allowHttp?: boolean;
   /**
@@ -51,8 +60,6 @@ export interface OidcIdentityHooks {
 }
 
 export const DEFAULT_ALGORITHMS = ['RS256', 'ES256'];
-/** Most keys tried for a token without a `kid`. */
-const MAX_KEY_TRIES = 5;
 
 const invalid = (why: string) => new OidcError('invalid_token', why);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : typeof v === 'string' ? [v] : []);
@@ -127,10 +134,16 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
   const algorithms = opts.algorithms?.length ? [...opts.algorithms] : DEFAULT_ALGORITHMS;
   for (const alg of algorithms) checkAlgorithm(alg, algorithms);
   const types = opts.types?.map(normType);
-  const skew = opts.clockSkewSec ?? 60;
-  const minRefresh = opts.jwksMinRefreshMs ?? 30_000;
-  const maxAge = opts.jwksMaxAgeMs ?? 600_000;
-  const timeoutMs = opts.timeoutMs ?? 5000;
+  const skew = limitValue(LIMITS.clockSkewSec, opts.clockSkewSec);
+  const minRefresh = limitValue(LIMITS.jwksMinRefreshMs, opts.jwksMinRefreshMs);
+  const maxAge = limitValue(LIMITS.jwksMaxAgeMs, opts.jwksMaxAgeMs);
+  const maxKeyTries = limitValue(LIMITS.maxKeyTries, opts.maxKeyTries);
+  const maxTokenChars = limitValue(LIMITS.maxTokenChars, opts.maxTokenChars);
+  const http: HttpLimits = {
+    timeoutMs: limitValue(LIMITS.timeoutMs, opts.timeoutMs),
+    maxResponseBytes: limitValue(LIMITS.maxResponseBytes, opts.maxResponseBytes),
+    errorDescriptionChars: limitValue(LIMITS.errorDescriptionChars, opts.errorDescriptionChars),
+  };
   const fetchImpl: FetchLike = hooks.fetch ?? fetch;
   const now = hooks.now ?? Date.now;
   const agents: AgentClients = { ...(opts.agentClients ? { agentClients: [...opts.agentClients] } : {}), ...(opts.agentSubjects ? { agentSubjects: { ...opts.agentSubjects } } : {}) };
@@ -147,11 +160,11 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
 
   const load = async () => {
     if (!jwksUri) {
-      const doc = await discover(fetchImpl, opts.issuer, timeoutMs, opts.allowHttp);
+      const doc = await discover(fetchImpl, opts.issuer, http, opts.allowHttp);
       if (typeof doc.jwks_uri !== 'string') throw new OidcError('config', 'OIDC discovery: no "jwks_uri"');
       jwksUri = secureUrl(doc.jwks_uri, 'jwks_uri', opts.allowHttp).href;
     }
-    const body = await requestJson(fetchImpl, jwksUri, { method: 'GET', timeoutMs, what: 'JWKS' });
+    const body = await requestJson(fetchImpl, jwksUri, { method: 'GET', ...http, what: 'JWKS' });
     if (!Array.isArray(body.keys)) throw new OidcError('response', 'JWKS: no "keys" array');
     keys = (body.keys as unknown[]).filter((k): k is Jwk => !!k && typeof k === 'object' && !Array.isArray(k) && typeof (k as Jwk).kty === 'string');
     fetchedAt = now();
@@ -184,7 +197,7 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
     name,
     native: () => ({ refresh }),
     async verify(credential, vopts) {
-      const jwt = decodeJwt(credential);
+      const jwt = decodeJwt(credential, maxTokenChars);
       const { alg, kid, crit, typ } = jwt.header;
       checkAlgorithm(alg, algorithms);
       if (crit !== undefined) throw invalid('token uses critical header parameters');
@@ -194,7 +207,7 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
       if (!candidates.length && kid !== undefined) candidates = candidateKeys(await getKeys(true, vopts?.signal), alg, kid);
       if (!candidates.length) throw invalid('no signing key matches the token');
       // A known kid never triggers a refetch on a bad signature; without a kid a few keys of the right type are tried.
-      const tried = kid !== undefined ? candidates.slice(0, 1) : candidates.slice(0, MAX_KEY_TRIES);
+      const tried = kid !== undefined ? candidates.slice(0, 1) : candidates.slice(0, maxKeyTries);
       if (!tried.some((k) => verifySignature(jwt, importKey(k, alg)))) throw invalid('invalid token signature');
 
       const c = jwt.payload;

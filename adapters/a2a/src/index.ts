@@ -1,9 +1,9 @@
-import { defineAdapter, PORT_VERSIONS } from '@agent-layers/core';
-import { createA2ARuntime, type A2ARuntimeOptions } from './client.ts';
-import { createA2AServerChannel, type A2AServerOptions } from './server.ts';
+import { defineAdapter, limitProperties, PORT_VERSIONS } from '@agent-layers/core';
+import { createA2ARuntime, RUNTIME_LIMITS, type A2ARuntimeOptions } from './client.ts';
+import { createA2AServerChannel, SERVER_LIMITS, type A2AServerOptions } from './server.ts';
 
 export { isPrivateHost } from './client.ts';
-export { createA2ARuntime, createA2AServerChannel, type A2ARuntimeOptions, type A2AServerOptions };
+export { createA2ARuntime, createA2AServerChannel, RUNTIME_LIMITS, SERVER_LIMITS, type A2ARuntimeOptions, type A2AServerOptions };
 export { A2A_VERSION, LEGACY_VERSION, partsText, readResult, stateOf, type TaskState, type WireVersion } from './wire.ts';
 
 const strings = { type: 'array', items: { type: 'string', minLength: 1 } };
@@ -32,12 +32,15 @@ export const channelAdapter = defineAdapter<'ChannelPort', A2AServerOptions>({
         required: ['organization', 'url'],
         additionalProperties: false,
       },
-      maxTasksPerCaller: { type: 'integer', minimum: 1 },
-      maxTasks: { type: 'integer', minimum: 4 },
-      taskTtlMs: { type: 'integer', minimum: 1000 },
+      ...limitProperties(SERVER_LIMITS, {
+        maxTasksPerCaller: 'Tasks kept per authenticated caller, and of all anonymous callers together',
+        maxTasks: 'Tasks kept in total',
+        taskTtlMs: 'How long a finished task stays readable with GetTask',
+      }),
     },
     additionalProperties: false,
   },
+  limits: SERVER_LIMITS,
   create: (options, ctx) => createA2AServerChannel(options, ctx.name),
 });
 
@@ -66,12 +69,15 @@ export const runtimeAdapter = defineAdapter<'RuntimePort', A2ARuntimeOptions>({
         additionalProperties: false,
       },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
-      timeoutMs: { type: 'integer', minimum: 1 },
-      pollMs: { type: 'integer', minimum: 10 },
+      ...limitProperties(RUNTIME_LIMITS, {
+        timeoutMs: 'Time limit of a whole run, polling included',
+        pollMs: 'Interval between GetTask calls while a task is still working',
+      }),
     },
     required: ['url'],
     additionalProperties: false,
   },
+  limits: RUNTIME_LIMITS,
   create: (options, ctx) => createA2ARuntime(options, ctx.name),
 });
 

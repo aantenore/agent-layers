@@ -20,7 +20,10 @@ appended sessions first, `delete` removes a session and its events. Events survi
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `path` | string | `.agent-layers/state.db` | Database file, relative to the stack config folder; `:memory:` for tests |
-| `busyTimeoutMs` | integer | `5000` | How long a write waits for a lock held by another process |
+| `busyTimeoutMs` | integer | `5000` | How long a write waits for a lock held by another process; `0` fails at once |
+
+Limits accept `${env:NAME}`; `busyTimeoutMs` also accepts `"unbounded"` (SQLite's longest wait), which `agent-layers check` fails on
+the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 { "layers": { "state": { "adapter": "sqlite-state", "options": { "path": ".agent-layers/state.db" } } } }

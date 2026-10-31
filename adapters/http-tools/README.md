@@ -22,6 +22,11 @@ Declares HTTP endpoints as tools in the config, with no code. Each call is one r
 | `tools` | object | required | Tools by name (letters, digits, `_`, `.`, `-`) |
 | `timeoutMs` | integer | 30000 | Default time limit per request |
 | `maxResultChars` | integer | 16000 | Default response text cap |
+| `errorBodyChars` | integer | 500 | Characters of an error body kept in the error result, after masking |
+| `minSecretChars` | integer | 4 | Header and token values shorter than this are not masked |
+
+Limits accept `${env:NAME}`; `timeoutMs` and `maxResultChars` (also per tool) accept `"unbounded"`, which
+`agent-layers check` fails on the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 Per tool: `description`, `method`, `url` (absolute), `query`, `headerArgs`, `headers`, `body` (`json` or `none`),
 `bodyArg`, `schema`, `risk`, `timeoutMs`, `maxResultChars`, `auth`. `${env:NAME}` and `${env:NAME:-default}` in `url`

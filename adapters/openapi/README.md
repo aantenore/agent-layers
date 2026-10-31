@@ -28,6 +28,14 @@ given as a file path relative to the config directory, an `http(s)` URL, or inli
 | `headers` | object | none | Static headers on every call; `${env:NAME}` works |
 | `timeoutMs` | integer | 30000 | Time limit per request |
 | `maxResultChars` | integer | 16000 | Response text cap |
+| `errorBodyChars` | integer | 500 | Characters of an error body kept in the error result, after masking |
+| `minSecretChars` | integer | 4 | Header and token values shorter than this are not masked |
+| `specTimeoutMs` | integer | 30000 | Time limit to fetch the spec when it is a URL |
+| `maxDescriptionChars` | integer | 1000 | Characters kept of a tool description |
+| `maxRefDepth` | integer | 24 | Nesting depth at which `$ref` inlining stops |
+
+Limits accept `${env:NAME}`; `timeoutMs`, `maxResultChars` and `specTimeoutMs` also accept `"unbounded"`, which `agent-layers check` fails on
+the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 {

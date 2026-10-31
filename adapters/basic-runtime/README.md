@@ -17,6 +17,8 @@ passed as `extra`.
 | `maxTurns` | integer | `8` | Model calls per run |
 | `pricing` | object | none | USD per million tokens by model id, `{ "<model>": { "inputPerMTok": 3, "outputPerMTok": 15 } }`. The run reports `costUsd` when every model call is priced; otherwise it has none |
 
+Limits accept `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).
+
 ```json
 { "layers": { "runtime": { "adapter": "basic-runtime", "options": { "maxTurns": 6 } } } }
 ```

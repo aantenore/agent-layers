@@ -1,17 +1,18 @@
-/** Secrets shorter than this are not worth masking and would mangle ordinary text. */
-const MIN_SECRET_CHARS = 4;
 const REDACTED = '[redacted]';
 
-/** Every form a secret may take when a server echoes it: raw, JSON-escaped, URL-encoded; longest first. */
-export function secretForms(values: Iterable<string>): string[] {
+/**
+ * Every form a secret may take when a server echoes it: raw, JSON-escaped, URL-encoded; longest first. Values shorter
+ * than `minChars` (option `minSecretChars`) are not worth masking and would mangle ordinary text.
+ */
+export function secretForms(values: Iterable<string>, minChars: number): string[] {
   const forms = new Set<string>();
   for (const v of values) {
-    if (v.length < MIN_SECRET_CHARS) continue;
+    if (v.length < minChars) continue;
     forms.add(v);
     forms.add(JSON.stringify(v).slice(1, -1));
     forms.add(encodeURIComponent(v));
   }
-  return [...forms].filter((f) => f.length >= MIN_SECRET_CHARS).sort((x, y) => y.length - x.length);
+  return [...forms].filter((f) => f.length >= minChars).sort((x, y) => y.length - x.length);
 }
 
 export const redact = (text: string, forms: readonly string[]): string => forms.reduce((t, f) => t.split(f).join(REDACTED), text);

@@ -1,4 +1,4 @@
-import type { AccessRequest } from '@agent-layers/core';
+import { anySignal, timeoutSignal, type AccessRequest } from '@agent-layers/core';
 
 /** Failure to reach or understand the policy decision point. The stack turns it into a deny. */
 export class PdpError extends Error {
@@ -6,11 +6,6 @@ export class PdpError extends Error {
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
-
-/** Largest decision document read from the PDP. */
-export const MAX_RESPONSE_BYTES = 1_000_000;
-/** Longest reason passed on to the stack (the model sees it). */
-export const MAX_REASON_CHARS = 200;
 
 const isLoopback = (host: string) =>
   host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' || /^127(\.\d{1,3}){3}$/.test(host);
@@ -29,8 +24,8 @@ export function secureUrl(url: string, what: string, allowHttp = false): URL {
   throw new PdpError(`${what}: "${parsed.origin}" must use https (plain http only on loopback hosts or with allowHttp)`);
 }
 
-async function readBounded(res: Response, what: string): Promise<string> {
-  if (Number(res.headers.get('content-length') ?? NaN) > MAX_RESPONSE_BYTES) {
+async function readBounded(res: Response, max: number, what: string): Promise<string> {
+  if (Number(res.headers.get('content-length') ?? NaN) > max) {
     await res.body?.cancel().catch(() => {});
     throw new PdpError(`${what}: response too large`);
   }
@@ -42,7 +37,7 @@ async function readBounded(res: Response, what: string): Promise<string> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_RESPONSE_BYTES) {
+    if (size > max) {
       await reader.cancel().catch(() => {});
       throw new PdpError(`${what}: response too large`);
     }
@@ -52,8 +47,8 @@ async function readBounded(res: Response, what: string): Promise<string> {
 }
 
 /** POSTs JSON (redirects refused, bounded body, timeout) and returns the parsed JSON object answer. */
-export async function postJson(fetchImpl: FetchLike, url: string, payload: unknown, o: { headers?: Record<string, string>; timeoutMs: number; what: string; signal?: AbortSignal }): Promise<Record<string, unknown>> {
-  const timeout = AbortSignal.timeout(o.timeoutMs);
+export async function postJson(fetchImpl: FetchLike, url: string, payload: unknown, o: { headers?: Record<string, string>; timeoutMs: number; maxResponseBytes: number; what: string; signal?: AbortSignal }): Promise<Record<string, unknown>> {
+  const timeout = timeoutSignal(o.timeoutMs);
   let res: Response;
   let text: string;
   try {
@@ -62,17 +57,17 @@ export async function postJson(fetchImpl: FetchLike, url: string, payload: unkno
       headers: { ...o.headers, 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify(payload),
       redirect: 'error',
-      signal: o.signal ? AbortSignal.any([o.signal, timeout]) : timeout,
+      signal: anySignal(o.signal, timeout),
     });
     if (res.status >= 300 && res.status < 400) {
       await res.body?.cancel().catch(() => {});
       throw new PdpError(`${o.what}: redirects are not followed (HTTP ${res.status})`);
     }
-    text = await readBounded(res, o.what);
+    text = await readBounded(res, o.maxResponseBytes, o.what);
   } catch (err) {
     if (o.signal?.aborted) throw o.signal.reason;
     if (err instanceof PdpError) throw err;
-    throw new PdpError(`${o.what}: request failed (${timeout.aborted ? `timed out after ${o.timeoutMs}ms` : 'network error'})`);
+    throw new PdpError(`${o.what}: request failed (${timeout?.aborted ? `timed out after ${o.timeoutMs}ms` : 'network error'})`);
   }
   if (!res.ok) throw new PdpError(`${o.what}: HTTP ${res.status}`);
   let body: unknown;
@@ -102,9 +97,9 @@ export function pdpRequest(req: AccessRequest, includeArgs: boolean): AccessRequ
   return { subject, action: req.action, resource: req.resource, ...(Object.keys(ctx).length ? { context: ctx } : {}) };
 }
 
-/** A reason string from a PDP value: a string, or the first string of a localised `{lang: text}` object. */
-export function reasonText(value: unknown): string | undefined {
+/** A reason string from a PDP value (a string, or the first string of a localised `{lang: text}` object), cut to `maxChars`. */
+export function reasonText(value: unknown, maxChars: number): string | undefined {
   const text = typeof value === 'string' ? value
     : value && typeof value === 'object' && !Array.isArray(value) ? Object.values(value).find((v): v is string => typeof v === 'string') : undefined;
-  return text ? text.slice(0, MAX_REASON_CHARS) : undefined;
+  return text ? text.slice(0, maxChars) : undefined;
 }

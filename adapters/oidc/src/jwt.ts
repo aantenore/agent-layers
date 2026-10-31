@@ -27,8 +27,6 @@ export const JWS_ALGORITHMS: Readonly<Record<string, AlgSpec>> = Object.freeze({
   EdDSA: { kty: 'OKP', hash: null, curve: 'ed25519' },
 });
 
-/** Largest compact JWT accepted, in characters. */
-export const MAX_TOKEN_CHARS = 16_384;
 const MIN_RSA_BITS = 2048;
 const B64URL = /^[A-Za-z0-9_-]+$/;
 
@@ -45,9 +43,9 @@ function segment(part: string, what: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** Splits and decodes a compact JWS (RFC 7515) without verifying it. */
-export function decodeJwt(token: string): DecodedJwt {
-  if (typeof token !== 'string' || !token || token.length > MAX_TOKEN_CHARS) throw invalid('malformed token');
+/** Splits and decodes a compact JWS (RFC 7515) without verifying it; tokens longer than `maxChars` are refused. */
+export function decodeJwt(token: string, maxChars: number): DecodedJwt {
+  if (typeof token !== 'string' || !token || token.length > maxChars) throw invalid('malformed token');
   const parts = token.split('.');
   if (parts.length !== 3 || !B64URL.test(parts[0]!) || !B64URL.test(parts[1]!) || !(parts[2] === '' || B64URL.test(parts[2]!))) throw invalid('malformed token');
   const header = segment(parts[0]!, 'header');
@@ -126,9 +124,9 @@ export function verifySignature(jwt: DecodedJwt, key: KeyObject): boolean {
 }
 
 /** `exp` of a JWT read without verification: for cache timing only, never for trust. */
-export function unverifiedExpiry(token: string): number | undefined {
+export function unverifiedExpiry(token: string, maxChars: number): number | undefined {
   try {
-    const exp = decodeJwt(token).payload.exp;
+    const exp = decodeJwt(token, maxChars).payload.exp;
     return typeof exp === 'number' && Number.isFinite(exp) ? exp : undefined;
   } catch {
     return undefined;

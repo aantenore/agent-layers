@@ -1,5 +1,6 @@
-import { defineAdapter, GUARD_STAGES, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict } from '@agent-layers/core';
+import { defineAdapter, GUARD_STAGES, limitProperties, limitValue, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict, type LimitValue } from '@agent-layers/core';
 import { assertPlainUrl, failure, InvalidResponseError, postJson, trimSlash, type FetchLike, type HttpOptions } from './http.ts';
+import { LIMITS } from './limits.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface PresidioOptions {
@@ -23,7 +24,7 @@ export interface PresidioOptions {
   onError?: 'block' | 'allow';
   headers?: Record<string, string>;
   /** Per-request timeout in milliseconds (default 10000). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
 }
 
 export interface PresidioDeps { fetch?: FetchLike; name?: string }
@@ -42,7 +43,7 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
   const analyzer = `${trimSlash(options.analyzerUrl)}/analyze`;
   const anonymizer = options.anonymizerUrl ? `${trimSlash(options.anonymizerUrl)}/anonymize` : undefined;
   const http: HttpOptions = {
-    timeoutMs: options.timeoutMs ?? 10_000,
+    timeoutMs: limitValue(LIMITS.timeoutMs, options.timeoutMs),
     ...(options.headers ? { headers: options.headers } : {}),
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
   };
@@ -105,11 +106,12 @@ export const adapter = defineAdapter<'GuardPort', PresidioOptions>({
       stages: { type: 'array', minItems: 1, items: { enum: [...GUARD_STAGES] } },
       onError: { enum: ['block', 'allow'] },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
-      timeoutMs: { type: 'integer', minimum: 1 },
+      ...limitProperties(LIMITS, { timeoutMs: 'Time limit per request' }),
     },
     required: ['analyzerUrl'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createPresidioGuard(options, { name: ctx.name }),
 });
 

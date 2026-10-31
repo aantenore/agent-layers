@@ -49,6 +49,11 @@ Records carry no run id, so take them after each run; a dataset run is sequentia
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `layers` | string[] | all | Report only these layers |
+| `reasonChars` | integer | `160` | Characters of a run reason kept in the llm and harness score reasons |
+| `guardReasonChars` | integer | `80` | Characters of a run reason kept in the guardrail score reason |
+| `previewItems` | integer | `3` | Names listed in a score reason (guards, denied tools, failed tools) |
+
+Limits accept `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 { "layers": { "eval": [{ "adapter": "layer-signals" }, { "adapter": "expected-eval" }] } }

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { anySignal, timeoutSignal, type LimitValue } from '@agent-layers/core';
 import { redact, secretForms, staticSecrets } from './redact.ts';
 
 export type HeaderMap = Record<string, string>;
@@ -16,8 +17,17 @@ export interface McpServerOptions {
   /** HTTP only: bearer token for `audience` from the caller's credentials on every tool call. */
   auth?: { audience: string; scopes?: string[] };
   /** Per-request time limit (default 60000). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
+  /** Characters of an error body kept in the error message, after masking (default 300). */
+  errorBodyChars?: number;
+  /** Header and token values shorter than this are not masked in errors (default 4). */
+  minSecretChars?: number;
+  /** stdio only: characters of the server's stderr kept for error messages (default 2000). */
+  stderrChars?: number;
 }
+
+/** The connection limits of one server, resolved from {@link McpServerOptions}. */
+export interface TransportLimits { timeoutMs: number; errorBodyChars: number; minSecretChars: number; stderrChars: number }
 
 /** The server answered with a JSON-RPC error. */
 export class McpRpcError extends Error {
@@ -65,13 +75,13 @@ export class StdioTransport implements Transport {
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #stderr = '';
-  #timeoutMs: number;
+  #limits: TransportLimits;
   #alive = true;
 
-  constructor(cfg: McpServerOptions, env: Record<string, string | undefined>, timeoutMs: number) {
-    this.#timeoutMs = timeoutMs;
+  constructor(cfg: McpServerOptions, env: Record<string, string | undefined>, limits: TransportLimits) {
+    this.#limits = limits;
     this.#child = spawn(cfg.command!, cfg.args ?? [], { cwd: cfg.cwd, env: { ...env, ...cfg.env }, stdio: ['pipe', 'pipe', 'pipe'] });
-    this.#child.stderr!.on('data', (d: Buffer) => { this.#stderr = (this.#stderr + d.toString()).slice(-2000); });
+    this.#child.stderr!.on('data', (d: Buffer) => { this.#stderr = limits.stderrChars > 0 ? (this.#stderr + d.toString()).slice(-limits.stderrChars) : ''; });
     createInterface({ input: this.#child.stdout! }).on('line', (line) => this.#onLine(line));
     const fail = (why: string) => {
       this.#alive = false;
@@ -110,7 +120,7 @@ export class StdioTransport implements Transport {
     if (!this.#alive) return Promise.reject(new Error('MCP server is not running'));
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => done(new Error(`MCP ${method} timed out after ${this.#timeoutMs}ms`)), this.#timeoutMs);
+      const timer = Number.isFinite(this.#limits.timeoutMs) ? setTimeout(() => done(new Error(`MCP ${method} timed out after ${this.#limits.timeoutMs}ms`)), this.#limits.timeoutMs) : undefined;
       const onAbort = () => {
         this.#write({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id } });
         done(abortReason(signal!));
@@ -181,14 +191,14 @@ export class HttpTransport implements Transport {
   #session: string | undefined;
   #protocol: string | undefined;
   #cfg: McpServerOptions;
-  #timeoutMs: number;
+  #limits: TransportLimits;
   #connectHeaders: () => Promise<HeaderMap | undefined>;
   #trace: () => HeaderMap;
 
   /** `trace` returns the trace context headers of the active span, sent with each request so the server joins the trace. */
-  constructor(cfg: McpServerOptions, timeoutMs: number, connectHeaders: () => Promise<HeaderMap | undefined> = async () => undefined, trace: () => HeaderMap = () => ({})) {
+  constructor(cfg: McpServerOptions, limits: TransportLimits, connectHeaders: () => Promise<HeaderMap | undefined> = async () => undefined, trace: () => HeaderMap = () => ({})) {
     this.#cfg = cfg;
-    this.#timeoutMs = timeoutMs;
+    this.#limits = limits;
     this.#connectHeaders = connectHeaders;
     this.#trace = trace;
   }
@@ -202,12 +212,11 @@ export class HttpTransport implements Transport {
 
   /** Static header values and the active credential: a server error may echo them. */
   #secrets(auth: HeaderMap | undefined): string[] {
-    return secretForms([...staticSecrets(this.#cfg.headers), ...staticSecrets(auth)]);
+    return secretForms([...staticSecrets(this.#cfg.headers), ...staticSecrets(auth)], this.#limits.minSecretChars);
   }
 
   async #post(body: unknown, signal?: AbortSignal, headers?: HeaderMap): Promise<{ res: Response; auth: HeaderMap | undefined }> {
     const auth = headers ?? (await this.#connectHeaders());
-    const timeout = AbortSignal.timeout(this.#timeoutMs);
     const res = await fetch(this.#cfg.url!, {
       method: 'POST',
       headers: {
@@ -219,11 +228,11 @@ export class HttpTransport implements Transport {
         ...withAuth(this.#cfg.headers, auth),
       },
       body: JSON.stringify(body),
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      signal: anySignal(signal, timeoutSignal(this.#limits.timeoutMs)),
     });
     this.#session = res.headers.get('mcp-session-id') ?? this.#session;
     // Mask the whole body before cutting it: a secret that straddles the cut would otherwise survive in part.
-    if (!res.ok) throw new McpHttpError(res.status, redact(await res.text().catch(() => ''), this.#secrets(auth)).slice(0, 300));
+    if (!res.ok) throw new McpHttpError(res.status, redact(await res.text().catch(() => ''), this.#secrets(auth)).slice(0, this.#limits.errorBodyChars));
     return { res, auth };
   }
 
@@ -256,7 +265,7 @@ export class HttpTransport implements Transport {
     await fetch(this.#cfg.url!, {
       method: 'DELETE',
       headers: { 'mcp-session-id': this.#session, ...withAuth(this.#cfg.headers, auth) },
-      signal: AbortSignal.timeout(this.#timeoutMs),
+      signal: timeoutSignal(this.#limits.timeoutMs),
     }).catch(() => {});
   }
 }

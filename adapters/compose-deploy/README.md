@@ -21,6 +21,12 @@ side effects; `up` and `down` run the commands and throw with Compose's error ou
 | `searchDirs` | string[] | `["reference"]` | Directories searched for layer compose files |
 | `command` | string[] | `["docker", "compose"]` | Compose command |
 | `wait` | boolean | `true` | Add `--wait` to `up` |
+| `healthIntervalS` | integer | `5` | Seconds between health checks of the generated services |
+| `healthTimeoutS` | integer | `3` | Seconds a health check may take |
+| `healthRetries` | integer | `12` | Failed health checks before a service counts as unhealthy |
+| `errorOutputChars` | integer | `500` | Characters of the command output kept in the error message when Compose fails |
+
+Limits accept `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json
 {

@@ -1,4 +1,4 @@
-import { contentText, lastUserText, type ChatRequest, type ChatTool } from '@agent-layers/core';
+import { contentText, defineLimits, lastUserText, limitValue, type ChatRequest, type ChatTool } from '@agent-layers/core';
 
 export interface MockRule {
   /** Regular expression (case-insensitive) tested on the last user message. */
@@ -17,6 +17,12 @@ export interface Decision {
   /** Full tool name and JSON arguments of the call, when it calls a tool. */
   call?: { name: string; arguments: string };
 }
+
+/** Configurable limits; see docs/limits.md. */
+export const LIMITS = defineLimits({
+  latencyMs: { path: 'options.latencyMs', default: 0, unit: 'ms', min: 0 },
+  toolResultChars: { path: 'options.toolResultChars', default: 500, unit: 'chars', min: 0, max: 1_000_000, safe: { max: 10_000 } },
+});
 
 export interface CompiledRule extends Omit<MockRule, 'match'> { regex: RegExp }
 
@@ -48,9 +54,9 @@ function firstPassage(messages: ChatRequest['messages']): string | undefined {
 }
 
 /** Chooses the answer: tool result, first matching rule, forced tool call, knowledge passage, then echo. */
-export function decide(req: ChatRequest, rules: readonly CompiledRule[]): Decision {
+export function decide(req: ChatRequest, rules: readonly CompiledRule[], toolResultChars?: number): Decision {
   const last = req.messages.at(-1);
-  if (last?.role === 'tool') return { content: contentText(last.content).trim().slice(0, 500) };
+  if (last?.role === 'tool') return { content: contentText(last.content).trim().slice(0, limitValue(LIMITS.toolResultChars, toolResultChars)) };
 
   const tools = req.tool_choice === 'none' ? [] : (req.tools ?? []);
   const user = lastUserText(req.messages);

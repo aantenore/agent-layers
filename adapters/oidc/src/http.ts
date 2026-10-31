@@ -1,3 +1,5 @@
+import { anySignal, timeoutSignal } from '@agent-layers/core';
+
 /** Failure of the OIDC adapter. Messages never contain tokens or client secrets. */
 export class OidcError extends Error {
   override name = 'OidcError';
@@ -9,9 +11,6 @@ export class OidcError extends Error {
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
-
-/** Largest document read from the provider (discovery, JWKS, token response). */
-export const MAX_RESPONSE_BYTES = 1_000_000;
 
 const isLoopback = (host: string) =>
   host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' || /^127(\.\d{1,3}){3}$/.test(host);
@@ -72,11 +71,19 @@ export function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefine
   });
 }
 
-export interface RequestOptions {
+/** Resolved limits of one request (see `limits.ts`); `Infinity` where the limit is unbounded. */
+export interface HttpLimits {
+  timeoutMs: number;
+  /** Largest document read from the provider (discovery, JWKS, token response). */
+  maxResponseBytes: number;
+  /** Characters of a provider `error_description` kept in an error message. */
+  errorDescriptionChars: number;
+}
+
+export interface RequestOptions extends HttpLimits {
   method: 'GET' | 'POST';
   headers?: Record<string, string>;
   body?: string;
-  timeoutMs: number;
   what: string;
   signal?: AbortSignal;
 }
@@ -86,8 +93,8 @@ export interface RequestOptions {
  * and, for OAuth error bodies, the scrubbed `error` / `error_description`.
  */
 export async function requestJson(fetchImpl: FetchLike, url: string, o: RequestOptions): Promise<Record<string, unknown>> {
-  const timeout = AbortSignal.timeout(o.timeoutMs);
-  const signal = o.signal ? AbortSignal.any([o.signal, timeout]) : timeout;
+  const timeout = timeoutSignal(o.timeoutMs);
+  const signal = anySignal(o.signal, timeout);
   let res: Response;
   let text: string;
   try {
@@ -96,11 +103,11 @@ export async function requestJson(fetchImpl: FetchLike, url: string, o: RequestO
       await res.body?.cancel().catch(() => {});
       throw new OidcError('response', `${o.what}: redirects are not followed (HTTP ${res.status})`);
     }
-    text = await readBounded(res, MAX_RESPONSE_BYTES, o.what);
+    text = await readBounded(res, o.maxResponseBytes, o.what);
   } catch (err) {
     if (o.signal?.aborted) throw o.signal.reason;
     if (err instanceof OidcError) throw err;
-    throw new OidcError('unreachable', `${o.what}: request failed (${timeout.aborted ? `timed out after ${o.timeoutMs}ms` : 'network error'})`);
+    throw new OidcError('unreachable', `${o.what}: request failed (${timeout?.aborted ? `timed out after ${o.timeoutMs}ms` : 'network error'})`);
   }
   let body: unknown;
   try {
@@ -111,7 +118,7 @@ export async function requestJson(fetchImpl: FetchLike, url: string, o: RequestO
   const obj = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : undefined;
   if (!res.ok) {
     const code = typeof obj?.error === 'string' && /^[\w.-]{1,64}$/.test(obj.error) ? obj.error : undefined;
-    const desc = typeof obj?.error_description === 'string' ? scrub(obj.error_description).slice(0, 200) : undefined;
+    const desc = typeof obj?.error_description === 'string' ? scrub(obj.error_description).slice(0, o.errorDescriptionChars) : undefined;
     throw new OidcError('response', `${o.what}: HTTP ${res.status}${code ? ` (${code}${desc ? `: ${desc}` : ''})` : ''}`);
   }
   if (!obj) throw new OidcError('response', `${o.what}: response is not a JSON object`);
@@ -119,10 +126,10 @@ export async function requestJson(fetchImpl: FetchLike, url: string, o: RequestO
 }
 
 /** Fetches an OpenID Provider configuration (OpenID Connect Discovery 1.0) and checks that it names `issuer`. */
-export async function discover(fetchImpl: FetchLike, issuer: string, timeoutMs: number, allowHttp?: boolean): Promise<Record<string, unknown>> {
+export async function discover(fetchImpl: FetchLike, issuer: string, limits: HttpLimits, allowHttp?: boolean): Promise<Record<string, unknown>> {
   secureUrl(issuer, 'issuer', allowHttp);
   const url = `${issuer.replace(/\/+$/, '')}/.well-known/openid-configuration`;
-  const doc = await requestJson(fetchImpl, url, { method: 'GET', timeoutMs, what: 'OIDC discovery' });
+  const doc = await requestJson(fetchImpl, url, { method: 'GET', ...limits, what: 'OIDC discovery' });
   // Mix-up defence: the document must be the one of the expected issuer.
   if (doc.issuer !== issuer) throw new OidcError('config', 'OIDC discovery: the document names a different issuer');
   return doc;

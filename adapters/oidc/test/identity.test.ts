@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { agentKind, createOidcIdentity, MAX_RESPONSE_BYTES, type OidcIdentityOptions } from '../src/index.ts';
+import { agentKind, createOidcIdentity, IDENTITY_LIMITS, type OidcIdentityOptions } from '../src/index.ts';
 import { b64, ecKey, edKey, hmacJwt, idp, json, nowSec, rsaKey, server, signJwt } from './helpers.ts';
 
 const rs = rsaKey('rs-1');
@@ -204,7 +204,7 @@ describe('transport', () => {
   test('redirects are not followed and oversized documents are refused', async () => {
     const s = await server({
       '/redirect': (_req, res) => { res.writeHead(302, { location: '/jwks' }).end(); },
-      '/huge': (_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(`{"keys":[],"pad":"${'x'.repeat(MAX_RESPONSE_BYTES)}"}`); },
+      '/huge': (_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(`{"keys":[],"pad":"${'x'.repeat(IDENTITY_LIMITS.maxResponseBytes.default as number)}"}`); },
       '/chunked': (_req, res) => {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.write('{"keys":[],"pad":"');

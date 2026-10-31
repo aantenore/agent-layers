@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { defineAdapter, PORT_VERSIONS, type KnowledgePort, type Passage } from '@agent-layers/core';
+import { anySignal, defineAdapter, defineLimits, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal, type KnowledgePort, type LimitValue, type Passage } from '@agent-layers/core';
 import { interpolate } from './env.ts';
 import { headerSecrets, redact, secretForms } from './redact.ts';
 
@@ -12,14 +12,22 @@ export interface HttpKnowledgeOptions {
   /** Send the caller's raw token (`identity.token`) as `Authorization: Bearer`, so the service can apply its own access rules. */
   forwardIdentityToken?: boolean;
   /** Time limit per request (default 10000). */
-  timeoutMs?: number;
+  timeoutMs?: LimitValue;
   /** Passages requested when the query has no `k` (default 4). */
   k?: number;
+  /** Characters of an error body kept in the error message, after masking (default 300). */
+  errorBodyChars?: number;
+  /** Header values shorter than this are not masked in error bodies (default 4). */
+  minSecretChars?: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_K = 4;
-const ERROR_BODY_CHARS = 300;
+/** Configurable limits; see docs/limits.md. */
+export const LIMITS = defineLimits({
+  timeoutMs: { path: 'options.timeoutMs', default: 10_000, unit: 'ms', min: 1, unbounded: 'fail', safe: { max: 120_000 } },
+  k: { path: 'options.k', default: 4, unit: 'count', min: 1, safe: { max: 50 } },
+  errorBodyChars: { path: 'options.errorBodyChars', default: 300, unit: 'chars', min: 0, max: 100_000, safe: { max: 2000 } },
+  minSecretChars: { path: 'options.minSecretChars', default: 4, unit: 'chars', min: 1, max: 64, safe: { max: 8 } },
+});
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const hashId = (text: string): string => createHash('sha1').update(text).digest('hex').slice(0, 12);
@@ -46,11 +54,13 @@ export function createHttpKnowledge(
   if (!/^https?:\/\//i.test(url)) throw new Error('http-knowledge: url must be absolute http(s)');
   const headers = interpolate(options.headers ?? {}, env, 'headers');
   const source = name ?? new URL(url).host;
+  const timeoutMs = limitValue(LIMITS.timeoutMs, options.timeoutMs);
+  const errorBodyChars = limitValue(LIMITS.errorBodyChars, options.errorBodyChars);
+  const minSecretChars = limitValue(LIMITS.minSecretChars, options.minSecretChars);
   return {
     name: source,
     async search(q) {
-      const k = q.k ?? options.k ?? DEFAULT_K;
-      const timeout = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      const k = q.k ?? limitValue(LIMITS.k, options.k);
       const sent: Record<string, string> = {
         ...headers,
         ...(options.forwardIdentityToken && q.identity?.token ? { authorization: `Bearer ${q.identity.token}` } : {}),
@@ -59,10 +69,10 @@ export function createHttpKnowledge(
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json', ...sent },
         body: JSON.stringify({ query: q.query, k, ...(q.filter ? { filter: q.filter } : {}) }),
-        signal: q.signal ? AbortSignal.any([q.signal, timeout]) : timeout,
+        signal: anySignal(q.signal, timeoutSignal(timeoutMs)),
       });
       // The error body may echo the credentials; mask the whole body before cutting it.
-      if (!res.ok) throw new Error(`knowledge HTTP ${res.status}: ${redact(await res.text().catch(() => ''), secretForms(headerSecrets(sent))).slice(0, ERROR_BODY_CHARS)}`);
+      if (!res.ok) throw new Error(`knowledge HTTP ${res.status}: ${redact(await res.text().catch(() => ''), secretForms(headerSecrets(sent), minSecretChars)).slice(0, errorBodyChars)}`);
       const body: unknown = await res.json().catch(() => undefined);
       if (!isRecord(body) || !Array.isArray(body.passages)) throw new Error('knowledge HTTP: response has no "passages" array');
       return body.passages.flatMap((p) => toPassage(p, source) ?? []).slice(0, Math.max(0, k));
@@ -86,12 +96,15 @@ export const adapter = defineAdapter<'KnowledgePort', HttpKnowledgeOptions>({
       url: { type: 'string', minLength: 1 },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
       forwardIdentityToken: { type: 'boolean' },
-      timeoutMs: { type: 'integer', minimum: 1 },
-      k: { type: 'integer', minimum: 1 },
+      ...limitProperties(LIMITS, {
+        timeoutMs: 'Time limit per query', k: 'Passages requested when the query has no k',
+        errorBodyChars: 'Characters of an error body kept in the error message', minSecretChars: 'Shortest header value masked in error bodies',
+      }),
     },
     required: ['url'],
     additionalProperties: false,
   },
+  limits: LIMITS,
   create: (options, ctx) => createHttpKnowledge(options, { name: ctx.name, env: ctx.env }),
 });
 

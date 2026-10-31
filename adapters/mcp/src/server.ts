@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { matchesAny, type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type ToolPort, type ToolSpec } from '@agent-layers/core';
+import { limitValue, matchesAny, type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type ToolPort, type ToolSpec } from '@agent-layers/core';
+
+import { SERVER_LIMITS } from './limits.ts';
 
 /** Options of the inbound descriptor. */
 export interface McpServerChannelOptions {
@@ -14,19 +16,19 @@ export interface McpServerChannelOptions {
   /** Answer requests with a one-event SSE stream instead of JSON (default false: JSON unless the client accepts only SSE). */
   sse?: boolean;
   /** Idle time after which a session is forgotten (default 1800000). */
-  sessionTtlMs?: number;
+  sessionTtlMs?: LimitValue;
   /** Absolute lifetime of a session, however active (default 3600000). */
-  maxSessionAgeMs?: number;
+  maxSessionAgeMs?: LimitValue;
   /**
    * Most sessions in total (default 1000). When reached, the least recently used session of the authenticated caller
    * holding the most sessions makes room; anonymous sessions are never evicted for a new one.
    */
-  maxSessions?: number;
+  maxSessions?: LimitValue;
   /**
    * Most sessions per authenticated caller, and of all anonymous callers together (default 10; at most a quarter of
    * `maxSessions`). A caller's own least recently used session makes room for its new one; a full anonymous pool answers 429.
    */
-  maxSessionsPerCaller?: number;
+  maxSessionsPerCaller?: LimitValue;
 }
 
 /**
@@ -96,10 +98,10 @@ function toMcpTool(spec: ToolSpec) {
  */
 export function createMcpServerChannel(options: McpServerChannelOptions = {}, name = 'mcp'): ChannelPort {
   const path = options.path ?? '/mcp';
-  const ttl = options.sessionTtlMs ?? 30 * 60_000;
-  const max = options.maxSessions ?? 1000;
-  const perCaller = options.maxSessionsPerCaller ?? 10;
-  const maxAge = options.maxSessionAgeMs ?? 60 * 60_000;
+  const ttl = limitValue(SERVER_LIMITS.sessionTtlMs, options.sessionTtlMs);
+  const max = limitValue(SERVER_LIMITS.maxSessions, options.maxSessions);
+  const perCaller = limitValue(SERVER_LIMITS.maxSessionsPerCaller, options.maxSessionsPerCaller);
+  const maxAge = limitValue(SERVER_LIMITS.maxSessionAgeMs, options.maxSessionAgeMs);
   if (perCaller > max / 4) throw new Error('maxSessionsPerCaller must be at most a quarter of maxSessions');
   const visible = (tool: string) => (!options.include || matchesAny(options.include, tool)) && !(options.exclude && matchesAny(options.exclude, tool));
 
