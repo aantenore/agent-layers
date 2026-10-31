@@ -271,7 +271,7 @@ A run that does not complete carries a structured reason, required whenever `sta
 | `stage` | Guard stage, for guard stops. |
 | `detail` | Internal text. Never parsed. |
 
-A run that stops for a human answer ends with status `waiting`, reason `needs_input` or `needs_auth`. For a pending approval the reason is `{ "code": "needs_input", "layer": "identity", "by": "<approval instance>", "detail": "<approval id>" }`. The governed tool result that asked for it carries `ext["sdk.approval"]`, so a runtime can end the run without parsing text. A later run with the same session resumes the conversation.
+A run that stops for a human answer ends with status `waiting`, reason `needs_input` or `needs_auth`. For a pending approval the reason is `{ "code": "needs_input", "layer": "identity", "by": "<approval instance>", "detail": "<approval id>" }`. The governed tool result that asked for it carries `ext["sdk.approval"]`, so a runtime can end the run without parsing text. A later run in the same session (same session id, same caller) that makes the same call, same tool and same arguments, gets the decision: approved runs once, denied is refused, still pending returns the same approval id (see [ApprovalPort](ports/ApprovalPort.md)). The session carries the decision, not the conversation: `basic-runtime` and `reinloop` start each run from its input, so the follow-up message must lead the model to the same call.
 
 ## Trace context
 

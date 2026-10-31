@@ -27,6 +27,10 @@
           "$ref": "common.json#/$defs/Time",
           "description": "After this time a pending approval becomes expired."
         },
+        "key": {
+          "type": "string",
+          "description": "Identifies the call being approved (session, caller, access question with arguments), so a later identical call finds the decision. Since ApprovalPort 1.1.0."
+        },
         "ext": { "$ref": "common.json#/$defs/Ext" }
       },
       "additionalProperties": false,

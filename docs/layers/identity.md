@@ -105,8 +105,9 @@ sequenceDiagram
 - Every access decision is emitted to [telemetry](telemetry.md) as an audit event (`agent.access.check` span,
   `agent.access.decisions` metric).
 - When a call needs a person (`ask`), the run ends with status `waiting` and reason `needs_input` (layer `identity`,
-  `by` the approval adapter, `detail` the approval id); a later run with the same session resumes. See
-  [harness](harness.md).
+  `by` the approval adapter, `detail` the approval id). A later run in the same session, by the same caller, that
+  makes the same call (same arguments) gets the decision: approved runs once, denied is refused, pending keeps its
+  id. See [harness](harness.md) and [ApprovalPort](../../spec/ports/ApprovalPort.md).
 
 ## How to swap
 

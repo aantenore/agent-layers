@@ -1,4 +1,4 @@
-import { GUARD_STAGES, validate, type AccessQuestion, type ApprovalPort, type AuthorizationPort, type Caller, type CredentialPort, type GuardPort, type GuardStage, type IdentityPort } from '@agent-layers/core';
+import { GUARD_STAGES, validate, type AccessQuestion, type ApprovalPort, type ApprovalRequest, type AuthorizationPort, type Caller, type CredentialPort, type GuardPort, type GuardStage, type IdentityPort } from '@agent-layers/core';
 import { Checks } from '../check.ts';
 import { conforms, schema } from '../schemas.ts';
 
@@ -90,7 +90,28 @@ export async function checkApproval(port: ApprovalPort, _f: unknown = {}, c = ne
   c.expect(decided?.status === 'approved', 'decide: status must be approved');
   c.produced('decide', decided);
   c.expect((await c.attempt('wait', () => waiting))?.status === 'approved', 'wait: must resolve once decided');
+  if (port.lookup) await checkApprovalLookup(port, req, c);
   return c;
+}
+
+/** `lookup` (ApprovalPort 1.1.0, optional): by key, latest first; an approved approval is consumed once. */
+async function checkApprovalLookup(port: ApprovalPort, base: ApprovalRequest, c: Checks): Promise<void> {
+  const lookup = port.lookup!.bind(port);
+  const key = `conformance-key-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  c.expect((await c.attempt('lookup unknown key', () => lookup(`${key}-missing`))) === undefined, 'lookup: an unknown key must resolve to undefined');
+  const first = await c.attempt('request with key', () => port.request({ ...base, key }));
+  if (!first) return;
+  c.all(conforms('approval', first), 'approval with key');
+  c.expect((await c.attempt('lookup pending', () => lookup(key, { consume: true })))?.id === first.id, 'lookup: must return the approval requested with the key');
+  c.expect((await c.attempt('lookup pending again', () => lookup(key)))?.status === 'pending', 'lookup: consume must leave a pending approval in place');
+  await c.attempt('decide keyed', () => port.decide(first.id, { approved: true }));
+  c.expect((await c.attempt('lookup approved', () => lookup(key, { consume: true })))?.status === 'approved', 'lookup: must return the approved approval');
+  c.expect((await c.attempt('lookup consumed', () => lookup(key))) === undefined, 'lookup: a consumed approval must not be returned again');
+  const denied = await c.attempt('request to deny', () => port.request({ ...base, key: `${key}-d` }));
+  if (!denied) return;
+  await c.attempt('decide deny', () => port.decide(denied.id, { approved: false }));
+  await c.attempt('lookup denied', () => lookup(`${key}-d`, { consume: true }));
+  c.expect((await c.attempt('lookup denied again', () => lookup(`${key}-d`, { consume: true })))?.status === 'denied', 'lookup: consume must not remove a denial');
 }
 
 export interface GuardSample { stage: GuardStage; text: string }

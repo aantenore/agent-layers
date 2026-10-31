@@ -71,7 +71,7 @@ The channel moves the shapes of the runtime: input in, [RunResult](../schemas/ru
 - A channel must only call agents listed by `host.agents()`.
 - `serve` does not block until the end of the channel: it returns the handle. Use `done` or `close` to wait for or end it.
 - `signal` in `opts` stops the channel like `close`.
-- Approvals and long-running work can be surfaced by a channel (a run that is `waiting` can be resumed with the same session), but the contract does not require it (see [ApprovalPort](ApprovalPort.md)).
+- Approvals and long-running work can be surfaced by a channel (a later run in the same session that makes the same call gets the decision of a `waiting` run), but the contract does not require it (see [ApprovalPort](ApprovalPort.md)).
 
 ## Errors
 

@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@agent-layers/adapter-basic-runtime": "0.1.0",
+    "@agent-layers/adapter-memory-approval": "0.1.0",
     "@agent-layers/adapter-mock-model": "0.1.0",
     "@agent-layers/adapter-static-identity": "0.1.0",
     "@agent-layers/conformance": "0.1.0",

@@ -64,7 +64,7 @@ Statuses: `completed` (the agent answered), `failed` (an error ended the run), `
 | `stage?` | Guard stage, for `guard_block`. |
 | `detail?` | Internal text for people. Never parsed, never shown to the caller. |
 
-A run that waits for an approval ends with status `waiting` and reason `{code: "needs_input", layer: "identity", by: <approval instance>, detail: <approval id>}`. The governed tool result that asked for the approval carries `ext["sdk.approval"]` (the approval id), so a runtime can end the run without parsing text. A later run with the same session resumes the conversation.
+A run that waits for an approval ends with status `waiting` and reason `{code: "needs_input", layer: "identity", by: <approval instance>, detail: <approval id>}`. The governed tool result that asked for the approval carries `ext["sdk.approval"]` (the approval id), so a runtime can end the run without parsing text. A later run in the same session (same session id, same caller) that makes the same call, same tool and same arguments, gets the decision: approved runs once, denied is refused, still pending returns the same approval id (see [ApprovalPort](ApprovalPort.md)). The session carries the decision, not the conversation: `basic-runtime` and `reinloop` start each run from its input, so the follow-up message must lead the model to the same call.
 
 ### Run events
 

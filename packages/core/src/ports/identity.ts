@@ -81,6 +81,11 @@ export interface ApprovalRequest {
   reason?: string;
   /** ISO time after which a pending approval becomes `expired`. */
   expiresAt?: string;
+  /**
+   * Identifies the call being approved: a stable hash of the session, the caller and the access question (arguments
+   * included). Set by the tool pipeline so a later identical call finds the decision with `lookup`.
+   */
+  key?: string;
   ext?: Ext;
 }
 
@@ -101,6 +106,12 @@ export interface ApprovalPort extends PortBase {
   decide(id: string, decision: { approved: boolean; by?: string; reason?: string }): Promise<Approval>;
   /** Resolves when the approval is no longer pending, or with the pending approval when `timeoutMs` elapses. */
   wait(id: string, opts?: { timeoutMs?: number; signal?: AbortSignal }): Promise<Approval>;
+  /**
+   * The latest approval requested with `key` that has not been consumed, or undefined. With `consume`, an approved
+   * approval is marked consumed in the same step, so it lets exactly one call proceed. Since 1.1.0; without it, every
+   * call asks again.
+   */
+  lookup?(key: string, opts?: { consume?: boolean }): Promise<Approval | undefined>;
 }
 
 /** Copy of a caller without its credential, safe for guards, events and traces. */

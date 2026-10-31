@@ -31,12 +31,18 @@ An `AgentSpec` carries `name`, `instructions`, `model`, `tools`, `knowledge`, `s
 | `completed` | The agent answered. |
 | `failed` | An error ended the run. |
 | `stopped` | Something ended the run on purpose: a guard, a denial, a limit, a cancellation. |
-| `waiting` | The run stopped for a human answer (an approval, input, authentication). A later run with the same session resumes the conversation. |
+| `waiting` | The run stopped for a human answer (an approval, input, authentication). A later run in the same session that makes the same call gets the decision. |
 
 Whenever the status is not `completed`, `reason` is structured: `{ code, layer?, by?, stage?, detail? }`. Consumers
 branch on `code` only: `guard_block`, `denied`, `aborted`, `timeout`, `limit`, `needs_input`, `needs_auth`, `rejected`,
 `error` (config can add values that behave like one of them); `detail` is internal text and never parsed. A pending
 approval ends the run `waiting` with `{ code: "needs_input", layer: "identity", by: <approval adapter>, detail: <approval id> }`.
+Approvals are keyed by session id, caller and the access question with its arguments. A later run in the same
+session, by the same caller, that makes the same call uses the decision: `approved` lets the call run once, `denied`
+refuses it, still `pending` returns the same approval id, `expired` asks again. The session carries the decision, not
+the conversation: `basic-runtime` and `reinloop` start each run from its input, so the follow-up message must lead
+the model to the same call. Inbound adapters set the session: A2A uses the context id (per caller), the MCP server
+its MCP session; a call without a session is keyed by its run.
 
 ### Where it sits
 

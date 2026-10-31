@@ -20,7 +20,7 @@ A port is the contract between the stack and one kind of backend. Every port has
 | Control plane | `identity` (L6) | [IdentityPort](IdentityPort.md) | 1.0.0 | Verify inbound credentials into a caller |
 | Control plane | `identity` (L6) | [CredentialPort](CredentialPort.md) | 1.0.0 | Outbound tokens, on behalf of a user or as the agent |
 | Control plane | `identity` (L6) | [AuthorizationPort](AuthorizationPort.md) | 1.0.0 | Decide whether an action is allowed |
-| Control plane | `identity` (L6) | [ApprovalPort](ApprovalPort.md) | 1.0.0 | Human approval for actions the policy marks ask |
+| Control plane | `identity` (L6) | [ApprovalPort](ApprovalPort.md) | 1.1.0 | Human approval for actions the policy marks ask |
 | Control plane | `guardrail` (L7) | [GuardPort](GuardPort.md) | 1.0.0 | Allow, block or redact text at four stages |
 | Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 1.0.0 | Expose agents to people, apps and other agents |
 | Experience plane | `interface` (L8) | [TriggerPort](TriggerPort.md) | 1.0.0 | Start runs from events and schedules |

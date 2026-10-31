@@ -69,3 +69,27 @@ test('the stored question never carries a caller credential', async () => {
   assert.ok(!JSON.stringify(await port.get(a.id)).includes('raw-token'));
   assert.equal((leaked.question.caller as { credential?: string }).credential, 'raw-token', 'the caller object is not changed');
 });
+
+test('lookup finds the latest approval by key; consume lets an approval through once', async () => {
+  const port = createMemoryApproval();
+  assert.equal(await port.lookup!('k1'), undefined);
+  const a = await port.request({ ...req, key: 'k1' });
+  assert.equal((await port.lookup!('k1'))?.id, a.id);
+  assert.equal((await port.lookup!('k1', { consume: true }))?.status, 'pending', 'a pending approval is not consumed');
+  await port.decide(a.id, { approved: true });
+  assert.equal((await port.lookup!('k1', { consume: true }))?.status, 'approved');
+  assert.equal(await port.lookup!('k1'), undefined, 'consumed');
+  assert.equal((await port.get(a.id))?.status, 'approved', 'get still shows the decision');
+  const d = await port.request({ ...req, key: 'k2' });
+  await port.decide(d.id, { approved: false });
+  assert.equal((await port.lookup!('k2', { consume: true }))?.status, 'denied');
+  assert.equal((await port.lookup!('k2', { consume: true }))?.status, 'denied', 'a denial stays');
+  assert.equal(await port.lookup!('other'), undefined);
+});
+
+test('lookup reports an expired approval', async () => {
+  const port = createMemoryApproval({ ttlMs: 5 });
+  await port.request({ ...req, key: 'k' });
+  await sleep(15);
+  assert.equal((await port.lookup!('k'))?.status, 'expired');
+});

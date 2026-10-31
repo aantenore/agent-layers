@@ -3,12 +3,13 @@ import { boundExt, withExt } from '../ext.ts';
 import { ATTR, EVENT, METRIC, SPAN } from '../names.ts';
 import type { BoundCredentials, CallContext } from '../ports/base.ts';
 import type { GuardPort } from '../ports/guard.ts';
-import type { ApprovalPort, AuthorizationPort, CredentialPort } from '../ports/identity.ts';
+import type { AccessQuestion, ApprovalPort, AuthorizationPort, CredentialPort } from '../ports/identity.ts';
 import type { TelemetryPort } from '../ports/telemetry.ts';
 import type { ToolPort, ToolResult, ToolSpec } from '../ports/tool.ts';
 import { accessQuestion, evaluatePolicy, riskOf, type PolicyRule } from '../policy.ts';
 import { noopTelemetry } from '../telemetry.ts';
 import { CORE_VOCABULARIES, type Vocabularies } from '../vocab.ts';
+import { sha256, stableStringify } from '../util.ts';
 import { runGuards } from './guards.ts';
 
 export interface GovernedToolsOptions {
@@ -41,9 +42,9 @@ interface Denial { reason: string; approval?: string }
 
 /**
  * Aggregates several ToolPorts into one, naming tools `<source><separator><tool>`, and governs every call:
- * local policy → approval (for `ask`) → authorization → tool_args guards → call with bound
- * credentials → tool_result guards. Denials and blocks are error results, not exceptions. Every result carries
- * `ext["sdk.outcome"]`; a call waiting for an approval also `ext["sdk.approval"]` (the approval id).
+ * local policy → approval (for `ask`) → authorization → tool_args guards → call with bound credentials → tool_result
+ * guards (over the text and the structured data). Denials and blocks are error results, not exceptions. Every result
+ * carries `ext["sdk.outcome"]`; a call waiting for an approval also `ext["sdk.approval"]` (the approval id).
  */
 export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: GovernedToolsOptions = {}): ToolPort {
   const sep = opts.separator ?? '__';
@@ -91,10 +92,8 @@ export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: G
       if (effect === 'deny') return { reason: 'denied by policy' };
       if (effect === 'ask') {
         if (!opts.approval) return { reason: 'approval required' };
-        const pending = await opts.approval.request({ question, agent: ctx.agent, runId: ctx.runId });
-        const answer = opts.approvalTimeoutMs ? await opts.approval.wait(pending.id, { timeoutMs: opts.approvalTimeoutMs, ...(ctx.signal ? { signal: ctx.signal } : {}) }) : pending;
-        if (answer.status === 'pending') return { reason: `approval pending: ${answer.id}`, approval: answer.id };
-        if (answer.status !== 'approved') return { reason: `approval ${answer.status}${answer.reason ? `: ${answer.reason}` : ''}` };
+        const denied = await approve(opts.approval, question, ctx);
+        if (denied) return denied;
       }
     }
     if (!opts.authorization) return undefined;
@@ -105,6 +104,29 @@ export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: G
       if (isAbort(err)) throw err;
       return { reason: `authorization unavailable: ${errorMessage(err)}` };
     }
+  }
+
+  /**
+   * Approval for one call, undefined when it may proceed. A decision already taken for the same key (session, caller,
+   * question with arguments) is used first: approved proceeds once (consumed), denied denies, pending keeps its id.
+   * An expired approval, or none, means a new request.
+   */
+  async function approve(port: ApprovalPort, question: AccessQuestion, ctx: CallContext): Promise<Denial | undefined> {
+    const key = approvalKey(question, ctx);
+    const lookup = port.lookup?.bind(port);
+    let current = lookup ? await lookup(key, { consume: true }) : undefined;
+    if (!current || current.status === 'expired') current = await port.request({ question, agent: ctx.agent, runId: ctx.runId, key });
+    if (current.status === 'pending' && opts.approvalTimeoutMs) {
+      current = await port.wait(current.id, { timeoutMs: opts.approvalTimeoutMs, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      // Decided while this call waited: consume it, so it lets this call (and no later one) through.
+      if (current.status === 'approved' && lookup) {
+        const used = await lookup(key, { consume: true });
+        if (used?.id !== current.id || used.status !== 'approved') return { reason: 'approval already used' };
+      }
+    }
+    if (current.status === 'pending') return { reason: `approval pending: ${current.id}`, approval: current.id };
+    if (current.status !== 'approved') return { reason: `approval ${current.status}${current.reason ? `: ${current.reason}` : ''}` };
+    return undefined;
   }
 
   function bind(ctx: CallContext): CallContext {
@@ -143,13 +165,33 @@ export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: G
       out = { ok: false, text: `Tool failed: ${errorMessage(err)}` };
     }
 
-    const resultCheck = await runGuards(guards, 'tool_result', out.text, ctx, t, name);
-    if (resultCheck.action === 'block') return result('blocked', { ok: false, text: `Result withheld by guardrail ${resultCheck.guard}` });
-    if (resultCheck.action === 'redact') {
-      const { data: _data, ...rest } = out;
-      return result('redacted', { ...rest, text: resultCheck.text });
+    return guardResult(name, out, guards, ctx, t);
+  }
+
+  /**
+   * tool_result guards over the text and over the canonical JSON of `data`, which channels pass on as structured
+   * content. A block in either withholds both. A redacted `data` is parsed back; when it no longer parses it is dropped
+   * and `ext["sdk.data_dropped"]` is set.
+   */
+  async function guardResult(name: string, out: ToolResult, guards: readonly GuardPort[], ctx: CallContext, t: TelemetryPort): Promise<ToolResult & { outcome: ToolOutcomeKind }> {
+    const withheld = (guard?: string) => result('blocked', { ok: false, text: `Result withheld by guardrail ${guard}` });
+    const textCheck = await runGuards(guards, 'tool_result', out.text, ctx, t, name);
+    if (textCheck.action === 'block') return withheld(textCheck.guard);
+    const { data, ...rest } = out;
+    let guarded: ToolResult = { ...rest, text: textCheck.text };
+    let redacted = textCheck.action === 'redact';
+    let dropped = false;
+    if (data !== undefined) {
+      const json = stableStringify(data);
+      const dataCheck = await runGuards(guards, 'tool_result', json, ctx, t, name);
+      if (dataCheck.action === 'block') return withheld(dataCheck.guard);
+      if (dataCheck.action === 'redact') {
+        redacted = true;
+        try { guarded = { ...guarded, data: JSON.parse(dataCheck.text) as unknown }; } catch { dropped = true; }
+      } else guarded = { ...guarded, data };
     }
-    return result(out.ok ? 'ok' : 'error', out);
+    if (!redacted) return result(out.ok ? 'ok' : 'error', out);
+    return result('redacted', guarded, dropped ? { 'sdk.data_dropped': true } : {});
   }
 
   return {
@@ -173,4 +215,13 @@ export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: G
       await Promise.allSettled(Object.values(ports).map((p) => p.close?.()));
     },
   };
+}
+
+/**
+ * Key of an approval: the session (the run when there is none), the caller and the access question, arguments
+ * included. The same call in a later run of the same session by the same caller finds the same decision.
+ */
+export function approvalKey(question: AccessQuestion, ctx: CallContext): string {
+  const caller = ctx.caller ? `${ctx.caller.kind}:${ctx.caller.id}` : 'anonymous';
+  return `approval:${sha256(stableStringify({ session: ctx.sessionId ?? `run:${ctx.runId}`, caller, question }))}`;
 }

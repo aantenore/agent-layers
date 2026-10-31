@@ -99,3 +99,46 @@ test('a throwing tool becomes an error result', async () => {
   const tools = governedTools({ t: { listTools: async () => [{ name: 'x', description: 'x', params: {}, risk: 'read' as const }], callTool: async () => { throw new Error('kaboom'); } } });
   assert.deepEqual(await tools.callTool('t__x', {}, ctx()), { ok: false, text: 'Tool failed: kaboom', ext: outcome('error') });
 });
+
+test('approvals are found again by session, caller and arguments; an approval decided during the wait is used once', async () => {
+  const store: { id: string; key?: string; status: 'pending' | 'approved' | 'denied' | 'expired'; used?: boolean }[] = [];
+  const view = (a: (typeof store)[number]) => ({ id: a.id, status: a.status, request: { question: {} as AccessQuestion, agent: 'x', runId: 'r', ...(a.key ? { key: a.key } : {}) } });
+  let decideOnWait: 'approved' | undefined;
+  const approval: ApprovalPort = {
+    async request(req) { const a = { id: `a${store.length + 1}`, ...(req.key ? { key: req.key } : {}), status: 'pending' as const }; store.push(a); return view(a); },
+    get: async (id) => { const a = store.find((x) => x.id === id); return a && view(a); },
+    decide: async () => { throw new Error('unused'); },
+    async wait(id) { const a = store.find((x) => x.id === id)!; if (decideOnWait) a.status = decideOnWait; return view(a); },
+    async lookup(key, o) {
+      const a = store.filter((x) => x.key === key && !x.used).at(-1);
+      if (a && o?.consume && a.status === 'approved') a.used = true;
+      return a && view(a);
+    },
+  };
+  const log: { name: string; args: unknown; ctx: CallContext }[] = [];
+  const tools = governedTools({ t: fakeTools([{ name: 'pay', risk: 'write' }], log) }, { policy: [{ effect: 'ask' }], approval });
+  const s1 = ctx({ sessionId: 's1', caller: user });
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, s1)).ext?.['sdk.approval'], 'a1');
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, { ...s1, runId: 'run-2' })).ext?.['sdk.approval'], 'a1', 'pending: same id, no new request');
+  assert.equal(store.length, 1);
+  store[0]!.status = 'approved';
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, ctx({ sessionId: 's2', caller: user }))).ext?.['sdk.approval'], 'a2', 'another session asks again');
+  assert.equal((await tools.callTool('t__pay', { n: 2 }, s1)).ext?.['sdk.approval'], 'a3', 'other arguments ask again');
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, ctx({ sessionId: 's1' }))).ext?.['sdk.approval'], 'a4', 'another caller asks again');
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, { ...s1, runId: 'run-3' })).ext?.['sdk.outcome'], 'ok', 'approved: proceeds');
+  assert.equal(log.length, 1);
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, s1)).ext?.['sdk.approval'], 'a5', 'consumed: the next call asks again');
+  store[4]!.status = 'denied';
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, s1)).text, 'Denied: approval denied');
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, s1)).text, 'Denied: approval denied', 'a denial stands');
+  store[4]!.status = 'expired';
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, s1)).ext?.['sdk.approval'], 'a6', 'expired: a new request');
+
+  decideOnWait = 'approved';
+  const waiting = governedTools({ t: fakeTools([{ name: 'pay', risk: 'write' }], log) }, { policy: [{ effect: 'ask' }], approval, approvalTimeoutMs: 10 });
+  const s9 = ctx({ sessionId: 's9', caller: user });
+  assert.equal((await waiting.callTool('t__pay', {}, s9)).ext?.['sdk.outcome'], 'ok');
+  assert.equal(store.at(-1)!.used, true, 'the waiting call consumed the approval');
+  decideOnWait = undefined;
+  assert.equal((await waiting.callTool('t__pay', {}, s9)).ext?.['sdk.outcome'], 'pending');
+});

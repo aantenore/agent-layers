@@ -157,11 +157,12 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
         return true;
       };
 
-      const callContext = (ctx: InboundContext, signal: AbortSignal): CallContext => ({
-        runId: randomUUID(), agent: name, signal, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
+      /** A call in a stateful MCP session carries it as the session, so a repeated call finds its approval. */
+      const callContext = (ctx: InboundContext, signal: AbortSignal, sessionId?: string): CallContext => ({
+        runId: randomUUID(), agent: name, signal, ...(sessionId ? { sessionId } : {}), ...(ctx.caller ? { caller: ctx.caller } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
       });
 
-      async function dispatch(msg: RpcRequest, inflight: Session['inflight'], ctx: InboundContext): Promise<unknown> {
+      async function dispatch(msg: RpcRequest, inflight: Session['inflight'], ctx: InboundContext, sessionId?: string): Promise<unknown> {
         switch (msg.method) {
           case 'ping':
             return {};
@@ -180,7 +181,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
             const key = msg.id ?? randomUUID();
             inflight.set(key, controller);
             try {
-              const out = await tools.callTool(tool, args as Record<string, unknown>, callContext(ctx, AbortSignal.any([ctx.signal, controller.signal])));
+              const out = await tools.callTool(tool, args as Record<string, unknown>, callContext(ctx, AbortSignal.any([ctx.signal, controller.signal]), sessionId));
               const structured = out.data && typeof out.data === 'object' && !Array.isArray(out.data) ? { structuredContent: out.data } : {};
               return { content: [{ type: 'text', text: out.text }], isError: !out.ok, ...structured };
             } finally {
@@ -292,7 +293,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
           return new Response(null, { status: 202 });
         }
         try {
-          return reply(req, { jsonrpc: '2.0', id: m.id, result: await dispatch(m, session.inflight, ctx) });
+          return reply(req, { jsonrpc: '2.0', id: m.id, result: await dispatch(m, session.inflight, ctx, `mcp-${id}`) });
         } catch (err) {
           // Only protocol errors carry their message; anything else could echo an upstream body.
           const e = err instanceof RpcError ? err : new RpcError(-32603, 'internal error');
