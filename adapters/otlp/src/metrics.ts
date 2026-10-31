@@ -1,4 +1,4 @@
-import type { Attributes } from '@agent-layers/core';
+import { METRIC, type Attributes } from '@agent-layers/core';
 import { toAttributes, type KeyValue } from './otlp-json.ts';
 
 // Bucket boundaries recommended by the OpenTelemetry GenAI semantic conventions.
@@ -11,9 +11,9 @@ interface Known { unit: string; description: string; bounds?: number[] }
 const KNOWN: Readonly<Record<string, Known>> = {
   'gen_ai.client.token.usage': { unit: '{token}', description: 'Input and output tokens used per model call', bounds: TOKEN_BOUNDS },
   'gen_ai.client.operation.duration': { unit: 's', description: 'Duration of model calls', bounds: DURATION_BOUNDS },
-  'agent.tool.calls': { unit: '{call}', description: 'Tool calls by outcome' },
-  'agent.policy.decisions': { unit: '{decision}', description: 'Tool authorization decisions' },
-  'agent.guardrail.actions': { unit: '{action}', description: 'Guard verdicts that were not allow' },
+  [METRIC.toolCalls]: { unit: '{call}', description: 'Tool calls by outcome' },
+  [METRIC.accessDecisions]: { unit: '{decision}', description: 'Tool authorization decisions' },
+  [METRIC.guardActions]: { unit: '{action}', description: 'Guard verdicts that were not allow' },
   'agent.runs': { unit: '{run}', description: 'Finished runs by status' },
 };
 

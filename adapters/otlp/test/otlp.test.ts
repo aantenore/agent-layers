@@ -14,16 +14,16 @@ const byName = (spans: OtlpSpan[], name: string) => spans.find((s) => s.name ===
 
 test('spans started inside a span are its children; one trace per run', async () => {
   const t = make();
-  await t.span('invoke_agent', L('harness', { 'gen_ai.agent.name': 'support' }), async () => {
-    await t.span('guard.check', L('guardrail'), async () => {});
-    await t.span('chat', L('llm', { 'gen_ai.request.model': 'm1' }), async () => {
+  await t.span('agent.run', L('harness', { 'agent.name': 'support' }), async () => {
+    await t.span('agent.guard.check', L('guardrail'), async () => {});
+    await t.span('agent.model.call', L('llm', { 'agent.model.requested': 'm1' }), async () => {
       await t.span('inner', L('telemetry'), async () => {});
     });
   });
   await t.flush!();
   const spans = sink.spans();
   const run = byName(spans, 'invoke_agent support');
-  const guard = byName(spans, 'guard.check');
+  const guard = byName(spans, 'agent.guard.check');
   const chat = byName(spans, 'chat m1');
   const inner = byName(spans, 'inner');
   assert.equal(run.parentSpanId, undefined);
@@ -37,9 +37,9 @@ test('spans started inside a span are its children; one trace per run', async ()
 
 test('concurrent runs keep their own parents and traces', async () => {
   const t = make();
-  const run = (id: string, delay: number) => t.span('invoke_agent', L('harness', { 'run.id': id }), async () => {
+  const run = (id: string, delay: number) => t.span('agent.run', L('harness', { 'agent.run.id': id }), async () => {
     await new Promise((r) => setTimeout(r, delay));
-    await t.span('chat', L('llm', { 'run.id': id }), async () => { await new Promise((r) => setTimeout(r, delay)); });
+    await t.span('agent.model.call', L('llm', { 'agent.run.id': id }), async () => { await new Promise((r) => setTimeout(r, delay)); });
   });
   await Promise.all([run('a', 20), run('b', 5), run('c', 12)]);
   await t.flush!();
@@ -47,28 +47,29 @@ test('concurrent runs keep their own parents and traces', async () => {
   assert.equal(new Set(spans.map((s) => s.traceId)).size, 3);
   for (const chat of spans.filter((s) => s.name === 'chat')) {
     const parent = spans.find((s) => s.spanId === chat.parentSpanId)!;
-    assert.equal(attr(parent, 'run.id'), attr(chat, 'run.id'));
+    assert.equal(attr(parent, 'agent.run.id'), attr(chat, 'agent.run.id'));
     assert.equal(parent.traceId, chat.traceId);
   }
 });
 
 test('siblings that run in parallel share the parent', async () => {
   const t = make();
-  await t.span('invoke_agent', L('harness'), () => Promise.all([
-    t.span('knowledge.search', L('knowledge', { 'knowledge.source': 'a' }), async () => {}),
-    t.span('knowledge.search', L('knowledge', { 'knowledge.source': 'b' }), async () => {}),
+  await t.span('agent.run', L('harness'), () => Promise.all([
+    t.span('agent.knowledge.search', L('knowledge', { 'agent.knowledge.source': 'a' }), async () => {}),
+    t.span('agent.knowledge.search', L('knowledge', { 'agent.knowledge.source': 'b' }), async () => {}),
   ]));
   await t.flush!();
   const spans = sink.spans();
   const run = byName(spans, 'invoke_agent');
-  assert.deepEqual(spans.filter((s) => s.name === 'knowledge.search').map((s) => s.parentSpanId), [run.spanId, run.spanId]);
+  assert.deepEqual(spans.filter((s) => s.name === 'agent.knowledge.search').map((s) => s.parentSpanId), [run.spanId, run.spanId]);
 });
 
 test('every span carries agent.layer, timing is ordered, kinds follow the operation', async () => {
   const t = make();
-  await t.span('invoke_agent', L('harness'), async () => {
-    await t.span('chat', L('llm', { 'gen_ai.operation.name': 'chat' }), async () => { await new Promise((r) => setTimeout(r, 5)); });
-    await t.span('execute_tool', L('tool', { 'gen_ai.operation.name': 'execute_tool' }), async () => {});
+  await t.span('agent.run', L('harness'), async () => {
+    await t.span('agent.model.call', L('llm'), async () => { await new Promise((r) => setTimeout(r, 5)); });
+    await t.span('agent.tool.call', L('tool'), async () => {});
+    await t.span('agent.guard.check', L('guardrail'), async () => {});
   });
   await t.flush!();
   for (const s of sink.spans()) {
@@ -77,18 +78,22 @@ test('every span carries agent.layer, timing is ordered, kinds follow the operat
   }
   assert.equal(byName(sink.spans(), 'chat').kind, 3);
   assert.equal(byName(sink.spans(), 'execute_tool').kind, 1);
+  assert.equal(byName(sink.spans(), 'invoke_agent').kind, 1);
+  assert.equal(byName(sink.spans(), 'agent.guard.check').kind, 1);
 });
 
 test('names follow the GenAI conventions, and can be left plain', async () => {
   const run = async (o: OtlpOptions) => {
     sink.requests.length = 0;
     const t = make(o);
-    await t.span('execute_tool', L('tool', { 'gen_ai.tool.name': 'crm__get' }), async () => {});
+    await t.span('agent.tool.call', L('tool', { 'agent.tool.name': 'crm__get' }), async () => {});
     await t.flush!();
-    return sink.spans()[0]!.name;
+    return sink.spans()[0]!;
   };
-  assert.equal(await run({}), 'execute_tool crm__get');
-  assert.equal(await run({ semconvNames: false }), 'execute_tool');
+  assert.equal((await run({})).name, 'execute_tool crm__get');
+  const plain = await run({ semconvNames: false });
+  assert.equal(plain.name, 'agent.tool.call');
+  assert.equal(attr(plain, 'gen_ai.operation.name'), 'execute_tool', 'attributes are mapped either way');
 });
 
 test('span values, errors and status: the value passes through, the same error is rethrown', async () => {
@@ -109,17 +114,18 @@ test('span values, errors and status: the value passes through, the same error i
 });
 
 test('captureContent exports error text and content attributes; off by default', async () => {
-  const content = { 'gen_ai.input.messages': '[{"role":"user"}]', 'gen_ai.tool.call.arguments': '{"id":1}', 'policy.reason': 'denied by policy', 'knowledge.query': 'salary of bob' };
+  const content = { 'gen_ai.input.messages': '[{"role":"user"}]', 'gen_ai.tool.call.arguments': '{"id":1}', 'agent.access.reason': 'denied by policy', 'agent.error': 'refused by crm', 'knowledge.query': 'salary of bob' };
   const run = async (o: OtlpOptions) => {
     sink.requests.length = 0;
     const t = make(o);
-    await t.span('x', L('tool', { ...content, 'tool.source': 'crm' }), async (s) => { s.setAttributes({ 'gen_ai.tool.call.result': 'rows' }); throw new Error('timeout talking to crm'); }).catch(() => {});
+    await t.span('x', L('tool', { ...content, 'agent.tool.source': 'crm', 'agent.run.reason': 'guard_block' }), async (s) => { s.setAttributes({ 'gen_ai.tool.call.result': 'rows' }); throw new Error('timeout talking to crm'); }).catch(() => {});
     await t.flush!();
     return sink.spans()[0]!;
   };
   const off = await run({});
   for (const k of [...Object.keys(content), 'gen_ai.tool.call.result']) assert.equal(attr(off, k), undefined, k);
-  assert.equal(attr(off, 'tool.source'), 'crm');
+  assert.equal(attr(off, 'agent.tool.source'), 'crm');
+  assert.equal(attr(off, 'agent.run.reason'), 'guard_block', 'the stop code is not free text');
   const on = await run({ captureContent: true });
   for (const k of [...Object.keys(content), 'gen_ai.tool.call.result']) assert.ok(attr(on, k) !== undefined, k);
   assert.equal(on.status?.message, 'timeout talking to crm');
@@ -137,13 +143,13 @@ test('secret-looking attributes are masked even when the stack did not do it', a
 test('events attach to the active span; span.addEvent works; orphans become spans or are dropped', async () => {
   const t = make();
   await t.span('run', L('harness'), async (s) => {
-    t.event('knowledge.error', L('knowledge', { 'knowledge.source': 'docs' }));
+    t.event('agent.knowledge.error', L('knowledge', { 'agent.knowledge.source': 'docs' }));
     s.addEvent('step', { n: 2 });
   });
   t.event('lonely', L('telemetry'));
   await t.flush!();
   const run = byName(sink.spans(), 'run');
-  assert.deepEqual(run.events!.map((e) => e.name), ['knowledge.error', 'step']);
+  assert.deepEqual(run.events!.map((e) => e.name), ['agent.knowledge.error', 'step']);
   const lonely = byName(sink.spans(), 'lonely');
   assert.equal(attr(lonely, 'agent.layer'), 'telemetry');
   assert.equal(lonely.parentSpanId, undefined);
@@ -157,37 +163,102 @@ test('events attach to the active span; span.addEvent works; orphans become span
 
 test('metrics: token histogram, counters, derived model duration and run counter, cumulative', async () => {
   const t = make();
-  await t.span('invoke_agent', L('harness', { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'support' }), async (run) => {
-    await t.span('chat', L('llm', { 'gen_ai.operation.name': 'chat', 'gen_ai.request.model': 'm1' }), async () => {
-      t.metric('gen_ai.client.token.usage', 100, L('llm', { 'gen_ai.token.type': 'input' }));
-      t.metric('gen_ai.client.token.usage', 20, L('llm', { 'gen_ai.token.type': 'output' }));
+  await t.span('agent.run', L('harness', { 'agent.name': 'support' }), async (run) => {
+    await t.span('agent.model.call', L('llm', { 'agent.model.requested': 'm1' }), async () => {
+      t.metric('agent.model.tokens', 100, L('llm', { 'agent.tokens.kind': 'input', 'agent.model.used': 'm1-2025' }));
+      t.metric('agent.model.tokens', 20, L('llm', { 'agent.tokens.kind': 'output', 'agent.model.used': 'm1-2025' }));
     });
-    t.metric('agent.guardrail.actions', 1, L('guardrail', { 'guard.action': 'redact' }));
-    t.metric('agent.guardrail.actions', 1, L('guardrail', { 'guard.action': 'redact' }));
-    run.setAttributes({ 'run.status': 'completed' });
+    t.metric('agent.guard.actions', 1, L('guardrail', { 'agent.guard.action': 'redact' }));
+    t.metric('agent.guard.actions', 1, L('guardrail', { 'agent.guard.action': 'redact' }));
+    run.setAttributes({ 'agent.run.status': 'completed' });
   });
   await t.flush!();
   const metrics = sink.metrics();
   const named = (n: string) => metrics.find((m) => m.name === n)!;
+  assert.equal(named('agent.model.tokens'), undefined, 'the language name is not exported');
   const tokens = named('gen_ai.client.token.usage');
   assert.equal(tokens.unit, '{token}');
   assert.equal(tokens.histogram.aggregationTemporality, 2);
-  const input = tokens.histogram.dataPoints.find((p: any) => p.attributes.some((a: any) => a.key === 'gen_ai.token.type' && a.value.stringValue === 'input'));
+  const key = (p: any, k: string) => p.attributes.find((a: any) => a.key === k)?.value.stringValue;
+  const input = tokens.histogram.dataPoints.find((p: any) => key(p, 'gen_ai.token.type') === 'input');
   assert.equal(input.count, '1');
   assert.equal(input.sum, 100);
   assert.equal(input.bucketCounts.length, input.explicitBounds.length + 1);
   assert.equal(input.bucketCounts.map(Number).reduce((a: number, b: number) => a + b), 1);
   assert.ok(input.attributes.some((a: any) => a.key === 'agent.layer'));
-  const guard = named('agent.guardrail.actions').sum;
+  assert.equal(key(input, 'gen_ai.operation.name'), 'chat');
+  assert.equal(key(input, 'gen_ai.response.model'), 'm1-2025');
+  assert.equal(key(input, 'agent.tokens.kind'), 'input', 'the language attribute is kept');
+  const guard = named('agent.guard.actions').sum;
   assert.equal(guard.isMonotonic, true);
   assert.equal(guard.dataPoints[0].asDouble, 2);
-  assert.equal(named('gen_ai.client.operation.duration').histogram.dataPoints[0].count, '1');
-  assert.equal(named('agent.runs').sum.dataPoints[0].attributes.find((a: any) => a.key === 'run.status').value.stringValue, 'completed');
+  const duration = named('gen_ai.client.operation.duration').histogram.dataPoints[0];
+  assert.equal(duration.count, '1');
+  assert.equal(key(duration, 'gen_ai.request.model'), 'm1');
+  const runs = named('agent.runs').sum.dataPoints[0];
+  assert.equal(key(runs, 'agent.run.status'), 'completed');
+  assert.equal(key(runs, 'gen_ai.agent.name'), 'support');
 
-  t.metric('agent.guardrail.actions', 1, L('guardrail', { 'guard.action': 'redact' }));
+  t.metric('agent.guard.actions', 1, L('guardrail', { 'agent.guard.action': 'redact' }));
   await t.flush!();
-  const again = sink.metrics().filter((m) => m.name === 'agent.guardrail.actions').at(-1);
+  const again = sink.metrics().filter((m) => m.name === 'agent.guard.actions').at(-1);
   assert.equal(again.sum.dataPoints[0].asDouble, 3, 'cumulative totals');
+});
+
+test('GenAI mapping: names, kinds, attributes and finish reasons; agent.* attributes stay', async () => {
+  const t = make();
+  await t.span('agent.run', L('harness', { 'agent.name': 'support', 'agent.run.id': 'r1' }), async () => {
+    await t.span('agent.model.call', L('llm', { 'agent.model.requested': 'm1' }), async (s) => {
+      s.setAttributes({ 'agent.model.used': 'm1-2025', 'agent.tokens.input': 12, 'agent.tokens.output': 5, 'agent.model.finish': 'tools' });
+    });
+    await t.span('agent.tool.call', L('tool', { 'agent.tool.name': 'crm__get', 'agent.tool.source': 'crm' }), async () => {});
+    await t.span('agent.guard.check', L('guardrail', { 'agent.guard.name': 'pii' }), async () => {});
+  });
+  await t.flush!();
+  const spans = sink.spans();
+  const run = byName(spans, 'invoke_agent support');
+  assert.equal(attr(run, 'gen_ai.operation.name'), 'invoke_agent');
+  assert.equal(attr(run, 'gen_ai.agent.name'), 'support');
+  assert.equal(attr(run, 'agent.name'), 'support');
+  assert.equal(attr(run, 'agent.run.id'), 'r1', 'unmapped agent.* pass unchanged');
+  const chat = byName(spans, 'chat m1');
+  assert.equal(chat.kind, 3);
+  assert.equal(attr(chat, 'gen_ai.operation.name'), 'chat');
+  assert.equal(attr(chat, 'gen_ai.request.model'), 'm1');
+  assert.equal(attr(chat, 'gen_ai.response.model'), 'm1-2025');
+  assert.equal(attr(chat, 'gen_ai.usage.input_tokens'), 12);
+  assert.equal(attr(chat, 'gen_ai.usage.output_tokens'), 5);
+  assert.deepEqual((chat.attributes.find((a) => a.key === 'gen_ai.response.finish_reasons')!.value as any).arrayValue.values, [{ stringValue: 'tool_calls' }]);
+  assert.equal(attr(chat, 'agent.model.finish'), 'tools');
+  assert.equal(attr(chat, 'agent.tokens.input'), 12);
+  const tool = byName(spans, 'execute_tool crm__get');
+  assert.equal(attr(tool, 'gen_ai.operation.name'), 'execute_tool');
+  assert.equal(attr(tool, 'gen_ai.tool.name'), 'crm__get');
+  assert.equal(attr(tool, 'agent.tool.source'), 'crm');
+  const guard = byName(spans, 'agent.guard.check');
+  assert.equal(attr(guard, 'agent.guard.name'), 'pii');
+  assert.ok(!guard.attributes.some((a) => a.key.startsWith('gen_ai.')), 'spans without a GenAI equivalent get no gen_ai attributes');
+});
+
+test('finish reasons: end, limit, tools, refused map; other and unknown values pass through', async () => {
+  const t = make();
+  const finishes = ['end', 'limit', 'tools', 'refused', 'other', 'weird'];
+  for (const finish of finishes) await t.span('agent.model.call', L('llm', { 'agent.model.finish': finish }), async () => {});
+  await t.flush!();
+  const out = sink.spans().map((s) => ((s.attributes.find((a) => a.key === 'gen_ai.response.finish_reasons')!.value as any).arrayValue.values[0].stringValue));
+  assert.deepEqual(out, ['stop', 'length', 'tool_calls', 'content_filter', 'other', 'weird']);
+});
+
+test('a failed run counts as failed; a failed model call keeps error.type on the duration metric', async () => {
+  const t = make();
+  await assert.rejects(t.span('agent.run', L('harness', { 'agent.name': 'a' }), async () => {
+    await t.span('agent.model.call', L('llm', { 'agent.model.requested': 'm1' }), async () => { throw new RangeError('x'); });
+  }));
+  await t.flush!();
+  const point = (n: string) => sink.metrics().find((m) => m.name === n)!;
+  const status = (p: any, k: string) => p.attributes.find((a: any) => a.key === k)?.value.stringValue;
+  assert.equal(status(point('agent.runs').sum.dataPoints[0], 'agent.run.status'), 'failed');
+  assert.equal(status(point('gen_ai.client.operation.duration').histogram.dataPoints[0], 'error.type'), 'RangeError');
 });
 
 test('metrics can be switched off; nothing is sent when nothing changed', async () => {
@@ -319,12 +390,12 @@ test('endpoints with credentials or that are not URLs are rejected at creation',
 
 test('a remote parent from another process: same trace, parented span, propagated flags and state', async () => {
   const t = make();
-  const parent = { traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01', tracestate: 'vendor=a' };
+  const parent = { parent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01', state: 'vendor=a' };
   let inside: ReturnType<typeof t.current>;
   await t.span('gateway.request', L('telemetry'), async () => {
     inside = t.current();
     // A nested span keeps its local parent even when given a remote one.
-    await t.span('chat', L('llm'), async () => {}, { parent: { traceparent: '00-11111111111111111111111111111111-2222222222222222-01' } });
+    await t.span('agent.model.call', L('llm'), async () => {}, { parent: { parent: '00-11111111111111111111111111111111-2222222222222222-01' } });
   }, { parent });
   assert.equal(t.current(), undefined, 'no context outside a span');
   await t.flush!();
@@ -333,18 +404,70 @@ test('a remote parent from another process: same trace, parented span, propagate
   assert.equal(root.traceId, '4bf92f3577b34da6a3ce929d0e0e4736');
   assert.equal(root.parentSpanId, '00f067aa0ba902b7');
   assert.equal(byName(spans, 'chat').parentSpanId, root.spanId);
-  assert.equal(inside?.traceparent, `00-${root.traceId}-${root.spanId}-01`);
-  assert.equal(inside?.tracestate, 'vendor=a');
+  assert.equal(inside?.parent, `00-${root.traceId}-${root.spanId}-01`);
+  assert.equal(inside?.state, 'vendor=a');
 });
 
-test('a malformed remote parent starts a new trace', async () => {
+const TRACE = '4bf92f3577b34da6a3ce929d0e0e4736';
+const SPAN = '00f067aa0ba902b7';
+const joined = async (trace: { parent: string; state?: string }) => {
+  sink.requests.length = 0;
   const t = make();
-  for (const traceparent of ['garbage', '00-00000000000000000000000000000000-00f067aa0ba902b7-01', 'ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01']) {
-    await t.span('root', L('telemetry'), async () => {}, { parent: { traceparent } });
-  }
+  let inside: ReturnType<typeof t.current>;
+  await t.span('root', L('telemetry'), async () => { inside = t.current(); }, { parent: trace });
   await t.flush!();
-  for (const s of sink.spans()) {
-    assert.equal(s.parentSpanId, undefined);
-    assert.notEqual(s.traceId, '4bf92f3577b34da6a3ce929d0e0e4736');
+  const root = sink.spans()[0]!;
+  return { root, inside: inside!, joined: root.traceId === TRACE && root.parentSpanId === SPAN };
+};
+
+test('a malformed remote parent starts a new trace', async () => {
+  const bad = [
+    'garbage', '', `00-${TRACE}-${SPAN}`, `00-${TRACE}-${SPAN}-01-extra`, `00-${TRACE}-${SPAN}-01-`,
+    `00-${TRACE.toUpperCase()}-${SPAN}-01`, `00-${TRACE}-${SPAN.toUpperCase()}-01`, `0G-${TRACE}-${SPAN}-01`, `00-${TRACE}-${SPAN}-0G`,
+    `00-${TRACE.slice(1)}-${SPAN}-01`, `00-${TRACE}0-${SPAN}-01`, `00-${TRACE}-${SPAN.slice(1)}-01`, `00-${TRACE}-${SPAN}0-01`, `00-${TRACE}-${SPAN}-1`,
+    `ff-${TRACE}-${SPAN}-01`, `00-${'0'.repeat(32)}-${SPAN}-01`, `00-${TRACE}-${'0'.repeat(16)}-01`,
+    ` 00-${TRACE}-${SPAN}-01`, `00-${TRACE}-${SPAN}-01\n`, `00_${TRACE}_${SPAN}_01`,
+  ];
+  for (const parent of bad) {
+    const r = await joined({ parent });
+    assert.equal(r.joined, false, JSON.stringify(parent));
+    assert.equal(r.root.parentSpanId, undefined, JSON.stringify(parent));
+    assert.match(r.root.traceId, /^[0-9a-f]{32}$/);
+  }
+});
+
+test('a future version with more fields is accepted and re-emitted as version 00', async () => {
+  const r = await joined({ parent: `01-${TRACE}-${SPAN}-01-extra-fields` });
+  assert.equal(r.joined, true);
+  assert.equal(r.inside.parent, `00-${TRACE}-${r.root.spanId}-01`);
+  assert.equal((await joined({ parent: `01-${TRACE}-${SPAN}-01` })).joined, true);
+  assert.equal((await joined({ parent: `01-${TRACE}-${SPAN}01-x` })).joined, false, 'extra fields follow a dash');
+});
+
+test('flags are kept', async () => {
+  const r = await joined({ parent: `00-${TRACE}-${SPAN}-00` });
+  assert.equal(r.inside.parent, `00-${TRACE}-${r.root.spanId}-00`);
+});
+
+test('tracestate: valid lists are kept; oversize, too many members and malformed ones are dropped, the trace still joins', async () => {
+  const parent = `00-${TRACE}-${SPAN}-01`;
+  const members = (n: number) => Array.from({ length: n }, (_, i) => `k${i}=v`).join(',');
+  const good = ['vendor=a', 'a=1,b=2', 'a=1 , b=2', 'tenant@sys=value with spaces', members(32), `k=${'v'.repeat(256)}`];
+  for (const state of good) assert.equal((await joined({ parent, state })).inside.state, state, state);
+  const bad = [
+    '', members(33), `k=${'v'.repeat(600)}`, `${'a'.repeat(300)}=1`, 'novalue', '=v', 'UPPER=1', '1abc=v', 'a=1,a=2', 'a=b=c', 'a="x",b', 'k=v\u0001', 'k=caf\u00e9', 'a=1;b=2',
+    `k=${'v'.repeat(257)}`, 'a@b@c=1', `${'t'.repeat(242)}@sys=1`, 'tenant@SYS=1',
+  ];
+  for (const state of bad) {
+    const r = await joined({ parent, state });
+    assert.equal(r.joined, true, state);
+    assert.equal(r.inside.state, undefined, JSON.stringify(state));
+  }
+});
+
+test('an invalid parent never fails the run', async () => {
+  const t = make();
+  for (const trace of [{ parent: undefined as unknown as string }, { parent: 5 as unknown as string }, { parent: `00-${TRACE}-${SPAN}-01`, state: 7 as unknown as string }, null as never]) {
+    assert.equal(await t.span('root', L('telemetry'), async () => 1, { parent: trace }), 1);
   }
 });

@@ -47,13 +47,13 @@ async function traceOf(service: string, min: number): Promise<JaegerSpan[]> {
 test('live: nested spans and metrics reach Jaeger and the collector', needsTelemetry, async () => {
   const service = `otlp-adapter-${Date.now()}`;
   const t = createOtlpTelemetry({ endpoint: collectorUrl, serviceName: service, intervalMs: 500 });
-  await t.span('invoke_agent', { 'agent.layer': 'harness', 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'live' }, async (run) => {
-    await t.span('guard.check', { 'agent.layer': 'guardrail', 'guard.action': 'allow' }, async () => {});
-    await t.span('chat', { 'agent.layer': 'llm', 'gen_ai.operation.name': 'chat', 'gen_ai.request.model': 'mock' }, async () => {
-      t.metric('gen_ai.client.token.usage', 12, { 'agent.layer': 'llm', 'gen_ai.token.type': 'input', 'gen_ai.response.model': 'mock' });
+  await t.span('agent.run', { 'agent.layer': 'harness', 'agent.name': 'live' }, async (run) => {
+    await t.span('agent.guard.check', { 'agent.layer': 'guardrail', 'agent.guard.action': 'allow' }, async () => {});
+    await t.span('agent.model.call', { 'agent.layer': 'llm', 'agent.model.requested': 'mock' }, async () => {
+      t.metric('agent.model.tokens', 12, { 'agent.layer': 'llm', 'agent.tokens.kind': 'input', 'agent.model.used': 'mock' });
     });
-    t.metric('agent.guardrail.actions', 1, { 'agent.layer': 'guardrail', 'guard.action': 'redact' });
-    run.setAttributes({ 'run.status': 'completed' });
+    t.metric('agent.guard.actions', 1, { 'agent.layer': 'guardrail', 'agent.guard.action': 'redact' });
+    run.setAttributes({ 'agent.run.status': 'completed' });
   });
   await t.close!();
 
@@ -61,22 +61,22 @@ test('live: nested spans and metrics reach Jaeger and the collector', needsTelem
   const run = spans.find((s) => s.name === 'invoke_agent live')!;
   assert.ok(run, 'run span');
   assert.equal(tag(run, 'agent.layer'), 'harness');
-  for (const name of ['guard.check', 'chat mock']) {
+  for (const name of ['agent.guard.check', 'chat mock']) {
     const child = spans.find((s) => s.name === name)!;
     assert.ok(child, name);
     assert.equal(child.parentSpanId, run.spanId, `${name} is a child of the run`);
     assert.equal(child.traceId, run.traceId);
   }
-  assert.equal(tag(spans.find((s) => s.name === 'guard.check')!, 'agent.layer'), 'guardrail');
+  assert.equal(tag(spans.find((s) => s.name === 'agent.guard.check')!, 'agent.layer'), 'guardrail');
   assert.equal(tag(spans.find((s) => s.name === 'chat mock')!, 'agent.layer'), 'llm');
 
   let text = '';
-  for (let i = 0; i < 20 && !(text.includes('gen_ai_client_token_usage') && text.includes('agent_guardrail_actions') && text.includes(service)); i++) {
+  for (let i = 0; i < 20 && !(text.includes('gen_ai_client_token_usage') && text.includes('agent_guard_actions') && text.includes(service)); i++) {
     await new Promise((r) => setTimeout(r, 1000));
     text = await (await fetch(prometheusUrl)).text();
   }
-  for (const name of ['gen_ai_client_token_usage', 'agent_guardrail_actions', 'gen_ai_client_operation_duration', 'agent_runs']) assert.ok(text.includes(name), name);
-  assert.match(text, /agent_guardrail_actions\S*\{[^}]*agent_layer="guardrail"/);
+  for (const name of ['gen_ai_client_token_usage', 'agent_guard_actions', 'gen_ai_client_operation_duration', 'agent_runs']) assert.ok(text.includes(name), name);
+  assert.match(text, /agent_guard_actions\S*\{[^}]*agent_layer="guardrail"/);
 });
 
 test('live: a composed stack redacts an email before the model and traces guard and model under the run', needsBoth, async () => {
@@ -102,7 +102,7 @@ test('live: a composed stack redacts an email before the model and traces guard 
   const run = spans.find((s) => s.name === 'invoke_agent assistant')!;
   assert.ok(run, 'run span');
   const children = spans.filter((s) => s.parentSpanId === run.spanId);
-  assert.ok(children.some((s) => s.name === 'guard.check' && tag(s, 'guard.action') === 'redact' && tag(s, 'agent.layer') === 'guardrail'), 'guard span under the run');
+  assert.ok(children.some((s) => s.name === 'agent.guard.check' && tag(s, 'agent.guard.action') === 'redact' && tag(s, 'agent.layer') === 'guardrail'), 'guard span under the run');
   assert.ok(children.some((s) => s.name === 'chat mock' && tag(s, 'agent.layer') === 'llm'), 'model span under the run');
   assert.equal(new Set(spans.map((s) => s.traceId)).size, 1, 'one trace');
   assert.ok(!JSON.stringify(spans).includes('jane.doe'), 'no content exported');

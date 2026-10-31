@@ -1,9 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
-import { defineAdapter, defineLimits, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal, traceContext, type Attributes, type LayerAttributes, type LimitValue, type Span, type SpanOptions, type TelemetryPort, type TraceContext } from '@agent-layers/core';
+import { defineAdapter, defineLimits, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal, type Attributes, type LayerAttributes, type LimitValue, type Span, type SpanOptions, type TelemetryPort, type TraceContext } from '@agent-layers/core';
 import { MetricsAggregator } from './metrics.ts';
 import { createClock, toAttributes, type KeyValue } from './otlp-json.ts';
-import { scrub, spanKind, spanName } from './semconv.ts';
+import { deriveMetric, mapMetric, mapSpan, scrub } from './semconv.ts';
+import { w3cCodec } from './w3c.ts';
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -31,7 +32,7 @@ export interface OtlpOptions {
   timeoutMs?: LimitValue;
   /** Characters of an error message exported with `captureContent` (default 200). */
   errorMessageChars?: number;
-  /** Name spans `chat <model>`, `invoke_agent <agent>`, `execute_tool <tool>` as the GenAI conventions do (default true). */
+  /** Name spans `chat <model>`, `invoke_agent <agent>`, `execute_tool <tool>` as the GenAI conventions do; false keeps the `agent.*` span names (default true). */
   semconvNames?: boolean;
   /** An event outside any span: `span` exports it as a zero-length span (default), `drop` ignores it. */
   orphanEvents?: 'span' | 'drop';
@@ -174,9 +175,8 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
   /** The local active span is the parent; without one, a valid remote parent from another process. */
   function open(name: string, attrs: Attributes, remote?: TraceContext): OpenSpan {
     const local = context.getStore();
-    const parsed = !local && remote ? traceContext(remote.traceparent, remote.tracestate) : undefined;
-    const [, remoteTrace, remoteSpan, remoteFlags] = parsed ? parsed.traceparent.split('-') : [];
-    const parent = local ?? (parsed ? { traceId: remoteTrace!, spanId: remoteSpan!, flags: remoteFlags!, ...(parsed.tracestate ? { tracestate: parsed.tracestate } : {}) } : undefined);
+    const parsed = !local && remote ? w3cCodec.parse(remote) : undefined;
+    const parent = local ?? (parsed ? { traceId: parsed.traceId, spanId: parsed.spanId, flags: parsed.flags ?? '01', ...(parsed.state ? { tracestate: parsed.state } : {}) } : undefined);
     return {
       traceId: parent?.traceId ?? hex(16),
       spanId: hex(8),
@@ -198,23 +198,15 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
     if (closed) return;
     const endNanos = now();
     const attributes: Attributes = { ...s.attributes, ...(s.error ? { 'error.type': s.error.type } : {}) };
-    const operation = attributes['gen_ai.operation.name'];
-    if (metrics && operation === 'chat') {
-      metrics.record('gen_ai.client.operation.duration', (performance.now() - s.startMs) / 1000, {
-        'agent.layer': 'llm', 'gen_ai.operation.name': 'chat', 'gen_ai.request.model': attributes['gen_ai.request.model'], 'error.type': attributes['error.type'],
-      });
-    } else if (metrics && operation === 'invoke_agent') {
-      metrics.record('agent.runs', 1, {
-        'agent.layer': 'harness', 'gen_ai.agent.name': attributes['gen_ai.agent.name'],
-        'run.status': attributes['run.status'] ?? (s.error ? 'failed' : undefined),
-      });
-    }
+    const exported = mapSpan(s.name, attributes, !semconvNames);
+    const derived = metrics && deriveMetric(s.name, exported.attributes, (performance.now() - s.startMs) / 1000, !!s.error);
+    if (derived) metrics!.record(derived.name, derived.value, derived.attributes);
     pending.push({
       traceId: s.traceId, spanId: s.spanId, ...(s.parentSpanId ? { parentSpanId: s.parentSpanId } : {}),
-      name: semconvNames ? spanName(s.name, attributes) : s.name,
-      kind: spanKind(typeof operation === 'string' ? operation : s.name),
+      name: exported.name,
+      kind: exported.kind,
       startTimeUnixNano: s.startNanos, endTimeUnixNano: endNanos,
-      attributes: toAttributes(attributes),
+      attributes: toAttributes(exported.attributes),
       events: s.events.map((e) => ({ timeUnixNano: e.time, name: e.name, attributes: toAttributes(e.attributes) })),
       ...(s.error ? { status: { code: STATUS_ERROR, ...(captureContent ? { message: s.error.message.slice(0, errorMessageChars) } : {}) } } : {}),
     });
@@ -222,16 +214,18 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
     if (pending.length >= maxBatch) void flush();
   }
 
+  function current(): TraceContext | undefined {
+    const s = context.getStore();
+    return s ? w3cCodec.format({ traceId: s.traceId, spanId: s.spanId, flags: s.flags, ...(s.tracestate ? { state: s.tracestate } : {}) }) : undefined;
+  }
+
   return {
     name: deps.name ?? 'otlp',
     native: () => ({
       /** W3C `traceparent` of the active span, to propagate into outbound HTTP calls. */
-      traceparent: () => { const s = context.getStore(); return s ? `00-${s.traceId}-${s.spanId}-${s.flags}` : undefined; },
+      traceparent: () => current()?.parent,
     }),
-    current() {
-      const s = context.getStore();
-      return s ? { traceparent: `00-${s.traceId}-${s.spanId}-${s.flags}`, ...(s.tracestate ? { tracestate: s.tracestate } : {}) } : undefined;
-    },
+    current,
     async span<T>(name: string, attrs: LayerAttributes, fn: (span: Span) => Promise<T>, opts?: SpanOptions): Promise<T> {
       const s = open(name, attrs, opts?.parent);
       const handle: Span = {
@@ -259,7 +253,9 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
       }
     },
     metric(name, value, attrs) {
-      if (!closed) metrics?.record(name, value, scrub(attrs, false));
+      if (closed || !metrics) return;
+      const mapped = mapMetric(name, scrub(attrs, false));
+      metrics.record(mapped.name, value, mapped.attributes);
     },
     flush: () => flush(),
     async close() {
