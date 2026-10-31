@@ -231,7 +231,7 @@ Slots under `layers`:
 | `runtime`, `state` | RuntimePort, StatePort | single |
 | `knowledge`, `ingestion` | KnowledgePort, IngestionPort | keyed by source name |
 | `memory` | MemoryPort | single |
-| `tools` | ToolPort | keyed by source name (tool names become `<source>__<tool>`) |
+| `tools` | ToolPort | keyed by source name (tool names become `<source>__<tool>`; no source name may start with another one followed by `__`) |
 | `identity`, `credentials`, `authorization`, `approval` | IdentityPort, CredentialPort, AuthorizationPort, ApprovalPort | single |
 | `guardrails` | GuardPort | list; each entry may set `stages` |
 | `channels`, `triggers` | ChannelPort, TriggerPort | list |

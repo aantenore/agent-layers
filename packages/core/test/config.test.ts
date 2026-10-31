@@ -114,3 +114,13 @@ test('gateway block: profiles merge into the base and ${env:} is interpolated', 
   assert.throws(() => parseConfig(JSON.stringify({ gateway: { port: 'x' } })), ConfigError);
   assert.deepEqual(parseConfig('{}').gateway, {});
 });
+
+test('tool source names may not extend another source name with the separator', () => {
+  const tools = (names: string[]) => Object.fromEntries(names.map((n) => [n, { adapter: 'http-tools' }]));
+  assert.throws(() => resolveProfile({ layers: { tools: tools(['crm', 'crm__admin']) } }), (e: unknown) =>
+    e instanceof ConfigError && e.errors.some((m) => /tool source "crm__admin" starts with "crm__"/.test(m)));
+  assert.throws(() => parseConfig(JSON.stringify({ layers: { tools: tools(['knowledge__x']), knowledge: { wiki: { adapter: 'markdown-knowledge' } } } })),
+    /tool source "knowledge__x" starts with "knowledge__"/, 'knowledge becomes a tool source too');
+  assert.doesNotThrow(() => resolveProfile({ layers: { tools: tools(['crm', 'crm2', 'crm_admin']) } }));
+  assert.throws(() => resolveProfile({ layers: { tools: tools(['a']) }, profiles: { p: { layers: { tools: tools(['a__b']) } } } }, 'p'), /\(profile p\)/);
+});

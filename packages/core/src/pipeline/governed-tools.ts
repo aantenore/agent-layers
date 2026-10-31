@@ -12,6 +12,18 @@ import { CORE_VOCABULARIES, type Vocabularies } from '../vocab.ts';
 import { sha256, stableStringify } from '../util.ts';
 import { runGuards } from './guards.ts';
 
+/** Between a tool source name and the tool name (`<source>__<tool>`). */
+export const TOOL_SEPARATOR = '__';
+
+/**
+ * Source names that make prefixed tool names ambiguous: a source named `<other><separator>...` collides with source
+ * `other` (`a` and `a__b` both claim `a__b__x`). One message per pair; empty when the names are safe.
+ */
+export function ambiguousToolSources(names: readonly string[], separator = TOOL_SEPARATOR): string[] {
+  return names.flatMap((b) => names.filter((a) => a !== b && b.startsWith(`${a}${separator}`))
+    .map((a) => `tool source "${b}" starts with "${a}${separator}": tool names of "${a}" and "${b}" would be ambiguous`));
+}
+
 export interface GovernedToolsOptions {
   /** Local authorization rules, evaluated first. */
   policy?: readonly PolicyRule[];
@@ -47,7 +59,7 @@ interface Denial { reason: string; approval?: string }
  * carries `ext["sdk.outcome"]`; a call waiting for an approval also `ext["sdk.approval"]` (the approval id).
  */
 export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: GovernedToolsOptions = {}): ToolPort {
-  const sep = opts.separator ?? '__';
+  const sep = opts.separator ?? TOOL_SEPARATOR;
   const vocab = opts.vocabularies ?? CORE_VOCABULARIES;
   const known = new Map<string, Entry>();
   const tel = (ctx: CallContext) => opts.telemetry ?? ctx.telemetry ?? noopTelemetry;
@@ -67,7 +79,8 @@ export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: G
 
   async function lookup(name: string, ctx: CallContext): Promise<Entry | undefined> {
     if (known.has(name)) return known.get(name);
-    const source = Object.keys(ports).find((s) => name.startsWith(`${s}${sep}`));
+    // Longest source first, so a source whose name extends another's still gets its own tools.
+    const source = Object.keys(ports).sort((a, b) => b.length - a.length).find((s) => name.startsWith(`${s}${sep}`));
     if (!source) return undefined;
     await listSource(source, ctx).catch(() => []);
     return known.get(name);

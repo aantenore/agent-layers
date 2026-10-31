@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { governedTools, type AccessQuestion, type ApprovalPort, type CallContext } from '../src/index.ts';
+import { ambiguousToolSources, governedTools, type AccessQuestion, type ApprovalPort, type CallContext } from '../src/index.ts';
 import { ctx, fakeGuard, fakeTools, recorder } from './helpers.ts';
 
 const user = { id: 'alice', kind: 'user' as const, roles: ['analyst'], scopes: ['read'], credential: 'eyJ.super-secret-token' };
@@ -141,4 +141,14 @@ test('approvals are found again by session, caller and arguments; an approval de
   assert.equal(store.at(-1)!.used, true, 'the waiting call consumed the approval');
   decideOnWait = undefined;
   assert.equal((await waiting.callTool('t__pay', {}, s9)).ext?.['sdk.outcome'], 'pending');
+});
+
+test('a source whose name extends another source name still routes to its own tools (longest source first)', async () => {
+  const log: { name: string; args: unknown; ctx: CallContext }[] = [];
+  const tools = governedTools({ a: fakeTools([{ name: 'x', risk: 'read' }], log), a__b: fakeTools([{ name: 'x', risk: 'read' }], log) });
+  const out = await tools.callTool('a__b__x', {}, ctx());
+  assert.equal(out.ok, true);
+  assert.equal(log[0]!.name, 'x', 'the a__b source answered, not source a with tool "b__x"');
+  assert.deepEqual(ambiguousToolSources(['a', 'a__b', 'ab', 'c']), ['tool source "a__b" starts with "a__": tool names of "a" and "a__b" would be ambiguous']);
+  assert.deepEqual(ambiguousToolSources(['api', 'api2', 'apis']), []);
 });

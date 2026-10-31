@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import type { Tier } from './adapter.ts';
 import { configSchema } from './config-schema.ts';
 import { ConfigError } from './errors.ts';
+import { ambiguousToolSources } from './pipeline/governed-tools.ts';
 import { coerceLimits, limitProblem, validateLimits, type LimitValue } from './limits.ts';
 import { mappingsProblems, mergeMappings, type MappingsConfig } from './mappings.ts';
 import type { ModelSettings } from './ports/model.ts';
@@ -266,12 +267,21 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
       (layers as Record<string, unknown>)[key] = Object.fromEntries(Object.entries(v).filter(([, e]) => e != null));
     }
   }
+  const sourceErrors = ambiguousToolSources(toolSourceNames(layers)).map((e) => `layers.tools: ${e}${profile ? ` (profile ${profile})` : ''}`);
+  if (sourceErrors.length) throw new ConfigError(sourceErrors);
   return {
     ...(config.name ? { name: config.name } : {}),
     ...(profile ? { profile } : {}),
     chain, tier, ...(requires ? { requires } : {}),
     plugins: config.plugins ?? [], layers, policy, pipeline, gateway, limits, vocabularies, mappings, agents: config.agents ?? {}, dir,
   };
+}
+
+/** Names of the tool sources the stack aggregates: the `tools` slot, and `knowledge` when knowledge sources can become tools. */
+function toolSourceNames(layers: LayersConfig): string[] {
+  const names = Object.keys(isPlainObject(layers.tools) ? layers.tools : {});
+  if (isPlainObject(layers.knowledge) && Object.keys(layers.knowledge).length && !names.includes('knowledge')) names.push('knowledge');
+  return names;
 }
 
 export interface LoadOptions {
