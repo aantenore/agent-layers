@@ -101,10 +101,10 @@ node --conditions=source --test "tests/**/*.test.ts"              # smoke datase
 node --conditions=source ../../packages/cli/src/cli.ts diff prototype production
 ```
 
-Once the packages are published the same commands are `npx agent-layers init my-agent`, then `check`, `dev`,
-`test`, `eval` and `deploy --profile production`. `examples/minimal` is what `init` generates: all eleven layers
-wired, a prototype profile on zero-dependency adapters, and pilot and production profiles that name the reference
-adapters.
+Outside the repository, start from the published packages: `npx @agent-layers/cli init my-agent`, `npm install`,
+then `npx agent-layers check`, `dev`, `test`, `eval` and `deploy --profile production`. `examples/minimal` is what
+`init` generates: all eleven layers wired, a prototype profile on zero-dependency adapters, and pilot and production
+profiles that name the reference adapters.
 
 ## Layout
 
@@ -130,7 +130,8 @@ make test LAYER=knowledge                            # live test of one referenc
 npm run docs:check                                   # links, layer tables, ports, env, adapter catalog
 ```
 
-Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). Core paths need a spec change first.
+Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). Core paths need a spec change first. Releases:
+[RELEASING.md](RELEASING.md). Vulnerabilities: report them privately, see [SECURITY.md](SECURITY.md).
 
 ## Licenses of the reference technologies
 

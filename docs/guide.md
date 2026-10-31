@@ -6,7 +6,7 @@ to production. Concepts are in [architecture.md](architecture.md).
 ## Quickstart: init and start developing
 
 ```bash
-npx agent-layers init my-agent          # --template minimal|rag, --runtime <adapter>, --name, --agent, --force
+npx @agent-layers/cli init my-agent    # --template minimal|rag, --runtime <adapter>, --name, --agent, --force
 cd my-agent && npm install
 npx agent-layers check                  # config, adapters, readiness gate, conformance (prototype profile)
 npx agent-layers dev                    # talk to the agent, one trace line per layer
@@ -23,7 +23,9 @@ npx agent-layers gateway                # the same stack on http://127.0.0.1:878
 profile. The prototype profile uses only zero-dependency adapters, so it runs anywhere. `examples/minimal` is the
 same template, generated.
 
-Inside this repository, use `node --conditions=source packages/cli/src/cli.ts <command>` instead of `npx`.
+Run `init` through the scoped package name: the unscoped `agent-layers` name on npm is an unrelated package. After
+`npm install` the CLI is a dev dependency of the project, so `npx agent-layers` runs the local binary. Inside this
+repository, use `node --conditions=source packages/cli/src/cli.ts <command>` instead of `npx`.
 
 ## Concepts in one paragraph each
 

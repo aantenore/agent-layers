@@ -6,8 +6,9 @@ Adapters are independent packages, so anyone can add and maintain one without to
 
 1. Copy [`adapters/_template`](adapters/_template) to `adapters/<name>`. Name it after the standard or technology it
    maps: `openai-compatible`, `qdrant`, `presidio`.
-2. In `package.json`: name `@agent-layers/adapter-<name>`, remove `"private": true`, keep `@agent-layers/core` as a
-   peer dependency. Runtime dependencies only when the technology needs a client library.
+2. In `package.json`: name `@agent-layers/adapter-<name>`, remove `"private": true`, add
+   `"publishConfig": { "access": "public" }`, set `repository.directory` and `homepage` to `adapters/<name>`, keep
+   `@agent-layers/core` as a peer dependency. Runtime dependencies only when the technology needs a client library.
 3. In `src/index.ts`: a factory plus a `defineAdapter` descriptor with `layer`, `port`, `name` (= `<name>`),
    `direction`, `maps` (`standard` or `technology`), `portVersion: PORT_VERSIONS.<Port>`, `tiers` and
    `optionsSchema`. Technology-specific features go behind `native()` or the `extra` / `meta` fields. Every timeout,
@@ -43,6 +44,18 @@ maintainers listed in CODEOWNERS. A core change starts with a spec change:
 If the stack config schema changes, regenerate it with `npm run gen:schema -w @agent-layers/core`.
 Documentation follows the same rule: a changed layer, port or environment variable must be reflected in `docs/`;
 `npm run docs:check` catches the drift (see below).
+
+## Build and release
+
+`npm run build` builds every package in dependency order (`scripts/build-packages.mjs`; `--clean` removes `dist/`
+first). Packages ship `dist/` (JavaScript and type declarations), `README.md` and `LICENSE`; the `source` export
+condition points at `src/` for development inside the repository only.
+
+- `npm run release:dry`: clean build, then `npm pack --dry-run` of every package, to review the tarball contents.
+- `npm run release`: clean build, typecheck, package tests, `docs:check`, then `npm publish --workspaces --access public`.
+
+The steps for the maintainer, including the npm organization and the GitHub Actions workflow, are in
+[RELEASING.md](RELEASING.md).
 
 ## Style
 
