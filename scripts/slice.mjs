@@ -1,10 +1,11 @@
 // The vertical slice: the same agent, tools and knowledge (examples/slice) on three runtimes and three profiles,
 // through the gateway, with failure injection in production and layer attribution from the recorded telemetry.
 //
-//   node --conditions=source scripts/slice.mjs [--only prototype,pilot,production] [--keep]
+//   node --conditions=source scripts/slice.mjs [--only prototype,pilot,production] [--minimal] [--keep]
 //
 // Starts what each step needs (reference services with docker compose, the gateway, the Python agent) with bounded
-// timeouts and stops all of it at the end, volumes included; --keep leaves the services up. Results go to
+// timeouts and stops all of it at the end, volumes included; --keep leaves the services up. --minimal asks only the tool
+// question, on reinloop and Pydantic AI, skips the comparison cell and injects the faults on reinloop only. Results go to
 // examples/slice/.agent-layers/slice-results.json and .md. Needs uv (the Python agent runs in every tier); pilot and
 // production also need Docker and Ollama serving qwen3:4b on the host.
 import { spawn, spawnSync } from 'node:child_process';
@@ -26,6 +27,7 @@ const args = process.argv.slice(2);
 const onlyAt = args.indexOf('--only');
 const only = new Set((args.find((a) => a.startsWith('--only='))?.slice(7) ?? (onlyAt >= 0 ? args[onlyAt + 1] : undefined) ?? 'prototype,pilot,production').split(','));
 const keep = args.includes('--keep');
+const minimal = args.includes('--minimal');
 
 const PORTS = { gateway: Number(process.env.SLICE_GATEWAY_PORT ?? 8799), agent: Number(process.env.SLICE_AGENT_PORT ?? 9109) };
 const GW = `http://127.0.0.1:${PORTS.gateway}`;
@@ -217,7 +219,10 @@ const RUNTIMES = [
   { id: 'reinloop', label: 'reinloop (in-process)', suffix: '-reinloop' },
   { id: 'pydantic', label: 'Pydantic AI (remote, A2A)', suffix: '-pydantic' },
 ];
-const results = { started: new Date().toISOString(), cells: [], checks: [], security: [], failures: [], diffs: {}, skipped: [] };
+/** What a run covers: everything, or with --minimal one question on the two production-capable runtimes. */
+const ASKED = minimal ? QUESTIONS.filter((q) => q.id === 'tool') : QUESTIONS;
+const RUN_ON = minimal ? RUNTIMES.filter((r) => r.id !== 'basic') : RUNTIMES;
+const results = { started: new Date().toISOString(), mode: minimal ? 'minimal' : 'full', cells: [], checks: [], security: [], failures: [], diffs: {}, skipped: [] };
 
 function profileFor(tier, runtime) {
   if (tier === 'production') return runtime.id === 'reinloop' ? 'production' : runtime.id === 'pydantic' ? 'production-pydantic' : 'production-basic';
@@ -254,7 +259,7 @@ async function runCell(tier, runtime, modelGroup = REAL_MODEL) {
   const agent = runtime.id === 'pydantic' ? await pythonAgent() : undefined;
   const gw = await gateway(profile, cell, { SLICE_MODEL: modelGroup });
   try {
-    for (const q of QUESTIONS) {
+    for (const q of ASKED) {
       const r = await ask(await tokens(tier).alice(), q.text);
       const a = attribute(records(cell, r.traceId));
       const jaeger = tier === 'prototype' ? undefined : await jaegerSpans(r.traceId, a.spans);
@@ -365,7 +370,7 @@ try {
   const sync = sh('uv', ['sync', '--frozen', '--quiet'], { cwd: PY_DIR, timeoutS: 300 });
   if (sync.code !== 0) throw new Error(`uv sync failed:\n${sync.out}`);
 
-  if (only.has('prototype')) for (const rt of RUNTIMES) await runCell('prototype', rt);
+  if (only.has('prototype')) for (const rt of RUN_ON) await runCell('prototype', rt);
 
   if (only.has('pilot') || only.has('production')) {
     up('cache');
@@ -376,18 +381,18 @@ try {
     if (ingest.code !== 0) throw new Error(`ingest failed:\n${ingest.out}`);
   }
   if (only.has('pilot')) {
-    for (const rt of RUNTIMES) await runCell('pilot', rt);
+    for (const rt of RUN_ON) await runCell('pilot', rt);
     // The comparison cell: the same profile on the reasoning model, quality against latency.
-    await runCell('pilot', RUNTIMES[0], 'default');
+    if (!minimal) await runCell('pilot', RUNTIMES[0], 'default');
   }
 
   if (only.has('production')) {
     up('identity');
     up('guardrail', ['presidio-analyzer', 'presidio-anonymizer']);
     await productionExtras();
-    results.skipped.push({ cell: 'production × basic-runtime', why: 'basic-runtime is a prototype-tier adapter: the readiness gate refuses it (see check production-basic)' });
-    for (const rt of RUNTIMES.filter((r) => r.id !== 'basic')) await runCell('production', rt);
-    for (const rt of RUNTIMES.filter((r) => r.id !== 'basic')) await inject(rt);
+    if (!minimal) results.skipped.push({ cell: 'production × basic-runtime', why: 'basic-runtime is a prototype-tier adapter: the readiness gate refuses it (see check production-basic)' });
+    for (const rt of RUN_ON.filter((r) => r.id !== 'basic')) await runCell('production', rt);
+    for (const rt of RUN_ON.filter((r) => r.id !== 'basic' && (!minimal || r.id === 'reinloop'))) await inject(rt);
   }
 } catch (err) {
   console.error(err instanceof Error ? err.stack : String(err));
