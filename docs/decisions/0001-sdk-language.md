@@ -393,7 +393,7 @@ the adapter's defaults. For `out`, the source is the language shape and the targ
 |---|---|
 | `from` | JSON Pointer into the source, or a list of pointers (for `join`). Omit for a constant. |
 | `to` | JSON Pointer into the target. Writing a path copies; copying then `drop`ping the old path renames. |
-| `default` | Value used when `from` is missing or null. |
+| `default` | Value written when `from` is missing or null. Final: it is a target value, never `split` or looked up in `map`. |
 | `map` | Value table: `{ "<source value>": <target value>, "*": <fallback> }`. Keys are the source scalar as a string. A value the table does not list, without `"*"`, is not written. |
 | `join` | `"union"` concatenates lists without duplicates; a string joins strings with that separator. |
 | `split` | Separator that turns a string into a list. |
@@ -431,6 +431,8 @@ core copies `attrs` into `AccessQuestion.target.attrs`, and the AuthZEN adapter 
   { "from": "/caller/ext/oidc.tenant", "to": "/subject/properties/tenant" }
 ]}
 ```
+
+A tool without `destructiveHint` gets `exec`: the default is written as is, not looked up in `map`.
 
 Knowledge source metadata to passage fields:
 

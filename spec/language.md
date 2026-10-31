@@ -177,7 +177,7 @@ Rules run in order. For `in`, the source is the native document (read-only) and 
 | --- | --- |
 | `from` | JSON Pointer into the source, or a list of pointers (for `join`). Omit for a constant. |
 | `to` | JSON Pointer into the target. Writing a path copies; copying then dropping the old path renames. |
-| `default` | Value used when `from` is missing or null. |
+| `default` | Value written when `from` is missing or null. Final: it is a target value, never `split` or looked up in `map`. |
 | `map` | Value table `{ "<source value>": <target value>, "*": <fallback> }`. Keys are the source scalar as a string. A value the table does not list, without `"*"`, is not written (and is dropped from a list). |
 | `join` | `"union"` concatenates lists without duplicates; a string joins strings with that separator. |
 | `split` | Separator that turns a string into a list. |

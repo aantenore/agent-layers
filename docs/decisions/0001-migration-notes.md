@@ -174,7 +174,8 @@ Telemetry names (old → new): `invoke_agent` → `agent.run`; `chat` → `agent
 - Tools in: `inputSchema` → `params`; `title` → `attrs.title` if wanted; `annotations` → `ext["mcp.annotations"]`,
   `_meta` → `ext["mcp.meta"]`. Risk as `mappingDefaults.in` on `ToolSpec` (replaceable by config):
   `[{from: '/annotations/destructiveHint', to: '/risk', map: {true: 'exec', false: 'write'}, default: 'exec'},
-  {from: '/annotations/readOnlyHint', to: '/risk', map: {true: 'read'}}]` (an unlisted value is not written). Apply
+  {from: '/annotations/readOnlyHint', to: '/risk', map: {true: 'read'}}]` (an unlisted value is not written; the
+  default is final, so a missing hint is `exec`). Apply
   `ctx.mappings.in(mcpTool, spec)`.
 - Call: `args` sent as the object (no string round trip). Result: text items of `content[]` joined → `text`;
   `structuredContent` → `data`; `ok = !isError`; images and resources → `ext["mcp.content"]`.
@@ -396,9 +397,10 @@ Telemetry names (old → new): `invoke_agent` → `agent.run`; `chat` → `agent
   `input.subject.properties.authenticated` → `input.caller.kind != "anonymous"`, `input.resource.properties.risk` →
   `input.target.risk`.
 - Agent files with `params` (`reference/harness/agents/assistant.md`, `reference/eval/agents/smoke.md`,
-  `reference/eval/agents/diagnose.md`) → `settings: { temperature: 0, maxOutputTokens: 2048 }`.
-- Layer tests that assert old reasons (`guardrail:`), events (`run_start`, `tool_call`, `tool_result`,
-  `model_response`), spans (`invoke_agent`, `chat`, `execute_tool`) or `isError`/`content` → new names.
+  `reference/eval/agents/diagnose.md`) stay: they are reinloop agent files (loaded by reinloop, which refuses
+  `settings`), not SDK agent files.
+- Layers outside identity and guardrail run on reinloop directly: their `params`, events, spans and `isError` are
+  reinloop's own language or its OpenTelemetry GenAI export, not the SDK's, and do not change.
 - `reference/guardrail/README.md`: link `guard-request.json` → `guard-check.json`.
 
 ### `examples/*`

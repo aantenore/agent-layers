@@ -36,6 +36,17 @@ test('every rule kind: copy, default, map, join union, join string, split, drop,
   assert.deepEqual(run([{ to: '/kind', default: 'user' }], source), { kind: 'user' });
 });
 
+test('a default is final: written as is, never split or looked up in the map table', () => {
+  const rule: MappingRule = { from: '/annotations/destructiveHint', to: '/risk', map: { true: 'exec', false: 'write' }, default: 'exec' };
+  assert.deepEqual(run([rule], {}), { risk: 'exec' }, 'missing source: the default, although the table does not list it');
+  assert.deepEqual(run([rule], { annotations: { destructiveHint: null } }), { risk: 'exec' }, 'null source: the default');
+  assert.deepEqual(run([rule], { annotations: { destructiveHint: false } }), { risk: 'write' }, 'a present value still goes through the table');
+  assert.deepEqual(run([{ from: '/scope', to: '/scopes', split: ' ', default: 'a b' }], {}), { scopes: 'a b' }, 'not split');
+  assert.deepEqual(run([{ from: '/x', to: '/y', map: { a: 1 }, default: { keep: true } }], {}), { y: { keep: true } }, 'any value, copied');
+  assert.deepEqual(rulesAgainstShape([{ from: '/h', to: '/risk', map: { true: 'exec' }, default: 'nuclear' }], 'in', 'ToolSpec'),
+    ['in[0].default: "nuclear" is not a risk value'], 'a default with a source is validated as a target value');
+});
+
 test('rules never change the source or the given target', () => {
   const source = { a: { b: 1 } };
   const target = { t: { u: 1 } };

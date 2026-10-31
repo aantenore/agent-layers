@@ -17,7 +17,7 @@ export interface MappingRule {
   from?: string | string[];
   /** JSON Pointer into the target. Writing copies; copying then dropping the old path renames. */
   to?: string;
-  /** Used when `from` is missing or null. */
+  /** Value written as is when `from` is missing or null: final, never passed through `split` or `map`. */
   default?: unknown;
   /** Value table: source scalar (as a string) → target value; `"*"` is the fallback. Unlisted values are not written. */
   map?: Record<string, unknown>;
@@ -137,8 +137,8 @@ function valueOf(rule: MappingRule, source: unknown): unknown {
       v = strings.length ? strings.join(rule.join) : undefined;
     } else v = values[0];
   } else if (rule.from !== undefined) v = getPointer(source, rule.from);
-  if (v === undefined || v === null) v = rule.default;
-  if (v === undefined) return undefined;
+  // The default is a target value: it is written as is, never split or looked up in the `map` table.
+  if (v === undefined || v === null) return clone(rule.default);
   if (typeof rule.split === 'string' && typeof v === 'string') v = v.split(rule.split).map((x) => x.trim()).filter(Boolean);
   if (rule.map) {
     const table = rule.map;
@@ -294,7 +294,8 @@ export function rulesAgainstShape(rules: readonly MappingRule[], direction: Mapp
           for (const [k, target] of Object.entries(r.map)) {
             if (!vocab.has(v, target)) out.push(`${at}.map["${k}"]: "${String(target)}" is not a ${v} value`);
           }
-        } else if (v && r.from === undefined && r.default !== undefined && !vocab.has(v, r.default)) {
+        }
+        if (v && r.default !== undefined && !vocab.has(v, r.default)) {
           out.push(`${at}.default: "${String(r.default)}" is not a ${v} value`);
         }
       }

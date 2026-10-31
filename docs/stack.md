@@ -199,7 +199,7 @@ target is the wire document):
 |---|---|
 | `from` | JSON Pointer into the source, or a list of pointers (for `join`). Omit for a constant. |
 | `to` | JSON Pointer into the target. |
-| `default` | Used when `from` is missing or null. |
+| `default` | Written when `from` is missing or null. Final: a target value, never `split` or looked up in `map`. |
 | `map` | `{ "<source value>": <target value>, "*": <fallback> }`. A value not listed, without `"*"`, is not written. |
 | `join` | `"union"` merges lists without duplicates; another string joins strings with it. |
 | `split` | Separator that turns a string into a list. |
