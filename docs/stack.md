@@ -1,141 +1,81 @@
 # The stack on one page
 
-agent-layers is an open-source, runtime-agnostic agent platform. It has eleven layers, L0 to L10. L0-L9 cover what
-runs; L10 is the interface.
+An agent in production needs eleven layers. agent-layers names them, gives each one a port, and composes adapters
+for them from a config. The core is technology neutral: every technology choice below is an adapter or a reference
+setup, and each can be swapped by changing one line of config. The design is in [architecture.md](architecture.md).
 
-agent-layers is the container. The agent runtime is one component inside it, not the platform: L2 defines a runtime
-contract, and [reinloop](https://github.com/aantenore/reinloop) is its first binding (the reference runtime). LangGraph,
-Pydantic AI, the OpenAI Agents SDK and Google ADK are candidate runtimes. Planned layout: `runtimes/<name>/` holds only
-configuration and the binding; the runtime is a versioned dependency, never vendored source.
+## Layers by plane
 
-One rule applies to every layer:
+| Plane | L | Layer (id) | The question it answers | Ports | Reference adapters |
+|---|---|---|---|---|---|
+| Foundation | L0 | [Infrastructure & delivery](layers/infra.md) (`infra`) | Where does it run and how does it get there? | DeployPort, SecretPort | `compose-deploy` (Compose Spec); OpenBao, Kubernetes and OpenTofu planned |
+| Model | L1 | [Models](layers/llm.md) (`llm`) | Who thinks? | ModelPort | `openai-compatible` (Ollama, vLLM, LiteLLM, hosted APIs); `mock-model` for offline work |
+| Model | L2 | [Model access](layers/cache.md) (`cache`): routing, fallback, quotas, cache | Which model, at what cost and latency? | RouterPort, CachePort | `static-router`, `memory-cache`; a model gateway behind `openai-compatible`; Valkey planned |
+| Agent | L3 | [Agent runtime](layers/harness.md) (`harness`) | How does the agent loop run and keep state? | RuntimePort, StatePort | `basic-runtime`, `memory-state`; reinloop and agent-to-agent runtimes planned |
+| Agent | L4 | [Knowledge & memory](layers/knowledge.md) (`knowledge`) | What does it know? | KnowledgePort, MemoryPort, IngestionPort | `markdown-knowledge`; Qdrant, SQL, SPARQL planned |
+| Agent | L5 | [Tools](layers/tool.md) (`tool`) | What can it do? | ToolPort | `functions`; MCP and OpenAPI planned |
+| Control | L6 | [Identity & access](layers/identity.md) (`identity`) | Who is it, on whose behalf, and what is allowed? | IdentityPort, CredentialPort, AuthorizationPort, ApprovalPort | `static-identity` (dev only), `rules-authorization`, `memory-approval`; OIDC (Keycloak or any IdP) and OPA planned |
+| Control | L7 | [Guardrails](layers/guardrail.md) (`guardrail`) | Is this content acceptable? | GuardPort | `regex-guard`; Presidio and LLM Guard planned |
+| Experience | L8 | [Interfaces, channels & triggers](layers/interface.md) (`interface`) | Who talks to it and what starts it? | ChannelPort, TriggerPort | `terminal-channel`; OpenAI-compatible chat API, MCP server, A2A, CloudEvents planned |
+| Insight | L9 | [Telemetry & observability](layers/telemetry.md) (`telemetry`) | What happened? | TelemetryPort | `console-telemetry`, `jsonl-telemetry`; OTLP (to Langfuse, Jaeger or any collector) planned |
+| Insight | L10 | [Evaluation & improvement](layers/eval.md) (`eval`) | Was it good, and if not, which layer failed? | EvaluatorPort, FeedbackPort | `expected-eval`; judge and per-layer evaluators planned |
 
-> **Standard where it exists. SDK + conformance check where it does not. The reference is always free and swappable.**
+The full catalog with status and maturity is in [adapters.md](adapters.md). Layer ids are stable; the numbers are
+for reading only. Reference setups (compose files and live tests) live in `reference/<layer id>/`.
 
-Each layer is described with the same five fields:
-
-1. **Responsibility.** What the layer does and nothing else.
-2. **Standard.** The open standard it speaks, if one exists.
-3. **Extension point.** The code you write to plug in something new.
-4. **Reference implementation.** A free, open-source default you can replace.
-5. **Adapter SDK + conformance.** Where no standard exists, a typed interface plus a check that proves an adapter
-   behaves.
-
-## Layers
-
-| L | Layer | Responsibility | Standard | Extension point | Reference (free, swappable) | Adapter SDK + conformance | Around it |
-|---|---|---|---|---|---|---|---|
-| 0 | [Infrastructure & delivery](layers/L0-infra.md) | Run, provision and ship everything else | OCI, Compose Spec, Kubernetes API / Helm, OpenTofu (HCL), Vault-compatible secrets API | Deploy target adapter: `compose` or `k8s`; OpenTofu modules per cloud | Docker Compose, Traefik, OpenBao, OpenTofu | Deploy-target contract (images, env, secret refs in; endpoints out) | Ingress (Traefik), secrets (OpenBao), CI/CD + GitOps (Argo CD) |
-| 1 | [Models](layers/L1-llm.md) | Generate completions and tool calls | OpenAI Chat Completions, Anthropic Messages | `Provider` | Ollama + `qwen3:4b` (Apache-2.0) | Provider conformance check | - |
-| 2 | [Agent runtime](layers/L2-harness.md) | Run the agent loop: prompts, tools, policy, budgets, durability | Markdown agent files, Agent Skills | Middleware, patterns, `RunStore` | reinloop (first runtime binding; swappable) | Runtime contract | Session state (Postgres store), workers, queues and scheduled triggers (CloudEvents), know-how as Skills |
-| 3 | [Knowledge & memory](layers/L3-knowledge.md) | Give agents information that is not in the model | Per source type (see below); MCP for transport | `KnowledgeSource` | Qdrant, wiki folder, Apache Jena Fuseki, MCP Toolbox for Databases | `KnowledgeSource` + conformance | Ingestion (Docling), long-term memory, optional GraphRAG (Graphiti, LightRAG) |
-| 4 | [Tools](layers/L4-tools.md) | Let agents act on the outside world | MCP, OpenAPI 3 | Any JS function (`defineTool`) | MCP reference servers, declarative HTTP tools | - | OpenAPI import, sandbox for code-executing tools |
-| 5 | [Identity & access](layers/L5-identity.md) | Know who calls, act with the right credentials, decide what is allowed | OIDC / OAuth 2, RFC 8693, client credentials, OpenID AuthZEN | `IdentityVerifier`, `CredentialProvider`, `Authorizer` | Keycloak + OPA | Authorizer adapters + conformance | Tokens forwarded to MCP / HTTP tools, never logged |
-| 6 | [Guardrails](layers/L6-guardrails.md) | Inspect inputs, outputs and tool traffic; allow, block or redact | none | `Guard` | Presidio + LLM Guard | `Guard` + HTTP guard contract + conformance | Zero-infra regex guard, audit events |
-| 7 | [Model gateway (cache & router)](layers/L7-cache-router.md) | Cache, route and cap model calls | OpenAI-compatible gateway | `CacheStore`, `ModelRouter` | LiteLLM + Valkey | `ModelRouter` + conformance | In-process rule router, fallbacks, quotas |
-| 8 | [Telemetry & observability](layers/L8-telemetry.md) | Traces and metrics for every run | OpenTelemetry + GenAI semantic conventions | `Sink` | OTel Collector + Langfuse + Jaeger | - | `agent.layer` on every span; metrics for tokens, cost, denials, guardrail actions |
-| 9 | [Evaluation & improvement](layers/L9-eval.md) | Measure quality, find the layer a failure belongs to | none (promptfoo is the de facto tool) | `Evaluator` | promptfoo | `Evaluator` + dataset / result JSONL | Replay of stored runs, per-layer signals, diagnose agent, improvement loop |
-| 10 | [Interfaces & channels](layers/L10-interface.md) | How people, apps and other agents talk to an agent | OpenAI-compatible chat API, MCP server, A2A, AG-UI | Channel adapters | LibreChat (MIT) | Channel adapter + conformance | - |
-
-### Adapter forms
-
-For layers without a standard (L3 knowledge, L6 guardrails, L9 evaluation) the platform owns a language-neutral
-contract (JSON Schema + HTTP, see [contracts.md](contracts.md)). Every adapter can exist in two forms:
-
-- **(a) In-process binding** inside a runtime. Fastest; written in the runtime's language (an optimisation).
-- **(b) HTTP service** in the platform that implements the HTTP contract. Works with any runtime. Planned folder:
-  `services/<layer>-<adapter>/`.
-
-```mermaid
-flowchart LR
-  rA[Runtime A] -->|HTTP contract| svc[HTTP adapter service<br/>services/layer-adapter]
-  rB[Runtime B] -->|HTTP contract| svc
-  svc --> be[(Backend)]
-  rA -.->|in-process binding| be
-```
-
-Write the HTTP service first when the adapter should work everywhere; add an in-process binding for a runtime only
-where the extra hop matters.
-
-### Knowledge is not only RAG
-
-L3 covers several kinds of knowledge, each with its own query standard (or none):
-
-| Knowledge type | Query standard |
-|---|---|
-| Documents | none; each vector database has its own API |
-| Structured data | SQL |
-| Graphs and ontologies | SPARQL, RDF / OWL / SKOS (W3C); ISO GQL, Cypher |
-| Curated wiki | files + git |
-| Long-term memory | none |
-| Procedural know-how | Agent Skills |
-
-MCP standardises the transport (how an agent reaches a source), not the result (what a search returns). L3 therefore
-fixes the result: `KnowledgeSource.search` returns `Passage { id, text, source, score, metadata }`, and adapters
-translate each backend into it. Details in [L3](layers/L3-knowledge.md).
+Boundary rules: read-only context retrieval is `knowledge`, anything with side effects is `tool`; who may do what is
+`identity`, whether the content is acceptable is `guardrail`.
 
 ## Request flow
 
 ```mermaid
 flowchart TB
-  client([Person, app or agent]) --> L10[L10 interface<br/>chat API, MCP, A2A, AG-UI]
-  L10 --> ing[L0 ingress]
-  ing --> L5v[L5 verify identity]
-  L5v --> L2[L2 agent runtime]
-  L2 --> L6[L6 guardrails]
-  L2 --> L3[L3 knowledge]
-  L2 --> L4[L4 tools]
-  L5c[L5 credentials<br/>on behalf of a user, or own] -.->|scoped token| L3
-  L5c -.->|scoped token| L4
-  L2 --> L7[L7 model gateway]
-  L7 --> L1[L1 models]
-
-  L10 -.-> L8
-  L5v -.-> L8
-  L2 -.-> L8
-  L6 -.-> L8
-  L3 -.-> L8
-  L4 -.-> L8
-  L7 -.-> L8
-  L1 -.-> L8
-  L8[L8 telemetry] --> L9[L9 evaluation & improvement]
-  L9 -.->|fixes, regression tests| L2
-
-  subgraph L0[L0 infrastructure & delivery: containers, ingress, secrets, CI/CD]
-    ing
+  client([Person, app, agent, event]) --> L8[L8 interface<br/>channels & triggers]
+  L8 --> L6v[L6 identity: verify]
+  L6v --> L3[L3 harness: runtime]
+  L3 --> L7[L7 guardrail]
+  L3 --> L4[L4 knowledge]
+  L3 --> L5[L5 tool]
+  L6a[L6 identity: authorize, approve,<br/>credentials on behalf of the caller] -.-> L5
+  L6a -.-> L4
+  L3 --> L2[L2 cache: route, cache]
+  L2 --> L1[L1 llm]
+  L3 -.-> L9[L9 telemetry]
+  L7 -.-> L9
+  L4 -.-> L9
+  L5 -.-> L9
+  L2 -.-> L9
+  L1 -.-> L9
+  L9 --> L10[L10 eval]
+  L10 -.->|fixes, regression cases| L3
+  subgraph L0[L0 infra: deploy, secrets]
+    L8
   end
 ```
 
-The client reaches the agent through an L10 channel. L0 ingress terminates TLS and routes; L5 verifies the token. L2
-runs the agent. L6 checks input and output, and tool traffic; L3 and L4 are called with credentials issued by L5.
-Model calls go through L7 to L1. Every layer emits telemetry to L8, which feeds L9, and L9 sends fixes and regression
-tests back to L2-L4. L0 runs underneath all of it: every other box is a service it deploys.
+A channel or trigger starts a run. Identity verifies the caller; the runtime runs the agent loop. Guardrails check
+input, output and tool traffic; knowledge is retrieved with the caller's identity; tools are authorized and called
+with credentials issued for the caller. Model calls go through routing and caching to the model. Every step is
+traced with its layer, telemetry feeds evaluation, and evaluation sends fixes back. Infrastructure runs underneath.
+
+## Knowledge is not only RAG
+
+The knowledge layer covers documents, structured data, graphs and ontologies, a curated wiki, long-term memory and
+procedural know-how. Each backend has its own query language (or none), so the port fixes the result instead:
+`KnowledgePort.search` returns `Passage { id, text, source, score, metadata }` whatever the backend. That uniform
+result lets telemetry trace and evaluation score retrieval the same way everywhere.
 
 ## Cross-cutting concerns
 
-These are not layers. They are rules that span several layers and are enforced where each layer already has a hook.
-
 | Concern | Spans | Doc |
 |---|---|---|
-| Governance & compliance (EU AI Act, GDPR) | L5, L6, L8, L9 | [governance-compliance.md](cross-cutting/governance-compliance.md) |
-| Security (threat model) | L4, L5, L6 | [security.md](cross-cutting/security.md) |
-| Cost | L2, L7, L8 | [cost.md](cross-cutting/cost.md) |
+| Governance & compliance | identity, guardrail, telemetry, eval | [governance-compliance.md](cross-cutting/governance-compliance.md) |
+| Security | tool, identity, guardrail | [security.md](cross-cutting/security.md) |
+| Cost | harness, cache, telemetry | [cost.md](cross-cutting/cost.md) |
 
 ## Lifecycle
 
-| Phase | What happens | Layers |
-|---|---|---|
-| Design | Write the agent file and its eval criteria first | L2, L9 |
-| Build | Wire models, knowledge, tools, identity, guardrails, gateway | L1-L7 |
-| Test | Run the eval dataset, replay stored runs | L9 |
-| Release | Pipeline ships the versioned agent file | L0 |
-| Operate | Traces, metrics, audit | L8 |
-| Improve | Diagnose, fix, add regression cases; loop back | L9, L2-L4 |
-
-Agents are versioned files in git, so the git repository is the agent registry. See [lifecycle.md](lifecycle.md).
-
-## Where to go next
-
-- Data shapes and wire formats: [contracts.md](contracts.md)
-- One doc per layer: [L0](layers/L0-infra.md) to [L10](layers/L10-interface.md)
-- Quickstart and status: [README](../README.md)
+Design (agent file and eval cases) → build (pick adapters per layer) → test (`agent-layers test`, `eval`) → release
+(`agent-layers deploy --profile production`) → operate (telemetry) → improve (eval attributes failures to a layer).
+Profiles keep the same stack from prototype to production; see [guide.md](guide.md#from-prototype-to-production) and
+[lifecycle.md](lifecycle.md).

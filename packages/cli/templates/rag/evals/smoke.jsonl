@@ -1,0 +1,3 @@
+{"id":"knowledge-ferry","input":"When does the first Larkspur ferry leave Quillmere?","expected":"07:15","tags":["knowledge"],"layer":"knowledge"}
+{"id":"knowledge-gate","input":"When does the tide gate close?","expected":"19:40","tags":["knowledge"],"layer":"knowledge"}
+{"id":"knowledge-keeper","input":"Who is the keeper of the Brinewick lighthouse?","expected":"Penhallow","tags":["knowledge"],"layer":"knowledge"}

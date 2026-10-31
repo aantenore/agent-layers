@@ -1,0 +1,33 @@
+{
+  "name": "@agent-layers/conformance",
+  "version": "0.1.0",
+  "description": "Conformance suites for agent-layers ports: prove an adapter behaves",
+  "license": "MIT",
+  "author": "Antonio Antenore",
+  "type": "module",
+  "private": false,
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "schemas"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-schemas.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@agent-layers/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "typescript": "^7.0.2"
+  }
+}

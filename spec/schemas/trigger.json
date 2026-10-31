@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/trigger.json",
+  "title": "Trigger",
+  "description": "Something that starts a run: an event or a schedule tick (layer interface, TriggerPort).",
+  "type": "object",
+  "required": ["id", "type", "source"],
+  "properties": {
+    "id": { "type": "string" },
+    "type": { "type": "string" },
+    "source": { "type": "string" },
+    "time": { "type": "string", "format": "date-time" },
+    "agent": { "type": "string" },
+    "data": {}
+  }
+}

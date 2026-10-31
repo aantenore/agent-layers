@@ -1,0 +1,115 @@
+{
+  "$schema": "./node_modules/@agent-layers/core/schema/agent-layers.schema.json",
+  "name": "{{name}}",
+  "profile": "prototype",
+  "agents": {
+    "{{agent}}": { "file": "agents/{{agent}}.md" }
+  },
+  "policy": [
+    { "effect": "allow", "risk": ["read"] },
+    { "effect": "ask", "risk": ["write"] },
+    { "effect": "deny", "risk": ["exec"] }
+  ],
+  "pipeline": {
+    "knowledge": { "k": 3, "maxChars": 3000, "mode": "system" }
+  },
+  "profiles": {
+    "prototype": {
+      "description": "Runs anywhere: zero-dependency adapters and a scripted model.",
+      "tier": "prototype",
+      "layers": {
+        "deploy": { "adapter": "compose-deploy" },
+        "model": {
+          "adapter": "mock-model",
+          "options": {
+            "rules": [
+              { "match": "(-?\\d+(?:\\.\\d+)?)\\s*(?:°\\s*)?c\\b", "tool": "convert_temperature", "args": { "celsius": "{{1}}" } }
+            ]
+          }
+        },
+        "router": { "adapter": "static-router", "options": { "model": "mock" } },
+        "cache": { "adapter": "memory-cache", "options": { "maxEntries": 500 } },
+        "runtime": { "adapter": "{{runtime}}" },
+        "state": { "adapter": "memory-state" },
+        "knowledge": {
+          "docs": { "adapter": "markdown-knowledge", "options": { "dir": "knowledge" } }
+        },
+        "tools": {
+          "util": { "adapter": "functions", "options": { "module": "./tools/convert.ts" } }
+        },
+        "identity": {
+          "adapter": "static-identity",
+          "options": { "tokens": { "dev-token": { "subject": "dev-user", "roles": ["developer"] } } }
+        },
+        "credentials": { "adapter": "static-identity", "options": { "default": "dev-downstream-token" } },
+        "authorization": {
+          "adapter": "rules-authorization",
+          "options": { "rules": [{ "effect": "allow", "risk": ["read"] }], "default": "deny" }
+        },
+        "approval": { "adapter": "memory-approval" },
+        "guardrails": [
+          { "adapter": "regex-guard", "options": { "piiAction": "redact" } }
+        ],
+        "channels": [{ "adapter": "terminal-channel" }],
+        "telemetry": [{ "adapter": "console-telemetry" }],
+        "eval": [{ "adapter": "expected-eval" }]
+      }
+    },
+    "test": {
+      "description": "Prototype for automated tests: telemetry to a file, no terminal channel.",
+      "extends": "prototype",
+      "layers": {
+        "telemetry": [{ "adapter": "jsonl-telemetry", "options": { "path": ".agent-layers/telemetry.jsonl" } }],
+        "channels": null
+      }
+    },
+    "local": {
+      "description": "Prototype with a real model served on this machine through an OpenAI-compatible endpoint.",
+      "extends": "prototype",
+      "layers": {
+        "model": {
+          "adapter": "openai-compatible",
+          "options": { "baseUrl": "${env:LLM_BASE_URL:-http://localhost:11434/v1}", "apiKey": "${env:LLM_API_KEY:-}", "model": "${env:LLM_MODEL:-qwen3:4b}" }
+        },
+        "router": { "adapter": "static-router", "options": { "model": "${env:LLM_MODEL:-qwen3:4b}" } }
+      }
+    },
+    "pilot": {
+      "description": "Shared environment: telemetry and knowledge move to their reference services (adapters not installed yet).",
+      "extends": "local",
+      "layers": {
+        "telemetry": [{ "adapter": "otlp", "options": { "endpoint": "${env:OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4318}" } }],
+        "knowledge": {
+          "docs": { "adapter": "qdrant", "options": { "url": "${env:QDRANT_URL:-http://localhost:6333}", "collection": "docs" } }
+        }
+      }
+    },
+    "production": {
+      "description": "Enterprise systems for identity, authorization, guardrails, state and model access (adapters not installed yet).",
+      "extends": "pilot",
+      "tier": "production",
+      "layers": {
+        "model": {
+          "adapter": "openai-compatible",
+          "options": { "baseUrl": "${env:GATEWAY_URL:-http://localhost:4000/v1}", "apiKey": "${env:GATEWAY_KEY:-}", "model": "default" }
+        },
+        "router": null,
+        "cache": { "adapter": "valkey", "options": { "url": "${env:VALKEY_URL:-redis://localhost:6379}" } },
+        "runtime": { "adapter": "reinloop" },
+        "state": { "adapter": "postgres-state", "options": { "url": "${env:DATABASE_URL:-postgres://localhost:5432/agents}" } },
+        "identity": { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "audience": "${env:OIDC_AUDIENCE:-agent-runtime}" } },
+        "credentials": {
+          "adapter": "oidc",
+          "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "clientId": "${env:OIDC_CLIENT_ID:-agent-runtime}", "clientSecret": "${env:OIDC_CLIENT_SECRET:-}", "mode": "on-behalf-of" }
+        },
+        "authorization": { "adapter": "opa", "options": { "url": "${env:OPA_URL:-http://localhost:8181}" } },
+        "approval": null,
+        "guardrails": [
+          { "adapter": "presidio", "options": { "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}" } },
+          { "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL:-http://localhost:8000}" } }
+        ],
+        "channels": [{ "adapter": "a2a", "options": { "port": 8700 } }]
+      }
+    }
+  }
+}

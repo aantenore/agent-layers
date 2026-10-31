@@ -1,0 +1,12 @@
+# Core and spec: changes need a spec change first (see CONTRIBUTING.md).
+/spec/                    @aantenore
+/packages/core/           @aantenore
+/packages/conformance/    @aantenore
+/packages/cli/            @aantenore
+/adapters/_template/      @aantenore
+/docs/architecture.md     @aantenore
+/package.json             @aantenore
+/tsconfig*.json           @aantenore
+
+# Adapters: one line per adapter and its maintainers, for example
+# /adapters/qdrant/        @your-github-handle

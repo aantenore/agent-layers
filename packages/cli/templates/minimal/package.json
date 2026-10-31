@@ -1,0 +1,38 @@
+{
+  "name": "{{name}}",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "agent-layers dev",
+    "check": "agent-layers check",
+    "test": "node --test \"tests/**/*.test.ts\"",
+    "eval": "agent-layers eval evals/smoke.jsonl --agent {{agent}}",
+    "deploy": "agent-layers deploy --profile production"
+  },
+  "dependencies": {
+    "@agent-layers/core": "^{{version}}",
+    "@agent-layers/adapter-{{runtime}}": "^{{version}}",
+    "@agent-layers/adapter-compose-deploy": "^{{version}}",
+    "@agent-layers/adapter-console-telemetry": "^{{version}}",
+    "@agent-layers/adapter-expected-eval": "^{{version}}",
+    "@agent-layers/adapter-functions": "^{{version}}",
+    "@agent-layers/adapter-jsonl-telemetry": "^{{version}}",
+    "@agent-layers/adapter-markdown-knowledge": "^{{version}}",
+    "@agent-layers/adapter-memory-approval": "^{{version}}",
+    "@agent-layers/adapter-memory-cache": "^{{version}}",
+    "@agent-layers/adapter-memory-state": "^{{version}}",
+    "@agent-layers/adapter-mock-model": "^{{version}}",
+    "@agent-layers/adapter-openai-compatible": "^{{version}}",
+    "@agent-layers/adapter-regex-guard": "^{{version}}",
+    "@agent-layers/adapter-rules-authorization": "^{{version}}",
+    "@agent-layers/adapter-static-identity": "^{{version}}",
+    "@agent-layers/adapter-static-router": "^{{version}}",
+    "@agent-layers/adapter-terminal-channel": "^{{version}}"
+  },
+  "devDependencies": {
+    "@agent-layers/cli": "^{{version}}"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/feedback.json",
+  "title": "Feedback",
+  "description": "Feedback on a run (layer eval, FeedbackPort).",
+  "type": "object",
+  "required": ["runId"],
+  "properties": {
+    "id": { "type": "string" },
+    "runId": { "type": "string" },
+    "agent": { "type": "string" },
+    "rating": { "type": "number", "minimum": -1, "maximum": 1 },
+    "label": { "type": "string" },
+    "comment": { "type": "string" },
+    "subject": { "type": "string" },
+    "time": { "type": "string", "format": "date-time" }
+  }
+}

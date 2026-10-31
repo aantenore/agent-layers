@@ -2,16 +2,26 @@
   "name": "agent-layers",
   "private": true,
   "type": "module",
-  "description": "Open-source, runtime-agnostic agent platform in ten swappable layers",
+  "description": "Composition SDK that assembles the eleven layers of an agent, from development to production",
   "license": "MIT",
   "author": "Antonio Antenore",
   "engines": {
     "node": ">=22.18"
   },
+  "workspaces": [
+    "packages/*",
+    "adapters/*",
+    "runtimes/*"
+  ],
   "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:packages": "npm test --workspaces --if-present",
     "test:layer": "node --test \"layers/$LAYER/test/**/*.test.mjs\" \"layers/$LAYER/test/**/*.test.js\""
   },
   "devDependencies": {
-    "reinloop": "github:aantenore/reinloop"
+    "@types/node": "^24.19.0",
+    "reinloop": "github:aantenore/reinloop",
+    "typescript": "^7.0.2"
   }
 }

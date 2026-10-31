@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/approval.json",
+  "title": "Approval",
+  "description": "Human approval of an action the policy marks ask (layer identity, ApprovalPort).",
+  "type": "object",
+  "required": ["id", "status", "request"],
+  "properties": {
+    "id": { "type": "string" },
+    "status": { "enum": ["pending", "approved", "denied", "expired"] },
+    "request": {
+      "type": "object",
+      "required": ["access", "agent", "runId"],
+      "properties": {
+        "access": { "$ref": "access-request.json" },
+        "agent": { "type": "string" },
+        "runId": { "type": "string" },
+        "reason": { "type": "string" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "decidedBy": { "type": "string" },
+    "reason": { "type": "string" }
+  }
+}

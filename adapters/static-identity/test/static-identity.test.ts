@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { createStaticCredentials, createStaticIdentity } from '../src/index.ts';
+
+const identity = createStaticIdentity({
+  tokens: {
+    'user-tok': { subject: 'alice', roles: ['staff'], scopes: ['docs:read'], claims: { team: 'a' } },
+    'bot-tok': { subject: 'bot', kind: 'agent' },
+  },
+});
+
+test('verify maps a known credential to an identity carrying the token', async () => {
+  assert.deepEqual(await identity.verify('user-tok'), {
+    subject: 'alice', kind: 'user', roles: ['staff'], scopes: ['docs:read'], claims: { team: 'a' }, token: 'user-tok',
+  });
+  assert.equal((await identity.verify('bot-tok')).kind, 'agent');
+});
+
+test('verify rejects unknown and empty credentials without echoing them', async () => {
+  for (const bad of ['secret-guess', '', 'toString']) {
+    await assert.rejects(identity.verify(bad), (err: Error) => err.message === 'invalid credential' && !err.message.includes(bad || 'x'));
+  }
+});
+
+test('credentials resolve by audience, then default, else reject', async () => {
+  const port = createStaticCredentials({ tokens: { api: 'tok-api' }, default: 'tok-any' });
+  assert.equal(await port.token('api'), 'tok-api');
+  assert.equal(await port.token('other'), 'tok-any');
+  await assert.rejects(createStaticCredentials({ tokens: { api: 'x' } }).token('other'), /^Error: no token for audience other$/);
+});

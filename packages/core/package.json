@@ -1,0 +1,32 @@
+{
+  "name": "@agent-layers/core",
+  "version": "0.1.0",
+  "description": "Ports, adapter registry, composition pipelines and stack config for agent-layers",
+  "license": "MIT",
+  "author": "Antonio Antenore",
+  "type": "module",
+  "private": false,
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schema.json": "./schema/agent-layers.schema.json"
+  },
+  "files": ["dist", "schema"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "gen:schema": "node --conditions=source scripts/gen-schema.ts",
+    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "typescript": "^7.0.2"
+  }
+}

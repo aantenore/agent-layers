@@ -1,0 +1,34 @@
+{
+  "name": "@agent-layers/adapter-terminal-channel",
+  "version": "0.1.0",
+  "description": "Terminal (stdin/stdout) channel adapter for agent-layers",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "keywords": ["agent-layers", "agent-layers-adapter"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+  },
+  "peerDependencies": {
+    "@agent-layers/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@agent-layers/conformance": "0.1.0",
+    "@agent-layers/core": "0.1.0",
+    "@types/node": "^24.19.0",
+    "typescript": "^7.0.2"
+  }
+}

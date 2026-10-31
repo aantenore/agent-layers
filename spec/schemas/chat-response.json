@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/chat-response.json",
+  "title": "ChatResponse",
+  "description": "ModelPort response.",
+  "type": "object",
+  "required": ["model", "choices"],
+  "properties": {
+    "id": { "type": "string" },
+    "model": { "type": "string" },
+    "choices": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["index", "message", "finish_reason"],
+        "properties": {
+          "index": { "type": "integer" },
+          "message": {
+            "type": "object",
+            "required": ["role"],
+            "properties": {
+              "role": { "const": "assistant" },
+              "content": { "type": ["string", "null"] },
+              "tool_calls": { "type": "array", "items": { "$ref": "#/$defs/toolCall" } }
+            }
+          },
+          "finish_reason": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "required": ["prompt_tokens", "completion_tokens"],
+      "properties": {
+        "prompt_tokens": { "type": "integer", "minimum": 0 },
+        "completion_tokens": { "type": "integer", "minimum": 0 },
+        "total_tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "extra": { "type": "object" }
+  },
+  "$defs": {
+    "toolCall": {
+      "type": "object",
+      "required": ["id", "type", "function"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "const": "function" },
+        "function": {
+          "type": "object",
+          "required": ["name", "arguments"],
+          "properties": { "name": { "type": "string", "minLength": 1 }, "arguments": { "type": "string", "description": "JSON-encoded arguments." } }
+        }
+      }
+    }
+  }
+}

@@ -17,14 +17,14 @@ your deployment and use case.
 
 | Requirement | How the stack supports it | Layer |
 |---|---|---|
-| Know who acted, and for whom | Every run carries an `Identity`; on-behalf-of vs own identity is explicit | [L5](../layers/L5-identity.md) |
-| Human oversight | Policy rules `allow` / `ask` / `deny` per tool and risk; `ask` pauses for approval | L5, [L2](../layers/L2-harness.md) |
-| Data minimisation | Guards redact PII on input, output, tool arguments and tool results | [L6](../layers/L6-guardrails.md) |
-| Logging and audit trail | Guardrail actions and policy decisions are emitted as audit events; traces carry `agent.layer` | [L8](../layers/L8-telemetry.md) |
+| Know who acted, and for whom | Every run carries an `Identity`; on-behalf-of vs own identity is explicit | [identity](../layers/identity.md) |
+| Human oversight | Policy rules `allow` / `ask` / `deny` per tool and risk; `ask` pauses for approval | L5, [harness](../layers/harness.md) |
+| Data minimisation | Guards redact PII on input, output, tool arguments and tool results | [guardrail](../layers/guardrail.md) |
+| Logging and audit trail | Guardrail actions and policy decisions are emitted as audit events; traces carry `agent.layer` | [telemetry](../layers/telemetry.md) |
 | Retention | Traces, stored runs and eval datasets have a retention period set in their stores; no secrets or tokens are ever recorded | L8, L2 |
-| Transparency | Interfaces tell the user they talk to an agent; the agent file documents purpose and tools | [L10](../layers/L10-interface.md), L2 |
+| Transparency | Interfaces tell the user they talk to an agent; the agent file documents purpose and tools | [interface](../layers/interface.md), L2 |
 | Risk management | Known risks are listed in the [threat model](security.md) and owned per layer | all |
-| Accuracy, robustness, red teaming | Eval datasets include adversarial cases; failures are attributed to a layer | [L9](../layers/L9-eval.md) |
+| Accuracy, robustness, red teaming | Eval datasets include adversarial cases; failures are attributed to a layer | [eval](../layers/eval.md) |
 
 ## Practices
 

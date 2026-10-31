@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/access-decision.json",
+  "title": "AccessDecision",
+  "description": "Authorization decision (layer identity, AuthorizationPort).",
+  "type": "object",
+  "required": ["decision"],
+  "properties": {
+    "decision": { "type": "boolean" },
+    "context": {
+      "type": "object",
+      "properties": {
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

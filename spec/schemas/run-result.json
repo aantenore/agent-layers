@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/run-result.json",
+  "title": "RunResult",
+  "description": "Outcome of one run of a RunnableAgent.",
+  "type": "object",
+  "required": ["runId", "status", "output"],
+  "properties": {
+    "runId": { "type": "string" },
+    "status": { "type": "string", "examples": ["completed", "failed", "stopped"] },
+    "output": { "type": "string" },
+    "reason": { "type": "string", "description": "Why the run stopped, e.g. guardrail:<guard>:<stage>." },
+    "usage": { "$ref": "chat-response.json#/properties/usage" },
+    "events": { "type": "array", "items": { "type": "object", "required": ["type"], "properties": { "type": { "type": "string" } } } }
+  }
+}

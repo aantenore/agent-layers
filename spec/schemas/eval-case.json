@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/eval-case.json",
+  "title": "EvalCase",
+  "description": "One line of an evaluation dataset, JSON Lines (layer eval).",
+  "type": "object",
+  "required": ["id", "input"],
+  "properties": {
+    "id": { "type": "string" },
+    "input": { "type": "string" },
+    "expected": { "description": "Reference answer or structured expectation; free-form." },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "layer": {
+      "enum": ["infra", "llm", "cache", "harness", "knowledge", "tool", "identity", "guardrail", "interface", "telemetry", "eval"],
+      "description": "Layer the case is meant to exercise."
+    }
+  },
+  "additionalProperties": false
+}

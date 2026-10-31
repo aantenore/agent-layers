@@ -1,0 +1,906 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/stack-config.json",
+  "title": "StackConfig",
+  "description": "Stack configuration: which adapter fills each port, per profile. Layers: infra, llm, cache, harness, knowledge, tool, identity, guardrail, interface, telemetry, eval.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Modules exporting adapter descriptors."
+    },
+    "profile": {
+      "type": "string",
+      "description": "Default profile."
+    },
+    "layers": {
+      "$ref": "#/$defs/layers"
+    },
+    "policy": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/policyRule"
+      }
+    },
+    "pipeline": {
+      "$ref": "#/$defs/pipeline"
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/agent"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "adapterRef": {
+      "type": "object",
+      "required": [
+        "adapter"
+      ],
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Adapter name; resolved from the registry or the package @agent-layers/adapter-<name>."
+        },
+        "name": {
+          "type": "string",
+          "description": "Instance name for list slots."
+        },
+        "options": {
+          "type": "object",
+          "description": "Validated against the adapter optionsSchema."
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "input",
+              "output",
+              "tool_args",
+              "tool_result"
+            ]
+          },
+          "description": "Guardrails only: stages this guard runs at."
+        }
+      },
+      "additionalProperties": false
+    },
+    "adapterRefOverlay": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Adapter name; resolved from the registry or the package @agent-layers/adapter-<name>."
+        },
+        "name": {
+          "type": "string",
+          "description": "Instance name for list slots."
+        },
+        "options": {
+          "type": "object",
+          "description": "Validated against the adapter optionsSchema."
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "input",
+              "output",
+              "tool_args",
+              "tool_result"
+            ]
+          },
+          "description": "Guardrails only: stages this guard runs at."
+        }
+      },
+      "additionalProperties": false
+    },
+    "append": {
+      "type": "object",
+      "required": [
+        "$merge",
+        "items"
+      ],
+      "properties": {
+        "$merge": {
+          "const": "append"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/adapterRef"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "layers": {
+      "type": "object",
+      "description": "One entry per slot; each slot fills one port.",
+      "properties": {
+        "deploy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "DeployPort (infra)"
+        },
+        "secrets": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "SecretPort (infra)"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ModelPort (llm)"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "RuntimePort (harness)"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "StatePort (harness)"
+        },
+        "knowledge": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/adapterRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "KnowledgePort (knowledge)"
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "MemoryPort (knowledge)"
+        },
+        "ingestion": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/adapterRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "IngestionPort (knowledge)"
+        },
+        "tools": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/adapterRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "ToolPort (tool)"
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "IdentityPort (identity)"
+        },
+        "credentials": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "CredentialPort (identity)"
+        },
+        "authorization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "AuthorizationPort (identity)"
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ApprovalPort (identity)"
+        },
+        "guardrails": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "GuardPort (guardrail)"
+        },
+        "router": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "RouterPort (cache)"
+        },
+        "cache": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "CachePort (cache)"
+        },
+        "telemetry": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "TelemetryPort (telemetry)"
+        },
+        "eval": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "EvaluatorPort (eval)"
+        },
+        "feedback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "FeedbackPort (eval)"
+        },
+        "channels": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ChannelPort (interface)"
+        },
+        "triggers": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "TriggerPort (interface)"
+        },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Extra services for the deploy slot."
+        }
+      },
+      "additionalProperties": false
+    },
+    "layersOverlay": {
+      "type": "object",
+      "description": "Only the slots that differ from the extended profile; null removes a slot.",
+      "properties": {
+        "deploy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "DeployPort (infra)"
+        },
+        "secrets": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "SecretPort (infra)"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ModelPort (llm)"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "RuntimePort (harness)"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "StatePort (harness)"
+        },
+        "knowledge": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/adapterRefOverlay"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "KnowledgePort (knowledge)"
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "MemoryPort (knowledge)"
+        },
+        "ingestion": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/adapterRefOverlay"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "IngestionPort (knowledge)"
+        },
+        "tools": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/adapterRefOverlay"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": "ToolPort (tool)"
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "IdentityPort (identity)"
+        },
+        "credentials": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "CredentialPort (identity)"
+        },
+        "authorization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "AuthorizationPort (identity)"
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ApprovalPort (identity)"
+        },
+        "guardrails": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "GuardPort (guardrail)"
+        },
+        "router": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "RouterPort (cache)"
+        },
+        "cache": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "CachePort (cache)"
+        },
+        "telemetry": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "TelemetryPort (telemetry)"
+        },
+        "eval": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "EvaluatorPort (eval)"
+        },
+        "feedback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "FeedbackPort (eval)"
+        },
+        "channels": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "ChannelPort (interface)"
+        },
+        "triggers": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/adapterRef"
+              }
+            },
+            {
+              "$ref": "#/$defs/append"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "TriggerPort (interface)"
+        },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Extra services for the deploy slot."
+        }
+      },
+      "additionalProperties": false
+    },
+    "policyRule": {
+      "type": "object",
+      "required": [
+        "effect"
+      ],
+      "properties": {
+        "effect": {
+          "enum": [
+            "allow",
+            "ask",
+            "deny"
+          ]
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "risk": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "read",
+              "write",
+              "exec"
+            ]
+          }
+        },
+        "when": {
+          "type": "object",
+          "properties": {
+            "roles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "enum": [
+                "user",
+                "agent"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "pipeline": {
+      "type": "object",
+      "properties": {
+        "knowledge": {
+          "type": "object",
+          "properties": {
+            "k": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxChars": {
+              "type": "integer",
+              "minimum": 200
+            },
+            "mode": {
+              "enum": [
+                "system",
+                "user",
+                "tools",
+                "off"
+              ],
+              "description": "system/user: inject before model calls; tools: expose as tools; off."
+            }
+          },
+          "additionalProperties": false
+        },
+        "cacheTtlMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "approvalTimeoutMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Markdown agent file: front matter (model, tools, knowledge) and instructions as body."
+        },
+        "instructions": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "knowledge": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "params": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "extends": {
+          "type": "string"
+        },
+        "tier": {
+          "enum": [
+            "prototype",
+            "production"
+          ]
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "deploy",
+              "secrets",
+              "model",
+              "runtime",
+              "state",
+              "knowledge",
+              "memory",
+              "ingestion",
+              "tools",
+              "identity",
+              "credentials",
+              "authorization",
+              "approval",
+              "guardrails",
+              "router",
+              "cache",
+              "telemetry",
+              "eval",
+              "feedback",
+              "channels",
+              "triggers"
+            ]
+          }
+        },
+        "layers": {
+          "$ref": "#/$defs/layersOverlay"
+        },
+        "policy": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/policyRule"
+          }
+        },
+        "pipeline": {
+          "$ref": "#/$defs/pipeline"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

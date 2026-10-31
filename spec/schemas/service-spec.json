@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/service-spec.json",
+  "title": "ServiceSpec",
+  "description": "A service handed to DeployPort (layer infra). Secrets are references, never values.",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string" },
+    "layer": { "enum": ["infra", "llm", "cache", "harness", "knowledge", "tool", "identity", "guardrail", "interface", "telemetry", "eval"] },
+    "image": { "type": "string" },
+    "env": { "type": "object", "additionalProperties": { "type": "string" } },
+    "secretRefs": { "type": "array", "items": { "type": "string" } },
+    "ports": { "type": "array", "items": { "type": "integer" } },
+    "health": { "type": "object", "properties": { "url": { "type": "string" }, "command": { "type": "array", "items": { "type": "string" } } } }
+  }
+}

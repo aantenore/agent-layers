@@ -7,15 +7,15 @@ runtime. Overview in [stack.md](../stack.md).
 
 | Control | What it does | Layer |
 |---|---|---|
-| Per-run budgets | Cap tokens, tool calls or spend for one run; the run stops with a clear status when exceeded | [L2](../layers/L2-harness.md) |
-| Gateway quotas | Rate and spend limits per key, team or agent | [L7](../layers/L7-cache-router.md) |
+| Per-run budgets | Cap tokens, tool calls or spend for one run; the run stops with a clear status when exceeded | [harness](../layers/harness.md) |
+| Gateway quotas | Rate and spend limits per key, team or agent | [cache](../layers/cache.md) |
 | Exact-match cache | Repeated identical requests are served without a model call | L7 |
 | Routing | Cheaper model for easy requests, stronger model for hard ones; fallbacks on failure | L7 |
-| Local models | The reference setup runs on Ollama with `qwen3:4b`, at no per-token cost | [L1](../layers/L1-llm.md) |
+| Local models | The reference setup runs on Ollama with `qwen3:4b`, at no per-token cost | [llm](../layers/llm.md) |
 
 ## Measurement
 
-[L8](../layers/L8-telemetry.md) records what was spent:
+[telemetry](../layers/telemetry.md) records what was spent:
 
 - `gen_ai.client.token.usage`: input and output tokens per call.
 - `agent.cost.usd`: cost per run and per model.

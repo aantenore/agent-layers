@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/knowledge-document.json",
+  "title": "KnowledgeDocument",
+  "description": "A document loaded through IngestionPort (layer knowledge).",
+  "type": "object",
+  "required": ["id", "text"],
+  "properties": {
+    "id": { "type": "string" },
+    "text": { "type": "string" },
+    "source": { "type": "string" },
+    "metadata": { "type": "object" }
+  }
+}

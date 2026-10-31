@@ -12,3 +12,6 @@ layers/*/volumes/
 *.tfstate
 *.tfstate.*
 *.tfvars
+dist/
+.agent-layers/
+*.tsbuildinfo

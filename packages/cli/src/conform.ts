@@ -1,0 +1,47 @@
+import { conformance, type ConformanceReport } from '@agent-layers/conformance';
+import { agentSpec, compose, configuredAdapters, errorMessage, type ConfiguredAdapter, type Layer, type Stack } from '@agent-layers/core';
+import type { Project } from './project.ts';
+
+export interface AdapterReport { entry: ConfiguredAdapter; status: 'ok' | 'fail' | 'skip'; detail: string[] }
+
+const NOT_EXERCISED = new Set(['ChannelPort', 'TriggerPort']);
+
+/** Composes the stack and runs each configured adapter's conformance suite on the live instance. */
+export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<string, string | undefined> }): Promise<{ reports: AdapterReport[]; error?: string }> {
+  let stack: Stack;
+  try {
+    stack = await compose(p.config, { registry: p.registry, env: opts.env });
+  } catch (err) {
+    return { reports: [], error: errorMessage(err) };
+  }
+  const reports: AdapterReport[] = [];
+  const seen = new Map<string, number>();
+  try {
+    for (const entry of configuredAdapters(p.config.layers)) {
+      const index = seen.get(entry.slot) ?? 0;
+      seen.set(entry.slot, index + 1);
+      if (opts.layer && entry.layer !== opts.layer) continue;
+      const desc = p.registry.get(entry.port, entry.ref.adapter);
+      if (desc?.direction === 'inbound' || NOT_EXERCISED.has(entry.port)) {
+        reports.push({ entry, status: 'skip', detail: ['inbound: exercised by its own tests, not by check'] });
+        continue;
+      }
+      const instance = instanceOf(stack, entry, index);
+      const fixtures = entry.port === 'RuntimePort' && stack.agents().length
+        ? { stack, agent: await agentSpec(p.config, stack.agents()[0]!), input: 'hello' }
+        : undefined;
+      const r: ConformanceReport = await conformance(entry.port, instance as never, fixtures);
+      reports.push({ entry, status: r.ok ? 'ok' : 'fail', detail: r.failures });
+    }
+  } finally {
+    await stack.close();
+  }
+  return { reports };
+}
+
+function instanceOf(stack: Stack, e: ConfiguredAdapter, index: number): unknown {
+  const v = (stack.ports as unknown as Record<string, unknown>)[e.slot];
+  if (Array.isArray(v)) return v[index];
+  if (v && typeof v === 'object' && !('adapter' in v) && e.key in (v as object) && ['knowledge', 'ingestion', 'tools'].includes(e.slot)) return (v as Record<string, unknown>)[e.key];
+  return v;
+}

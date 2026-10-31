@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/tool-outcome.json",
+  "title": "ToolOutcome",
+  "description": "Result of ToolPort.callTool. Failures are results with isError, not exceptions.",
+  "type": "object",
+  "required": ["content"],
+  "properties": {
+    "content": { "type": "string" },
+    "data": {},
+    "isError": { "type": "boolean" }
+  }
+}
