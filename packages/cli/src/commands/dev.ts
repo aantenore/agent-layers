@@ -1,8 +1,8 @@
-import { compose, readiness, type Identity, type Stack } from '@agent-layers/core';
+import { compose, readiness, type Caller, type Stack } from '@agent-layers/core';
 import { createInterface } from 'node:readline';
 import { UsageError, type Io } from '../io.ts';
 import { openProject } from '../project.ts';
-import { authenticate, callerContext } from '../identity.ts';
+import { authenticate, callerContext, reasonLine } from '../identity.ts';
 import { traceTelemetry } from '../trace.ts';
 import { servicesOf } from './deploy.ts';
 
@@ -29,35 +29,35 @@ export async function dev(io: Io, args: DevArgs): Promise<number> {
     }
     const agent = args.agent ?? stack.agents()[0];
     if (!agent) throw new UsageError('no agents configured');
-    const identity = await authenticate(stack, p, args.token);
-    if (args.message !== undefined) return await once(stack, agent, args.message, io, identity);
+    const caller = await authenticate(stack, p, args.token);
+    if (args.message !== undefined) return await once(stack, agent, args.message, io, caller);
     if (stack.ports.channels.some((c) => c.serve) && !args.agent) {
-      const handle = await stack.start(identity ? { identity } : {});
+      const handle = await stack.start(caller ? { caller } : {});
       await (handle.done ?? new Promise<void>((r) => process.once('SIGINT', () => r())));
       await handle.close();
       return 0;
     }
-    return await repl(stack, agent, io, identity);
+    return await repl(stack, agent, io, caller);
   } finally {
     await stack.close();
   }
 }
 
-async function once(stack: Stack, agent: string, message: string, io: Io, identity: Identity | undefined): Promise<number> {
-  const r = await (await stack.agent(agent)).run(message, callerContext(identity));
-  io.out(r.status === 'completed' ? r.output : `[${r.status}] ${r.reason ?? ''}`.trim());
+async function once(stack: Stack, agent: string, message: string, io: Io, caller: Caller | undefined): Promise<number> {
+  const r = await (await stack.agent(agent)).run(message, callerContext(caller));
+  io.out(r.status === 'completed' ? r.output : `[${r.status}] ${reasonLine(r.reason)}`.trim());
   return r.status === 'completed' ? 0 : 1;
 }
 
-async function repl(stack: Stack, agent: string, io: Io, identity: Identity | undefined): Promise<number> {
+async function repl(stack: Stack, agent: string, io: Io, caller: Caller | undefined): Promise<number> {
   io.err(`Talking to ${agent} (profile ${stack.config.profile ?? 'base'}). Empty line or Ctrl+D to quit.`);
   const rl = createInterface({ input: io.stdin, terminal: false });
   const runnable = await stack.agent(agent);
   const sessionId = `dev-${Date.now()}`;
   for await (const line of rl) {
     if (!line.trim() || line.trim() === '/exit') break;
-    const r = await runnable.run(line, { sessionId, ...callerContext(identity) });
-    io.out(r.status === 'completed' ? r.output : `[${r.status}] ${r.reason ?? ''}`.trim());
+    const r = await runnable.run(line, { sessionId, ...callerContext(caller) });
+    io.out(r.status === 'completed' ? r.output : `[${r.status}] ${reasonLine(r.reason)}`.trim());
   }
   rl.close();
   return 0;

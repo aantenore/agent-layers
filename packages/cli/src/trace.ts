@@ -1,11 +1,12 @@
-import { layerLabel, recordingTelemetry, type TelemetryPort } from '@agent-layers/core';
+import { ATTR, layerLabel, recordingTelemetry, type TelemetryPort } from '@agent-layers/core';
 
 const SHOWN: Record<string, string> = {
-  'gen_ai.tool.name': 'tool', 'guard.stage': 'stage', 'guard.action': 'action', 'cache.hit': 'hit', 'router.model': 'model',
-  'knowledge.passages': 'passages', 'policy.decision': 'decision', 'tool.outcome': 'outcome', 'run.status': 'status',
+  [ATTR.toolName]: 'tool', [ATTR.guardStage]: 'stage', [ATTR.guardAction]: 'action', [ATTR.cacheHit]: 'hit', [ATTR.routerModel]: 'model',
+  [ATTR.knowledgePassages]: 'passages', [ATTR.accessDecision]: 'decision', [ATTR.toolOutcome]: 'outcome', [ATTR.runStatus]: 'status',
+  [ATTR.runReason]: 'reason',
 };
 
-/** One line per finished span: `[L5 tool] execute_tool 3ms ok`. Used by `dev` when no telemetry is configured. */
+/** One line per finished span: `[L5 tool] agent.tool.call 3ms ok`. Used by `dev` when no telemetry is configured. */
 export function traceTelemetry(write: (line: string) => void): TelemetryPort {
   return recordingTelemetry((r) => {
     if (r.type !== 'span') return;

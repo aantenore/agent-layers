@@ -1,8 +1,8 @@
-import { compose, errorMessage, type EvalCase, type EvalResult } from '@agent-layers/core';
+import { compose, stopReasonOf, type EvalCase, type EvalResult, type RunResult } from '@agent-layers/core';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { UsageError, type Io } from '../io.ts';
-import { authenticate, callerContext } from '../identity.ts';
+import { authenticate, callerContext, reasonLine } from '../identity.ts';
 import { openProject } from '../project.ts';
 
 export interface EvalArgs { config?: string; profile?: string; dataset?: string; agent?: string; out?: string; min?: string; token?: string }
@@ -22,18 +22,18 @@ export async function evaluate(io: Io, args: EvalArgs): Promise<number> {
     if (!stack.ports.eval.length) throw new UsageError('no evaluators configured (layers.eval)');
     const name = args.agent ?? stack.agents()[0];
     if (!name) throw new UsageError('no agents configured');
-    const identity = await authenticate(stack, p, args.token);
+    const caller = await authenticate(stack, p, args.token);
     const agent = await stack.agent(name);
     for (const c of cases) {
-      const run = await agent.run(c.input, callerContext(identity)).catch((err: unknown) => ({ runId: '', status: 'failed', output: '', reason: errorMessage(err) }));
+      const run: RunResult = await agent.run(c.input, callerContext(caller)).catch((err: unknown) => ({ runId: '', status: 'failed' as const, output: '', reason: stopReasonOf(err) }));
       const scores = (await Promise.all(stack.ports.eval.map((e) => e.score(c, run)))).flat();
       const result: EvalResult = {
-        id: c.id, runId: run.runId, output: run.output, status: String(run.status), scores,
-        ...('usage' in run && run.usage ? { usage: run.usage } : {}), ...('costUsd' in run && run.costUsd !== undefined ? { costUsd: run.costUsd } : {}),
+        id: c.id, runId: run.runId, output: run.output, status: run.status, scores,
+        ...(run.reason ? { reason: run.reason } : {}), ...(run.usage ? { usage: run.usage } : {}), ...(run.costUsd !== undefined ? { costUsd: run.costUsd } : {}),
       };
       lines.push(JSON.stringify(result));
       for (const s of scores) { total++; if (s.value >= 1) passed++; }
-      io.err(`  ${scores.every((s) => s.value >= 1) && run.status === 'completed' ? 'pass' : 'FAIL'} ${c.id}${run.status !== 'completed' ? ` (${run.status}${'reason' in run && run.reason ? `: ${run.reason}` : ''})` : ''}`);
+      io.err(`  ${scores.every((s) => s.value >= 1) && run.status === 'completed' ? 'pass' : 'FAIL'} ${c.id}${run.status !== 'completed' ? ` (${run.status}${run.reason ? `: ${reasonLine(run.reason)}` : ''})` : ''}`);
     }
   } finally {
     await stack.close();

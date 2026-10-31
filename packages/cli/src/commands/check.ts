@@ -17,6 +17,8 @@ export async function check(io: Io, args: CheckArgs): Promise<number> {
   const ready = await readiness(c, p.registry);
   if (ready.requires.length) io.out(`requires: ${ready.requires.join(', ')}`);
   for (const problem of ready.problems) io.out(`  FAIL ${problem.message}`);
+  // Language warnings (an adapter reads an ext key nothing produces) do not fail the check.
+  for (const w of ready.warnings) io.out(`  WARN ${w}`);
   // Limits: unsafe values on the production tier (docs/limits.md); warnings do not fail the check.
   for (const l of ready.limits) io.out(`  ${l.severity === 'fail' ? 'FAIL' : 'WARN'} limit ${l.message}`);
   let failed = !ready.ok;

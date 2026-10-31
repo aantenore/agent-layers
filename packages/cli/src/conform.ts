@@ -1,5 +1,5 @@
 import { conformance, NEEDS_CALLER, testContext, type ConformanceReport } from '@agent-layers/conformance';
-import { agentSpec, CHECK_LIMITS, compose, configuredAdapters, errorMessage, limitValue, type ConfiguredAdapter, type CredentialPort, type Identity, type Layer, type Stack } from '@agent-layers/core';
+import { agentSpec, CHECK_LIMITS, compose, configuredAdapters, errorMessage, limitValue, type ConfiguredAdapter, type Caller, type CredentialPort, type Layer, type Stack } from '@agent-layers/core';
 import type { Project } from './project.ts';
 
 export interface AdapterReport { entry: ConfiguredAdapter; status: 'ok' | 'fail' | 'skip'; detail: string[] }
@@ -19,7 +19,7 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
   }
   const reports: AdapterReport[] = [];
   const seen = new Map<string, number>();
-  let caller: Identity | undefined;
+  let caller: Caller | undefined;
   let callerError: string | undefined;
   try {
     if (opts.token && stack.ports.identity) {
@@ -43,7 +43,7 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
         continue;
       }
       const instance = instanceOf(stack, entry, index);
-      if (entry.port === 'CredentialPort' && (instance as CredentialPort).requiresCaller && !caller?.token) {
+      if (entry.port === 'CredentialPort' && (instance as CredentialPort).requiresCaller && !caller?.credential) {
         reports.push({ entry, status: 'skip', detail: [`on behalf of a caller only: ${NEEDS_CALLER}`] });
         continue;
       }
@@ -52,7 +52,7 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
       const fixtures = entry.port === 'RuntimePort' && firstAgent
         ? { stack, agent: firstAgent, input: 'hello' }
         : entry.port === 'ModelPort' && firstAgent ? { model: firstAgent.model }
-        : entry.port === 'CredentialPort' ? { ...(audience ? { audience } : {}), ...(caller ? { identity: caller } : {}) }
+        : entry.port === 'CredentialPort' ? { ...(audience ? { audience } : {}), ...(caller ? { caller } : {}) }
           : entry.port === 'IdentityPort' && caller ? { valid: opts.token }
             : undefined;
       const r: ConformanceReport = await conformance(entry.port, instance as never, fixtures, limits);
@@ -68,8 +68,8 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
  * Audience for the credentials probe: one a real provider issues tokens for. The first `audience` a tool declares,
  * else the first `auth.audience` in the options of a configured adapter (remote runtimes, MCP servers); none otherwise.
  */
-async function probeAudience(stack: Stack, caller: Identity | undefined, timeoutMs: number): Promise<string | undefined> {
-  const ctx = testContext(caller ? { identity: caller } : {});
+async function probeAudience(stack: Stack, caller: Caller | undefined, timeoutMs: number): Promise<string | undefined> {
+  const ctx = testContext(caller ? { caller } : {});
   for (const port of Object.values(stack.ports.tools)) {
     const specs = await Promise.race([port.listTools(ctx), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs).unref())]).catch(() => []);
     const found = specs.find((t) => typeof t.audience === 'string' && t.audience);

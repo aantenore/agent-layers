@@ -13,7 +13,7 @@ async function caller(stack: Stack, resolved: ResolvedConfig) {
   const ref = resolved.layers.identity;
   const tokens = ref?.adapter === 'static-identity' ? ref.options?.tokens : undefined;
   const token = process.env.AGENT_LAYERS_TOKEN || (tokens && typeof tokens === 'object' ? Object.keys(tokens)[0] : undefined);
-  return token && stack.ports.identity ? { identity: await stack.verify(token) } : {};
+  return token && stack.ports.identity ? { caller: await stack.verify(token) } : {};
 }
 
 test('smoke dataset passes offline with the scripted model', async () => {
@@ -24,7 +24,7 @@ test('smoke dataset passes offline with the scripted model', async () => {
     const ctx = await caller(stack, resolved);
     for (const c of cases) {
       const run = await agent.run(c.input, ctx);
-      assert.equal(run.status, 'completed', `${c.id}: ${run.reason}`);
+      assert.equal(run.status, 'completed', `${c.id}: ${run.reason?.code ?? ''}`);
       const scores = (await Promise.all(stack.ports.eval.map((e) => e.score(c, run)))).flat();
       assert.ok(scores.length > 0 && scores.every((s) => s.value === 1), `${c.id}: output "${run.output}"`);
     }
@@ -47,7 +47,7 @@ test('the agent answers through the local model', { timeout: 180_000 }, async (t
   const stack = await compose(resolved);
   try {
     const run = await (await stack.agent('{{agent}}')).run('Convert 100 C to Fahrenheit', await caller(stack, resolved));
-    assert.equal(run.status, 'completed', run.reason);
+    assert.equal(run.status, 'completed', run.reason?.code);
     assert.ok(run.output.length > 0);
   } finally {
     await stack.close();

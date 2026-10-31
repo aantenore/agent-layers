@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import {
-  AdapterRegistry, compose, defineAdapter, packageLoader, PORT_VERSIONS, recordingTelemetry, resolveProfile, toChatTools, type ChatMessage, type ChatRequest,
-  type RuntimePort, type StackConfig, type TelemetryRecord,
+  AdapterRegistry, callsOf, compose, defineAdapter, messageText, packageLoader, PORT_VERSIONS, recordingTelemetry, resolveProfile, textMessage, toolInfos,
+  type Message, type RuntimePort, type StackConfig, type TelemetryRecord,
 } from '@agent-layers/core';
 import { adapter as functionsAdapter, createFunctionTools, defineTool } from '@agent-layers/adapter-functions';
 import { REPO } from './helpers.ts';
@@ -21,27 +21,31 @@ const tinyRuntime: RuntimePort = {
       const model = stack.modelFor(agent);
       const tools = stack.toolsFor(agent);
       const specs = await tools.listTools(ctx);
-      const messages: ChatMessage[] = [{ role: 'system', content: agent.instructions }, { role: 'user', content: String(input) }];
+      const messages: Message[] = [textMessage('system', agent.instructions), textMessage('user', String(input))];
       for (let turn = 0; turn < 4; turn++) {
-        const msg = (await model.chat({ model: agent.model, messages, tools: toChatTools(specs) }, ctx)).choices[0]!.message;
-        messages.push({ role: 'assistant', content: msg.content, ...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}) });
-        if (!msg.tool_calls?.length) return { runId: ctx.runId, status: 'completed', output: msg.content ?? '' };
-        for (const call of msg.tool_calls) {
-          const out = await tools.callTool(call.function.name, JSON.parse(call.function.arguments) as Record<string, unknown>, ctx);
-          messages.push({ role: 'tool', tool_call_id: call.id, content: out.content });
+        const reply = await model.chat({ model: agent.model, messages, tools: toolInfos(specs) }, ctx);
+        messages.push(reply.message);
+        const calls = callsOf(reply.message);
+        if (!calls.length) return { runId: ctx.runId, status: 'completed', output: messageText(reply.message) };
+        for (const call of calls) {
+          const out = await tools.callTool(call.tool, call.args, ctx);
+          messages.push({ role: 'tool', parts: [{ type: 'result', callId: call.id, ok: out.ok, text: out.text }] });
         }
       }
-      return { runId: ctx.runId, status: 'stopped', output: '', reason: 'max_turns' };
+      return { runId: ctx.runId, status: 'stopped', output: '', reason: { code: 'limit', layer: 'harness', detail: 'turns' } };
     },
   }),
 };
 
-const seen: { body: ChatRequest; headers: IncomingHttpHeaders }[] = [];
+/** The OpenAI wire the test server reads (not the SDK language). */
+interface WireBody { model: string; messages: { role: string; content: unknown }[]; tools?: { function: { name: string } }[] }
+
+const seen: { body: WireBody; headers: IncomingHttpHeaders }[] = [];
 const server = createServer((req, res) => {
   let raw = '';
   req.on('data', (c: Buffer) => { raw += c; });
   req.on('end', () => {
-    const body = JSON.parse(raw) as ChatRequest;
+    const body = JSON.parse(raw) as WireBody;
     seen.push({ body, headers: req.headers });
     const last = body.messages.at(-1)!;
     const message = last.role === 'tool'
@@ -86,7 +90,7 @@ test('in-process run: every port composes around a runtime and an OpenAI-compati
   };
   const ledger = defineTool({
     name: 'ledger', description: 'Looks up a vessel in the harbour ledger', risk: 'read', audience: 'ledger',
-    inputSchema: { type: 'object', properties: { vessel: { type: 'string' } }, required: ['vessel'] },
+    params: { type: 'object', properties: { vessel: { type: 'string' } }, required: ['vessel'] },
     run: async ({ vessel }, ctx) => `${String(vessel)} berthed at pier 3 (token ${(await ctx.credentials!.token('ledger')).length} chars)`,
   });
   const registry = new AdapterRegistry({ loader: packageLoader(REPO) });
@@ -99,9 +103,9 @@ test('in-process run: every port composes around a runtime and an OpenAI-compati
     })],
   });
 
-  const identity = await stack.verify('user-token-abc');
+  const caller = await stack.verify('user-token-abc');
   const agent = await stack.agent('clerk');
-  const result = await agent.run('Where is the Gull, and when does the tide gate close? Reply to ysolde@example.com', { identity });
+  const result = await agent.run('Where is the Gull, and when does the tide gate close? Reply to ysolde@example.com', { caller });
 
   assert.equal(result.status, 'completed');
   assert.equal(result.output, 'The ledger says: Gull berthed at pier 3 (token 16 chars)');
@@ -123,7 +127,7 @@ test('in-process run: every port composes around a runtime and an OpenAI-compati
   assert.equal(scores[0]!.value, 1);
 
   const denied = await (await stack.agent('clerk')).run('Where is the Gull?');
-  assert.match(denied.output, /^The ledger says: Denied: no rule matched \(default deny\)/, 'without a harbourmaster identity the tool call is denied');
+  assert.match(denied.output, /^The ledger says: Denied: no rule matched \(default deny\)/, 'without a harbourmaster caller the tool call is denied');
   assert.equal(denied.status, 'completed');
   await stack.close();
 });

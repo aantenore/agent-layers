@@ -1,4 +1,4 @@
-import type { AdapterRef, CallContext, Identity, Stack } from '@agent-layers/core';
+import type { AdapterRef, CallContext, Caller, Stack } from '@agent-layers/core';
 import { UsageError } from './io.ts';
 import type { Project } from './project.ts';
 
@@ -22,7 +22,7 @@ export function resolveToken(p: Pick<Project, 'config' | 'env'>, flag?: string):
  * Verifies the caller's credential through the identity slot. Anonymous (undefined) when the stack has no identity
  * port or no credential is available; a credential that does not verify ends the command. The token is never printed.
  */
-export async function authenticate(stack: Stack, p: Pick<Project, 'config' | 'env'>, flag?: string): Promise<Identity | undefined> {
+export async function authenticate(stack: Stack, p: Pick<Project, 'config' | 'env'>, flag?: string): Promise<Caller | undefined> {
   if (!stack.ports.identity) return undefined;
   const token = resolveToken(p, flag);
   if (!token) return undefined;
@@ -34,4 +34,8 @@ export async function authenticate(stack: Stack, p: Pick<Project, 'config' | 'en
 }
 
 /** Run context for the authenticated caller. */
-export const callerContext = (identity: Identity | undefined): Partial<CallContext> => (identity ? { identity } : {});
+export const callerContext = (caller: Caller | undefined): Partial<CallContext> => (caller ? { caller } : {});
+
+/** A stop reason as one line: `code`, then `by` and `detail` when present. */
+export const reasonLine = (r: { code: string; by?: string; detail?: string } | undefined): string =>
+  r ? [r.code, r.by && `by ${r.by}`, r.detail].filter(Boolean).join(' ') : '';

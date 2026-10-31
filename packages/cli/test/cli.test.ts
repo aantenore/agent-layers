@@ -91,8 +91,8 @@ test('layers shows all eleven layers by plane with the adapter in use', async ()
   const out = text();
   for (const plane of ['Foundation', 'Model plane', 'Agent plane', 'Control plane', 'Experience plane', 'Insight plane']) assert.match(out, new RegExp(plane));
   for (const l of ['L0 infra', 'L1 llm', 'L2 cache', 'L3 harness', 'L4 knowledge', 'L5 tool', 'L6 identity', 'L7 guardrail', 'L8 interface', 'L9 telemetry', 'L10 eval']) assert.match(out, new RegExp(l));
-  assert.match(out, /ModelPort 0\.1\.0\s+uses mock-model/);
-  assert.match(out, /KnowledgePort 0\.1\.0\s+uses docs=markdown-knowledge/);
+  assert.match(out, /ModelPort 1\.0\.0\s+uses mock-model/);
+  assert.match(out, /KnowledgePort 1\.0\.0\s+uses docs=markdown-knowledge/);
   assert.match(out, /standard: openai-compatible/);
   assert.match(out, /native:\s+mock-model \(prototype\)/);
 });
@@ -110,8 +110,8 @@ test('dev --message runs the agent once through every layer', async () => {
   const { io, text, errors } = captureIo(dir);
   assert.equal(await main(['dev', '--profile', 'test', '--message', 'Convert 100 C to Fahrenheit', '--trace'], io), 0, errors());
   assert.equal(text(), '100 °C is 212 °F');
-  assert.match(errors(), /\[L5 tool\] execute_tool .*tool=util__convert_temperature/);
-  assert.match(errors(), /\[L7 guardrail\] guard\.check/);
+  assert.match(errors(), /\[L5 tool\] agent\.tool\.call .*tool=util__convert_temperature/);
+  assert.match(errors(), /\[L7 guardrail\] agent\.guard\.check/);
 });
 
 test('a rejected token stops dev before any run and is never printed', async () => {
@@ -124,9 +124,9 @@ test('a rejected token stops dev before any run and is never printed', async () 
 test('eval scores the smoke dataset', async () => {
   const { io, text, errors } = captureIo(dir);
   assert.equal(await main(['eval', 'evals/smoke.jsonl', '--agent', 'assistant', '--profile', 'test', '--min', '1'], io), 0, errors());
-  const lines = text().split('\n').map((l) => JSON.parse(l) as { id: string; scores: { value: number }[]; usage?: { prompt_tokens: number } });
+  const lines = text().split('\n').map((l) => JSON.parse(l) as { id: string; scores: { value: number }[]; usage?: { inputTokens: number } });
   assert.deepEqual(lines.map((l) => l.id), ['tool-convert', 'knowledge-ferry', 'greeting']);
-  assert.ok(lines.every((l) => (l.usage?.prompt_tokens ?? 0) > 0), 'eval rows carry the run usage');
+  assert.ok(lines.every((l) => (l.usage?.inputTokens ?? 0) > 0), 'eval rows carry the run usage');
   assert.match(errors(), /3\/3 scores passed/);
 });
 
