@@ -1,0 +1,36 @@
+# LLM Guard API configuration (minimal scanner set).
+# ${NAME:default} is read from the container environment (see compose.yml).
+app:
+  name: LLM Guard API
+  log_level: ${LOG_LEVEL:INFO}
+  log_json: ${LOG_JSON:false}
+  scan_fail_fast: false
+  scan_prompt_timeout: 60
+  scan_output_timeout: 60
+  lazy_load: ${LAZY_LOAD:false}
+
+auth:
+  type: http_bearer
+  token: ${AUTH_TOKEN:}
+
+# Applied to prompts (the reinloop `input` and `tool_result` stages).
+input_scanners:
+  - type: PromptInjection
+    params:
+      threshold: 0.92
+      match_type: truncate_head_tail
+      model_max_length: 256
+  - type: Secrets
+    params:
+      redact_mode: all
+
+# Applied to model answers (the `output` stage). Empty by default: each scanner below pulls another model.
+# Enable by uncommenting (and drop the empty list).
+output_scanners: []
+#  - type: Sensitive
+#    params:
+#      entity_types: [PERSON, EMAIL_ADDRESS]
+#      redact: true
+#  - type: NoRefusal
+#    params:
+#      threshold: 0.75
