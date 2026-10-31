@@ -67,12 +67,15 @@ export function mountableInbound(stack: Stack, names?: readonly string[]): { nam
  */
 export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promise<GatewayHandle> {
   const tier = stack.config.tier;
-  const anonymous = opts.anonymous ?? tier !== 'production';
+  // Anonymous callers only when the config says so; never on the production tier.
+  const anonymous = opts.anonymous === true;
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULTS.maxBodyBytes;
   const requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULTS.requestTimeoutMs;
   const telemetry: TelemetryPort = stack.telemetry;
+  if (tier === 'production' && anonymous) throw new ConfigError(['gateway: anonymous requests are not allowed on the production tier (remove gateway.anonymous)']);
+  if (tier === 'production' && !stack.ports.identity) throw new ConfigError(['gateway: the production tier needs an identity adapter (layers.identity) to authenticate requests']);
   if (!stack.ports.identity && !anonymous) {
-    throw new ConfigError(['gateway: no identity adapter is configured and anonymous requests are not allowed, so every request would be refused']);
+    throw new ConfigError(['gateway: no identity adapter is configured and gateway.anonymous is not true, so every request would be refused']);
   }
 
   const selected = opts.inbound
@@ -95,7 +98,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     async accept(trigger, ctx = {}) {
       const agent = trigger.agent ?? stack.agents()[0];
       if (!agent || !stack.agents().includes(agent)) throw new InboundRejected('not_found', `unknown agent "${trigger.agent ?? ''}"`);
-      if (!ctx.identity && (tier === 'production' || !anonymous)) throw new InboundRejected('unauthenticated', 'a trigger run needs an identity');
+      if (!ctx.identity && !anonymous) throw new InboundRejected('unauthenticated', 'a trigger run needs an identity');
       if (draining) throw new InboundRejected('forbidden', 'the gateway is shutting down');
       const input = typeof trigger.data === 'string' ? trigger.data : JSON.stringify(trigger.data ?? {});
       const attrs = { 'agent.layer': 'interface' as const, 'trigger.type': trigger.type, 'run.id': trigger.id, 'gen_ai.agent.name': agent };

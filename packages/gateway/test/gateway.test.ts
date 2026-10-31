@@ -114,10 +114,16 @@ test('production tier: no credential or a bad one is a 401 with WWW-Authenticate
   }
 });
 
-test('prototype tier allows anonymous callers unless the config says otherwise', async () => {
+test('anonymous callers only with anonymous: true, never on the production tier', async () => {
   const stack = await stackFor('prototype');
-  const open = await serveStack(stack, { port: 0 });
-  const closed = await serveStack(stack, { port: 0, anonymous: false });
+  const open = await serveStack(stack, { port: 0, anonymous: true });
+  const closed = await serveStack(stack, { port: 0 });
+  const prod = await stackFor('production');
+  await assert.rejects(serveStack(prod, { port: 0, anonymous: true }), /not allowed on the production tier/);
+  await prod.close();
+  const noIdentity = await compose(resolveProfile({ layers: { identity: null }, profiles: { p: { tier: 'production' } } }, 'p'));
+  await assert.rejects(serveStack(noIdentity, { port: 0 }), /needs an identity adapter/);
+  await noIdentity.close();
   try {
     assert.deepEqual(await (await fetch(`${open.url}/echo`, { method: 'POST', body: '{"text":"ping"}' })).json(), { who: null, output: 'pong', status: 'completed' });
     assert.equal((await fetch(`${closed.url}/echo`, { method: 'POST', body: '{"text":"ping"}' })).status, 401);
@@ -130,7 +136,7 @@ test('prototype tier allows anonymous callers unless the config says otherwise',
 
 test('limits: 404, 405, 413, 504 on timeout, 500 without the error text', async () => {
   const stack = await stackFor('prototype');
-  const gw = await serveStack(stack, { port: 0, maxBodyBytes: 64, requestTimeoutMs: 100 });
+  const gw = await serveStack(stack, { port: 0, anonymous: true, maxBodyBytes: 64, requestTimeoutMs: 100 });
   try {
     assert.equal((await fetch(`${gw.url}/nowhere`)).status, 404);
     const wrong = await fetch(`${gw.url}/echo`);
@@ -185,14 +191,15 @@ test('CORS is off by default and answers only the configured origins', async () 
   }
 });
 
-test('triggers: accepted with the caller identity; never anonymous on the production tier', async () => {
+test('triggers: accepted with the caller identity; never anonymous without anonymous: true', async () => {
   const stack = await stackFor('production');
-  const gw = await serveStack(stack, { port: 0, anonymous: true });
+  const gw = await serveStack(stack, { port: 0 });
   try {
     const ok = await fetch(`${gw.url}/hook`, { method: 'POST', headers: auth });
     assert.equal(ok.status, 202);
     assert.match((await ok.json() as { runId: string }).runId, /^t-/);
     await assert.rejects(sink!.accept({ id: 'x', type: 't', source: 's' }), (e: { kind?: string }) => e.kind === 'unauthenticated');
+    assert.equal((await fetch(`${gw.url}/hook`, { method: 'POST' })).status, 401);
     await assert.rejects(sink!.accept({ id: 'x', type: 't', source: 's', agent: 'ghost' }, { identity: { subject: 'u', kind: 'user' } }), (e: { kind?: string }) => e.kind === 'not_found');
   } finally {
     await gw.close();
@@ -202,7 +209,7 @@ test('triggers: accepted with the caller identity; never anonymous on the produc
 
 test('close is graceful: a request in flight completes, new ones are refused', async () => {
   const stack = await stackFor('prototype');
-  const gw = await serveStack(stack, { port: 0 });
+  const gw = await serveStack(stack, { port: 0, anonymous: true });
   const status = new Promise<number>((resolve, reject) => {
     const req = request(`${gw.url}/echo`, { method: 'POST', headers: { 'content-type': 'application/json' } }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode ?? 0)); });
     req.on('error', reject);

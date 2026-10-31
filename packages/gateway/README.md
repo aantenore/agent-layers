@@ -23,7 +23,7 @@ From the command line: `agent-layers gateway --profile <name> [--port <n>] [--ho
 2. Route lookup: exact paths before prefixes, longer before shorter; 404 or 405 with `Allow`.
 3. Authentication, unless the route is `public` (discovery documents): `Authorization: Bearer <credential>` verified
    through the identity port, and the identity passed to the route. No credential: 401 with
-   `WWW-Authenticate: Bearer realm="agent-layers"`, unless anonymous callers are allowed. A credential that does not
+   `WWW-Authenticate: Bearer realm="agent-layers"`, unless the config sets `anonymous: true`. A credential that does not
    verify: always 401 with `error="invalid_token"`; the adapter's error text is never returned.
 4. Body limit (413) and time limit (504); an error inside a route is a 500 without its message.
 5. One span `gateway.request` on the `interface` layer, with method, path (never the query string), route, inbound
@@ -33,8 +33,10 @@ From the command line: `agent-layers gateway --profile <name> [--port <n>] [--ho
 gate and the gateway is not draining, 503 otherwise.
 
 Triggers mounted on the gateway hand their events to a sink that starts the run in the background and answers with
-its run id. A trigger run needs an identity unless anonymous callers are allowed; on the production tier it always
-does.
+its run id. A trigger run needs an identity unless the config sets `anonymous: true`.
+
+On the production tier the gateway refuses to start without an identity adapter or with `anonymous: true`. On other
+tiers, without an identity adapter it starts only with `anonymous: true`.
 
 `close()` stops accepting connections, waits for requests and trigger runs in flight (up to `closeGraceMs`), then
 releases the mounts. It does not close the stack.
@@ -48,7 +50,7 @@ The `gateway` block of the stack config, overridable per profile; `serveStack` t
 | `port` | integer | `8787` | `0` picks a free port |
 | `host` | string | `127.0.0.1` | Interface to listen on |
 | `inbound` | string[] | every mountable one | Instance names of the channels and triggers to mount |
-| `anonymous` | boolean | `true` on prototype, `false` on production | Accept requests without a credential |
+| `anonymous` | boolean | `false` | Accept requests without a credential; refused on the production tier |
 | `maxBodyBytes` | integer | `1048576` | Largest request body |
 | `requestTimeoutMs` | integer | `300000` | Time limit of one request, streams included |
 | `publicOrigin` | string | the listen address | Origin used in absolute URLs, behind a proxy |
