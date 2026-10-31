@@ -10,9 +10,9 @@ test('k sets how many passages a query without k returns; the default is 4', asy
   const { dir, cleanup } = await tempDir(FILES);
   try {
     const query = 'Quillmere harbour town tide gate lighthouse beacon salt pans';
-    assert.equal((await createMarkdownKnowledge({ dir: '.' }, { cwd: dir }).search({ query })).length, 4);
-    assert.equal((await createMarkdownKnowledge({ dir: '.', k: 2 }, { cwd: dir }).search({ query })).length, 2);
-    assert.equal((await createMarkdownKnowledge({ dir: '.', k: 2 }, { cwd: dir }).search({ query, k: 3 })).length, 3);
+    assert.equal((await createMarkdownKnowledge({ dir: '.' }, { cwd: dir }).search({ text: query })).length, 4);
+    assert.equal((await createMarkdownKnowledge({ dir: '.', k: 2 }, { cwd: dir }).search({ text: query })).length, 2);
+    assert.equal((await createMarkdownKnowledge({ dir: '.', k: 2 }, { cwd: dir }).search({ text: query, k: 3 })).length, 3);
   } finally {
     await cleanup();
   }

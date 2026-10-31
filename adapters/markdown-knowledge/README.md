@@ -3,10 +3,16 @@
 Maps **Markdown files** → **KnowledgePort** (layer `knowledge`). Tier: prototype, production.
 
 Reads the Markdown files below a directory, splits them into chunks at `#`, `##` and `###` headings and ranks the chunks
-with BM25, giving extra weight to query terms that appear in the heading. Each passage carries the heading path
-(for example `Port of Quillmere > Tide gate`), its file as `source`, and `metadata` with `file`, `heading` and `title`.
-Files are read on the first search and cached; call `refresh()` on the instance to reload them. The query filter
-`{ "source": "guide/*" }` takes one glob or an array of globs over the relative file path.
+with BM25, giving extra weight to query terms that appear in the heading. Each passage text starts with the heading path
+(for example `Port of Quillmere > Tide gate`); `source` is the instance name, `title` the document title, `attrs` hold
+`file` (relative POSIX path) and `heading`, and `score` is the raw BM25 score (the core fuses scores across sources).
+Files are read on the first search and cached; call `refresh()` on the instance to reload them. The query filter works
+on `attrs`: a string is a glob (`{ "file": "guide/*" }`), a list means any of, and a passage without the key does not
+match.
+
+Mappings: `in` rules on `Passage` (instance key `knowledge.<name>`). The source document of a rule is the chunk
+`{ file, slug, heading, title, body }`; for example `{ "from": "/file", "to": "/url" }`. The filter sees the mapped
+`attrs`.
 
 ## Options
 

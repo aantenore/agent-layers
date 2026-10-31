@@ -10,7 +10,7 @@ test('markdown-knowledge passes KnowledgePort conformance', async () => {
     const report = await checkAdapter(adapter, {
       options: { dir: '.' },
       ctx: { cwd: dir },
-      fixtures: { query: 'quillmere tide gate', expectText: '14:20', filter: { source: 'guild/fishers.md' } },
+      fixtures: { query: 'quillmere tide gate', expectText: '14:20', filter: { file: 'guild/fishers.md' } },
     });
     assert.deepEqual(report.failures, []);
   } finally {

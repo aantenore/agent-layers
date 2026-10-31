@@ -1,6 +1,9 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, extname, resolve, sep } from 'node:path';
-import { defineAdapter, defineLimits, limitProperties, limitValue, matchesAny, PORT_VERSIONS, type KnowledgePort, type Passage } from '@agent-layers/core';
+import {
+  defineAdapter, defineLimits, limitProperties, limitValue, matchesAny, noMappings, PORT_VERSIONS, type AttrFilter, type Attrs, type KnowledgePort, type Mappings,
+  type Passage,
+} from '@agent-layers/core';
 import { chunkMarkdown } from './chunk.ts';
 import { Bm25, indexDoc, tokenize } from './rank.ts';
 
@@ -24,8 +27,27 @@ export type MarkdownKnowledge = KnowledgePort & {
   refresh(): Promise<void>;
 };
 
-interface Entry { passage: Omit<Passage, 'score'>; source: string }
-interface Index { entries: Entry[]; bm25: Bm25 }
+interface Index { passages: Omit<Passage, 'score'>[]; bm25: Bm25 }
+
+/** What one chunk looks like before it becomes a passage: the source document of the `in` mapping rules. */
+export interface MarkdownChunk { file: string; slug: string; heading: string; title: string; body: string }
+
+/**
+ * True when the passage's attributes satisfy the filter: every key must be present; a string value is a glob over a
+ * string attribute (or any element of a list attribute), other values compare equal; a list means any of.
+ */
+export function matchesFilter(attrs: Attrs | undefined, filter: AttrFilter | undefined): boolean {
+  if (!filter) return true;
+  for (const [key, wanted] of Object.entries(filter)) {
+    const have = attrs?.[key];
+    if (have === undefined) return false;
+    const values = Array.isArray(have) ? have : [have];
+    const ok = (Array.isArray(wanted) ? wanted : [wanted]).some((w) =>
+      values.some((v) => (typeof w === 'string' && typeof v === 'string' ? matchesAny([w], v) : v === w)));
+    if (!ok) return false;
+  }
+  return true;
+}
 
 /** Relative POSIX paths of the matching files below `root`, dot-directories skipped, sorted. */
 async function listFiles(root: string, extensions: readonly string[]): Promise<string[]> {
@@ -43,31 +65,30 @@ async function listFiles(root: string, extensions: readonly string[]): Promise<s
     .sort();
 }
 
-async function buildIndex(root: string, extensions: readonly string[]): Promise<Index> {
-  const entries: Entry[] = [];
+async function buildIndex(root: string, extensions: readonly string[], source: string, mappings: Mappings): Promise<Index> {
+  const passages: Omit<Passage, 'score'>[] = [];
   const docs: ReturnType<typeof indexDoc>[] = [];
   for (const rel of await listFiles(root, extensions)) {
     const markdown = await readFile(resolve(root, rel), 'utf8');
     for (const chunk of chunkMarkdown(markdown, basename(rel, extname(rel)))) {
-      entries.push({
-        source: rel,
-        passage: {
-          id: `${rel}#${chunk.slug}`,
-          text: `${chunk.heading}\n\n${chunk.body}`,
-          source: rel,
-          metadata: { file: rel, heading: chunk.heading, title: chunk.title },
-        },
-      });
+      const native: MarkdownChunk = { file: rel, slug: chunk.slug, heading: chunk.heading, title: chunk.title, body: chunk.body };
+      passages.push(mappings.in(native, {
+        id: `${rel}#${chunk.slug}`,
+        text: `${chunk.heading}\n\n${chunk.body}`,
+        source,
+        title: chunk.title,
+        attrs: { file: rel, heading: chunk.heading },
+      }));
       docs.push(indexDoc(chunk.heading, chunk.name, chunk.body));
     }
   }
-  return { entries, bm25: new Bm25(docs) };
+  return { passages, bm25: new Bm25(docs) };
 }
 
 /** Factory: usable directly from code, without the registry. */
 export function createMarkdownKnowledge(
   options: MarkdownKnowledgeOptions,
-  { cwd = process.cwd(), name = 'markdown-knowledge' }: { cwd?: string; name?: string } = {},
+  { cwd = process.cwd(), name = 'markdown-knowledge', mappings = noMappings() }: { cwd?: string; name?: string; mappings?: Mappings } = {},
 ): MarkdownKnowledge {
   const root = resolve(cwd, options.dir);
   const defaultK = limitValue(LIMITS.k, options.k);
@@ -78,16 +99,14 @@ export function createMarkdownKnowledge(
     name,
     async search(q) {
       q.signal?.throwIfAborted();
-      const terms = [...new Set(tokenize(q.query))];
+      const terms = [...new Set(tokenize(q.text))];
       if (!terms.length) return [];
-      const idx = await (index ??= buildIndex(root, extensions).catch((err) => { index = undefined; throw err; }));
-      const source = q.filter?.source;
-      const globs = typeof source === 'string' ? [source] : Array.isArray(source) ? source.filter((s): s is string => typeof s === 'string') : undefined;
+      const idx = await (index ??= buildIndex(root, extensions, name, mappings).catch((err) => { index = undefined; throw err; }));
       const scored: Passage[] = [];
-      idx.entries.forEach((e, i) => {
-        if (globs && !matchesAny(globs, e.source)) return;
+      idx.passages.forEach((p, i) => {
+        if (!matchesFilter(p.attrs, q.filter)) return;
         const score = idx.bm25.score(i, terms);
-        if (score > 0) scored.push({ ...e.passage, score });
+        if (score > 0) scored.push({ ...p, score });
       });
       return scored.sort((a, b) => b.score! - a.score! || a.id.localeCompare(b.id)).slice(0, Math.max(0, q.k ?? defaultK));
     },
@@ -119,7 +138,9 @@ export const adapter = defineAdapter<'KnowledgePort', MarkdownKnowledgeOptions>(
     additionalProperties: false,
   },
   limits: LIMITS,
-  create: (options, ctx) => createMarkdownKnowledge(options, { cwd: ctx.cwd, name: ctx.name }),
+  ext: { produces: [] },
+  mappingDefaults: { in: { shape: 'Passage' } },
+  create: (options, ctx) => createMarkdownKnowledge(options, { cwd: ctx.cwd, name: ctx.name, mappings: ctx.mappings }),
 });
 
 export const adapters = [adapter];
