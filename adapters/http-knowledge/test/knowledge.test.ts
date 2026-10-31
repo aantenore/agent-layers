@@ -69,3 +69,16 @@ test('errors reject: HTTP status, a body without passages, an unreachable servic
   assert.throws(() => createHttpKnowledge({ url: '/relative' }), /absolute/);
   assert.throws(() => createHttpKnowledge({ url: '${env:NOPE}' }, { env: {} }), /NOPE is not set/);
 });
+
+test('an error body that echoes the credentials is masked, also across the truncation cut', async () => {
+  const svc = await startKnowledgeService((_body, headers) => ({ status: 500, text: `${'y'.repeat(287)}${headers.authorization} ${headers['x-api-key']}` }));
+  try {
+    const source = createHttpKnowledge({ url: svc.url, headers: { 'x-api-key': 'key-from-env-123' }, forwardIdentityToken: true });
+    await assert.rejects(
+      source.search({ query: 'x', identity: { subject: 'u', kind: 'user', token: 'user-token-9' } }),
+      (err: Error) => /\[redacted\]/.test(err.message) && !/user-t|key-/.test(err.message),
+    );
+  } finally {
+    await svc.close();
+  }
+});

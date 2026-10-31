@@ -11,7 +11,7 @@ const DOCS = [
 ];
 
 /** A service that implements the knowledge HTTP contract: word match, metadata filter, at most `k` passages. */
-export async function startKnowledgeService(respond?: (body: Record<string, any>) => { status?: number; json?: unknown; text?: string }): Promise<KnowledgeMock> {
+export async function startKnowledgeService(respond?: (body: Record<string, any>, headers: IncomingMessage['headers']) => { status?: number; json?: unknown; text?: string }): Promise<KnowledgeMock> {
   const requests: Seen[] = [];
   const server = createServer(async (req, res) => {
     let raw = '';
@@ -19,7 +19,7 @@ export async function startKnowledgeService(respond?: (body: Record<string, any>
     const body = raw ? JSON.parse(raw) : {};
     requests.push({ headers: req.headers, body });
     if (respond) {
-      const out = respond(body);
+      const out = respond(body, req.headers);
       res.writeHead(out.status ?? 200, { 'content-type': out.json !== undefined ? 'application/json' : 'text/plain' });
       res.end(out.json !== undefined ? JSON.stringify(out.json) : (out.text ?? ''));
       return;

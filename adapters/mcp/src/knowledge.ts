@@ -54,7 +54,7 @@ export function createMcpKnowledge(options: McpKnowledgeOptions, deps: McpKnowle
       } catch (err) {
         throw scrubError(err, forms);
       }
-      if (res.isError) throw new Error(redact(`MCP tool ${cfg.tool} failed: ${res.content.slice(0, 300)}`, forms));
+      if (res.isError) throw new Error(`MCP tool ${cfg.tool} failed: ${redact(res.content, forms).slice(0, 300)}`);
       const passages = parse ? parse(res, q) : parseMcpResult(res, name);
       const kept = cfg.filterArg ? passages : passages.filter((p) => matchesFilter(p.metadata, q.filter));
       return kept.slice(0, Math.max(0, k));

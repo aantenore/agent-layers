@@ -13,7 +13,7 @@ export interface McpMock {
 }
 
 /** Streamable-HTTP MCP fixture server on a random port. */
-export async function startMcpMock(opts: { sse?: boolean; requireAuth?: string; /** Answer tools/call with an error that echoes the credentials it received. */ echoErrors?: 'http' | 'rpc' } = {}): Promise<McpMock> {
+export async function startMcpMock(opts: { sse?: boolean; requireAuth?: string; /** Answer tools/call with an error that echoes the credentials it received. */ echoErrors?: 'http' | 'rpc' | 'long' } = {}): Promise<McpMock> {
   const requests: Seen[] = [];
   let session = 0;
   let expired = new Set<string>();
@@ -29,6 +29,8 @@ export async function startMcpMock(opts: { sse?: boolean; requireAuth?: string; 
     if (msg.method === 'notifications/initialized') { res.writeHead(202).end(); return; }
     if (opts.echoErrors && msg.method === 'tools/call') {
       const echoed = `${req.headers.authorization} ${req.headers['x-api-key']}`;
+      // The credentials start 287 characters in, so the 300-character cut falls inside them.
+      if (opts.echoErrors === 'long') { res.writeHead(500, { 'content-type': 'text/plain' }).end(`${'y'.repeat(287)}${echoed}`); return; }
       if (opts.echoErrors === 'http') { res.writeHead(500, { 'content-type': 'text/plain' }).end(`upstream failed for ${echoed}`); return; }
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32000, message: `rejected ${echoed}` } }));
       return;

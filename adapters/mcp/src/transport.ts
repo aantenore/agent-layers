@@ -218,7 +218,8 @@ export class HttpTransport implements Transport {
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     this.#session = res.headers.get('mcp-session-id') ?? this.#session;
-    if (!res.ok) throw new McpHttpError(res.status, redact((await res.text().catch(() => '')).slice(0, 300), this.#secrets(auth)));
+    // Mask the whole body before cutting it: a secret that straddles the cut would otherwise survive in part.
+    if (!res.ok) throw new McpHttpError(res.status, redact(await res.text().catch(() => ''), this.#secrets(auth)).slice(0, 300));
     return { res, auth };
   }
 

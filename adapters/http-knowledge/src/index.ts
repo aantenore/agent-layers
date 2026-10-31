@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { defineAdapter, PORT_VERSIONS, type KnowledgePort, type Passage } from '@agent-layers/core';
 import { interpolate } from './env.ts';
+import { headerSecrets, redact, secretForms } from './redact.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface HttpKnowledgeOptions {
@@ -50,18 +51,18 @@ export function createHttpKnowledge(
     async search(q) {
       const k = q.k ?? options.k ?? DEFAULT_K;
       const timeout = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      const sent: Record<string, string> = {
+        ...headers,
+        ...(options.forwardIdentityToken && q.identity?.token ? { authorization: `Bearer ${q.identity.token}` } : {}),
+      };
       const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-          ...headers,
-          ...(options.forwardIdentityToken && q.identity?.token ? { authorization: `Bearer ${q.identity.token}` } : {}),
-        },
+        headers: { 'content-type': 'application/json', accept: 'application/json', ...sent },
         body: JSON.stringify({ query: q.query, k, ...(q.filter ? { filter: q.filter } : {}) }),
         signal: q.signal ? AbortSignal.any([q.signal, timeout]) : timeout,
       });
-      if (!res.ok) throw new Error(`knowledge HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, ERROR_BODY_CHARS)}`);
+      // The error body may echo the credentials; mask the whole body before cutting it.
+      if (!res.ok) throw new Error(`knowledge HTTP ${res.status}: ${redact(await res.text().catch(() => ''), secretForms(headerSecrets(sent))).slice(0, ERROR_BODY_CHARS)}`);
       const body: unknown = await res.json().catch(() => undefined);
       if (!isRecord(body) || !Array.isArray(body.passages)) throw new Error('knowledge HTTP: response has no "passages" array');
       return body.passages.flatMap((p) => toPassage(p, source) ?? []).slice(0, Math.max(0, k));

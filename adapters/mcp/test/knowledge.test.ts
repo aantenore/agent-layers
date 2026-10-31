@@ -62,11 +62,11 @@ test('search: a failing tool rejects, custom argument names and parser are used'
   }
 });
 
-test('search: errors that echo static header secrets are masked', async () => {
-  const mock = await startMcpMock({ echoErrors: 'http' });
+test('search: errors that echo static header secrets are masked, also across the truncation cut', async () => {
+  const mock = await startMcpMock({ echoErrors: 'long' });
   const source = createMcpKnowledge({ url: mock.url, tool: 'search', headers: { 'x-api-key': 'key-from-env-123' } });
   try {
-    await assert.rejects(source.search({ query: 'x' }), (err: Error) => /\[redacted\]/.test(err.message) && !/key-from-env-123/.test(`${err.message}\n${err.stack}`));
+    await assert.rejects(source.search({ query: 'x' }), (err: Error) => /MCP HTTP 500/.test(err.message) && !/key/.test(`${err.message}\n${err.stack}`));
   } finally {
     await source.close?.();
     await mock.close();
