@@ -13,7 +13,7 @@ test('oidc passes IdentityPort conformance', async () => {
     const report = await checkAdapter(identityAdapter, {
       options: { issuer: p.issuer, audience: 'agent-runtime' },
       fixtures: {
-        valid, expectSubject: 'alice',
+        valid, expectId: 'alice',
         invalid: ['', 'not-a-credential', `${b64({ alg: 'none' })}.${b64(claims)}.`, signJwt(key, { ...claims, exp: nowSec() - 3600 }), signJwt(key, { ...claims, aud: 'other' })],
       },
     });

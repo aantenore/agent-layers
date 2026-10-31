@@ -2,7 +2,7 @@
 //   docker compose -f reference/identity/compose.yml --env-file .env.example up -d --wait
 import assert from 'node:assert/strict';
 import { before, describe, test } from 'node:test';
-import { compose, recordingTelemetry, resolveProfile, toolAccessRequest, type Identity, type TelemetryRecord } from '@agent-layers/core';
+import { accessQuestion, compose, noMappings, recordingTelemetry, resolveProfile, SPAN, type Caller, type TelemetryRecord } from '@agent-layers/core';
 import { checkAdapter } from '@agent-layers/conformance';
 import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
 import { adapter as functions, defineTool } from '@agent-layers/adapter-functions';
@@ -57,11 +57,12 @@ async function serviceAccountId(client: string): Promise<string> {
 let agentSubjects: Record<string, string> = {};
 const agentOptions = () => ({ agentClients: [clientId], agentSubjects });
 const inbound = () => createOidcIdentity({ issuer, audience: clientId, ...agentOptions() });
-const downstream = () => createOidcIdentity({ issuer, audience: toolsAudience, ...agentOptions() });
+const downstream = () => createOidcIdentity({ issuer, audience: toolsAudience, keepClaims: true, ...agentOptions() });
+const claimsOf = (c: Caller) => c.ext?.['oidc.claims'] as Record<string, unknown> | undefined;
 
 describe('reference/identity (Keycloak + OPA)', { skip }, () => {
-  let alice: Identity;
-  let bob: Identity;
+  let alice: Caller;
+  let bob: Caller;
   before(async () => {
     agentSubjects = { [clientId]: await serviceAccountId(clientId) };
     alice = await inbound().verify(await passwordToken('alice'));
@@ -70,40 +71,42 @@ describe('reference/identity (Keycloak + OPA)', { skip }, () => {
 
   test('verifies Keycloak user tokens; passes IdentityPort conformance', async () => {
     assert.equal(alice.kind, 'user');
-    assert.equal(alice.claims?.preferred_username, 'alice');
-    assert.ok(alice.roles?.includes('analyst'));
-    assert.ok(bob.roles?.includes('viewer') && !bob.roles.includes('analyst'));
-    await assert.rejects(downstream().verify(alice.token!), /audience/);
-    const report = await checkAdapter(identityAdapter, { options: { issuer, audience: clientId }, fixtures: { valid: alice.token, expectSubject: alice.subject } });
+    assert.equal(alice.name, 'alice');
+    assert.equal(alice.ext?.['oidc.claims'], undefined, 'no raw claims without keepClaims');
+    assert.equal(typeof alice.ext?.['oidc.exp'], 'number');
+    assert.ok(alice.roles.includes('analyst'));
+    assert.ok(bob.roles.includes('viewer') && !bob.roles.includes('analyst'));
+    await assert.rejects(downstream().verify(alice.credential!), /audience/);
+    const report = await checkAdapter(identityAdapter, { options: { issuer, audience: clientId, keepClaims: true }, fixtures: { valid: alice.credential, expectId: alice.id } });
     assert.deepEqual(report.failures, []);
   });
 
   test('exchanges alice\'s token on her behalf for tools-api (RFC 8693)', async () => {
     const creds = createOidcCredentials({ issuer, clientId, clientSecret, mode: 'on-behalf-of' });
-    const token = await creds.token(toolsAudience, { identity: alice });
+    const token = await creds.token(toolsAudience, { caller: alice });
     const exchanged = await downstream().verify(token);
-    assert.equal(exchanged.subject, alice.subject);
+    assert.equal(exchanged.id, alice.id);
     assert.equal(exchanged.kind, 'user');
-    assert.equal(exchanged.claims?.azp, clientId);
-    assert.ok([exchanged.claims?.aud].flat().includes(toolsAudience));
-    assert.equal(await creds.token(toolsAudience, { identity: alice }), token, 'cached');
-    assert.notEqual(await creds.token(toolsAudience, { identity: bob }), token, 'per caller');
+    assert.equal(claimsOf(exchanged)?.azp, clientId);
+    assert.ok([claimsOf(exchanged)?.aud].flat().includes(toolsAudience));
+    assert.equal(await creds.token(toolsAudience, { caller: alice }), token, 'cached');
+    assert.notEqual(await creds.token(toolsAudience, { caller: bob }), token, 'per caller');
   });
 
   test('gets the agent its own token with client_credentials; passes CredentialPort conformance', async () => {
     const token = await createOidcCredentials({ issuer, clientId, clientSecret, mode: 'self' }).token(toolsAudience);
     const self = await downstream().verify(token);
     assert.equal(self.kind, 'agent');
-    assert.equal(self.subject, agentSubjects[clientId]);
-    assert.equal(self.claims?.azp, clientId);
+    assert.equal(self.id, agentSubjects[clientId]);
+    assert.equal(claimsOf(self)?.azp, clientId);
     assert.equal((await createOidcIdentity({ issuer, audience: toolsAudience }).verify(token)).kind, 'user', 'without agentClients never agent');
     const report = await checkAdapter(credentialAdapter, { options: { issuer, clientId, clientSecret, mode: 'self' }, fixtures: { audience: toolsAudience } });
     assert.deepEqual(report.failures, []);
   });
 
   test('OPA allows alice and denies bob on a write tool (AuthorizationPort conformance)', async () => {
-    const spec = { name: 'notes__save', description: 's', inputSchema: {}, risk: 'write' as const };
-    const req = (identity?: Identity) => toolAccessRequest('notes__save', spec, {}, { runId: 'r', agent: 'notes', ...(identity ? { identity } : {}) });
+    const spec = { name: 'notes__save', description: 's', params: {}, risk: 'write' as const };
+    const req = (caller?: Caller) => accessQuestion('notes__save', spec, {}, { runId: 'r', agent: 'notes', ...(caller ? { caller } : {}) });
     const report = await checkAdapter(opa, { options: { url: opaUrl }, fixtures: { allow: [req(alice)], deny: [req(bob), req()] } });
     assert.deepEqual(report.failures, []);
   });
@@ -113,11 +116,11 @@ describe('reference/identity (Keycloak + OPA)', { skip }, () => {
     const issued: string[] = [];
     const save = defineTool({
       name: 'save_note', description: 'Saves a note', risk: 'write', audience: toolsAudience,
-      inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+      params: { type: 'object', properties: { text: { type: 'string' } } },
       async run(_args, ctx) {
         const token = await ctx.credentials!.token(toolsAudience);
         issued.push(token);
-        return `saved for ${(await downstream().verify(token)).subject}`;
+        return `saved for ${(await downstream().verify(token)).id}`;
       },
     });
     const config = resolveProfile({
@@ -131,21 +134,21 @@ describe('reference/identity (Keycloak + OPA)', { skip }, () => {
       },
       agents: { notes: { instructions: 'You save notes.', model: 'mock', tools: ['notes__*'] } },
     });
-    const notes = { ...functions, create: () => functions.create({ tools: [save] }, { name: 'notes', env: {}, cwd: process.cwd(), telemetry: undefined as never }) };
+    const notes = { ...functions, create: () => functions.create({ tools: [save] }, { name: 'notes', env: {}, cwd: process.cwd(), telemetry: undefined as never, mappings: noMappings('tools.notes') }) };
     const stack = await compose(config, { adapters: [identityAdapter, credentialAdapter, opa, mockModel, basicRuntime, notes], telemetry: [recordingTelemetry((r) => records.push(r))] });
     try {
       const agent = await stack.agent('notes');
-      const asAlice = await agent.run('save a note', { identity: await stack.verify(alice.token!) });
-      assert.equal(asAlice.output, `saved for ${alice.subject}`);
-      const asBob = await agent.run('save a note', { identity: await stack.verify(bob.token!) });
-      assert.match(asBob.output, new RegExp(`^Denied: user ${bob.subject} may not call write tools$`));
+      const asAlice = await agent.run('save a note', { caller: await stack.verify(alice.credential!) });
+      assert.equal(asAlice.output, `saved for ${alice.id}`);
+      const asBob = await agent.run('save a note', { caller: await stack.verify(bob.credential!) });
+      assert.match(asBob.output, new RegExp(`^Denied: user ${bob.id} may not call write tools$`));
       const anonymous = await agent.run('save a note');
       assert.match(anonymous.output, /^Denied: anonymous anonymous may not call write tools$/);
       assert.equal(issued.length, 1, 'denied calls never get a token');
 
       const dump = JSON.stringify([records, asAlice.events, asBob.events, anonymous.events]);
-      for (const secret of [alice.token!, bob.token!, ...issued, clientSecret]) assert.ok(!dump.includes(secret), 'no token or secret in telemetry or events');
-      assert.ok(records.some((r) => r.name === 'authorize'), 'authorization was traced');
+      for (const secret of [alice.credential!, bob.credential!, ...issued, clientSecret]) assert.ok(!dump.includes(secret), 'no token or secret in telemetry or events');
+      assert.ok(records.some((r) => r.name === SPAN.accessCheck), 'authorization was traced');
     } finally {
       await stack.close();
     }

@@ -1,4 +1,4 @@
-import { limitValue, type Identity, type IdentityPort, type LimitValue } from '@agent-layers/core';
+import { createMappings, limitValue, MappingError, type Caller, type IdentityPort, type LimitValue, type MappingRule, type Mappings } from '@agent-layers/core';
 import { abortable, discover, OidcError, requestJson, secureUrl, type FetchLike, type HttpLimits } from './http.ts';
 import { candidateKeys, checkAlgorithm, decodeJwt, importKey, verifySignature, type Jwk } from './jwt.ts';
 import { IDENTITY_LIMITS as LIMITS } from './limits.ts';
@@ -48,12 +48,16 @@ export interface OidcIdentityOptions {
   roleClients?: string[];
   /** Client roles as `<client>:<role>`, so they cannot collide with realm roles (default true). */
   namespaceClientRoles?: boolean;
+  /** Keep the verified claims under `ext["oidc.claims"]` (default false: guards and policies see no raw claims). */
+  keepClaims?: boolean;
 }
 
 /** Code-only extensions: not part of the JSON options. */
 export interface OidcIdentityHooks {
-  /** Derives `Identity.kind` from the verified claims (default `agentKind` with `agentClients` / `agentSubjects`). */
+  /** Derives `Caller.kind` from the verified claims (default `agentKind` with `agentClients` / `agentSubjects`). */
   kind?: (claims: Record<string, unknown>) => 'user' | 'agent';
+  /** Claims → caller mappings (the stack's `mappings.identity`). Default: `CALLER_RULES`. */
+  mappings?: Mappings;
   fetch?: FetchLike;
   /** Clock in milliseconds (tests). */
   now?: () => number;
@@ -61,6 +65,21 @@ export interface OidcIdentityHooks {
 
 export const DEFAULT_ALGORITHMS = ['RS256', 'ES256'];
 
+/** Verified claims, only with `keepClaims`. */
+export const CLAIMS_KEY = 'oidc.claims';
+/** The verified `exp` claim (seconds), always: the credential adapter bounds exchanged tokens by it. */
+export const EXP_KEY = 'oidc.exp';
+
+/**
+ * Default claims → caller rules (Keycloak layout and RFC 9068), replaceable through the stack's `mappings.identity.in`.
+ * Two things stay in code: `resource_access.<client>.roles` of the configured clients (a rule cannot name them) and
+ * the `scp` claim, merged with the scopes. `id`, `kind` and `credential` come from verification and cannot be mapped.
+ */
+export const CALLER_RULES: readonly MappingRule[] = Object.freeze([
+  { from: ['/realm_access/roles', '/roles'], to: '/roles', join: 'union' },
+  { from: '/scope', to: '/scopes', split: ' ' },
+  { from: '/preferred_username', to: '/name' },
+]);
 const invalid = (why: string) => new OidcError('invalid_token', why);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : typeof v === 'string' ? [v] : []);
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -92,28 +111,55 @@ export function agentKind(claims: Record<string, unknown>, cfg: AgentClients = {
 }
 
 /**
- * Roles: `realm_access.roles`, the issuer-set `roles` claim, and `resource_access` roles of the listed clients only,
- * as `<client>:<role>` unless `namespace` is false. Deduplicated.
+ * `resource_access` roles of the listed clients only, as `<client>:<role>` unless `namespace` is false. Clients that
+ * are not listed are never read.
  */
-export function rolesOf(claims: Record<string, unknown>, clients: readonly string[] = [], namespace = true): string[] {
-  const out = new Set(strings((claims.realm_access as { roles?: unknown } | undefined)?.roles));
-  for (const r of strings(claims.roles)) out.add(r);
+export function clientRolesOf(claims: Record<string, unknown>, clients: readonly string[] = [], namespace = true): string[] {
+  const out = new Set<string>();
   const resources = claims.resource_access;
   if (resources && typeof resources === 'object' && !Array.isArray(resources)) {
     for (const client of clients) {
       if (!Object.hasOwn(resources, client)) continue;
       const access = (resources as Record<string, { roles?: unknown } | null>)[client];
-      for (const r of strings(access?.roles)) out.add(namespace ? `${client}:${r}` : r);
+      for (const r of strings(access?.roles)) if (r) out.add(namespace ? `${client}:${r}` : r);
     }
   }
   return [...out];
 }
 
-/** Scopes from `scope` (space separated, RFC 8693 / RFC 9068) and `scp` (array or string). */
-export function scopesOf(claims: Record<string, unknown>): string[] {
-  const out = new Set<string>();
-  for (const s of [...strings(claims.scope), ...strings(claims.scp)]) for (const part of s.split(' ')) if (part) out.add(part);
-  return [...out];
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+// No cause is attached: a rule's error text can carry claim values or, from an `fn`, anything it saw.
+const mappingFailed = (why: string) => new OidcError('config', `oidc: caller mapping failed (${why})`);
+
+/** Non-empty strings of a mapped list; a value that is not a list is a mapping error. */
+function mappedList(v: unknown, field: string): string[] {
+  if (v === undefined) return [];
+  if (!Array.isArray(v)) throw mappingFailed(`${field} is not a list`);
+  return v.filter((x): x is string => typeof x === 'string' && x !== '');
+}
+
+/**
+ * The caller from the mapped shape: `id` and `kind` must be the verified ones; roles and scopes are kept as string
+ * lists and completed with the client roles and `scp`; `name` only when a string; `ext` only in the `oidc` namespace.
+ * Anything else a mapping added is dropped.
+ */
+function finishCaller(mapped: unknown, base: { id: string; kind: 'user' | 'agent' }, claims: Record<string, unknown>, more: { clientRoles: string[]; keepClaims: boolean; credential: string }): Caller {
+  if (!isObject(mapped)) throw mappingFailed('not an object');
+  if (mapped.id !== base.id || mapped.kind !== base.kind) throw mappingFailed('id and kind come from verification');
+  const roles = [...new Set([...mappedList(mapped.roles, 'roles'), ...more.clientRoles])];
+  const scopes = new Set<string>();
+  for (const s of [...mappedList(mapped.scopes, 'scopes'), ...strings(claims.scp)]) for (const part of s.split(/\s+/)) if (part) scopes.add(part);
+  if (mapped.ext !== undefined && !isObject(mapped.ext)) throw mappingFailed('ext is not an object');
+  const ext: Record<string, unknown> = Object.fromEntries(Object.entries(mapped.ext ?? {}).filter(([k]) => k.startsWith('oidc.')));
+  if (isNum(claims.exp)) ext[EXP_KEY] = claims.exp;
+  if (more.keepClaims) ext[CLAIMS_KEY] = structuredClone(claims);
+  else delete ext[CLAIMS_KEY];
+  return {
+    id: base.id, kind: base.kind, roles, scopes: [...scopes],
+    ...(typeof mapped.name === 'string' && mapped.name ? { name: mapped.name } : {}),
+    credential: more.credential,
+    ...(Object.keys(ext).length ? { ext } : {}),
+  };
 }
 
 const normType = (t: string) => t.toLowerCase().replace(/^application\//, '');
@@ -150,6 +196,13 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
   const kindOf = hooks.kind ?? ((c: Record<string, unknown>) => agentKind(c, agents));
   const roleClients = opts.roleClients ? [...opts.roleClients] : audiences;
   const namespaceRoles = opts.namespaceClientRoles ?? true;
+  const keepClaims = opts.keepClaims === true;
+  const mappings = hooks.mappings ?? createMappings('identity', { in: CALLER_RULES });
+  for (const r of mappings.rules.in) {
+    for (const p of [r.to, r.drop]) {
+      if (typeof p === 'string' && /^\/(id|kind|credential)(\/|$)/.test(p)) throw new OidcError('config', `oidc: mappings may not write "${p}": id, kind and credential come from verification`);
+    }
+  }
 
   let keys: Jwk[] | undefined;
   let fetchedAt = 0;
@@ -227,8 +280,15 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
       // A token without `sub` names no one unless it is an allow-listed agent client.
       const subject = c.sub !== undefined ? str(c.sub) : kind === 'agent' ? clientOf(c) : undefined;
       if (!subject) throw invalid('token has no subject');
-      const identity: Identity = { subject, kind, roles: rolesOf(c, roleClients, namespaceRoles), scopes: scopesOf(c), claims: c, token: credential };
-      return identity;
+      const base = { id: subject, kind, roles: [] as string[], scopes: [] as string[] };
+      let mapped: unknown;
+      try {
+        mapped = mappings.in(c, base);
+      } catch (err) {
+        const rule = err instanceof MappingError ? /\b(in\[\d+\])/.exec(err.message)?.[1] : undefined;
+        throw mappingFailed(rule ? `rule ${rule} failed` : 'a rule failed');
+      }
+      return finishCaller(mapped, base, c, { clientRoles: clientRolesOf(c, roleClients, namespaceRoles), keepClaims, credential });
     },
   };
 }

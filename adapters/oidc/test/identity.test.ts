@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { agentKind, createOidcIdentity, IDENTITY_LIMITS, type OidcIdentityOptions } from '../src/index.ts';
+import { createMappings, type MappingFn, type MappingRule } from '@agent-layers/core';
+import { agentKind, CALLER_RULES, createOidcIdentity, IDENTITY_LIMITS, type OidcIdentityOptions } from '../src/index.ts';
 import { b64, ecKey, edKey, hmacJwt, idp, json, nowSec, rsaKey, server, signJwt } from './helpers.ts';
 
 const rs = rsaKey('rs-1');
@@ -27,28 +28,25 @@ async function refused(verify: Promise<unknown>, token: string, pattern: RegExp)
 }
 
 describe('verify', () => {
-  test('accepts a valid token and maps subject, kind, roles, scopes and claims', async () => {
-    const token = signJwt(rs, claims());
-    const id = await port().verify(token);
-    assert.equal(id.subject, 'u-alice');
-    assert.equal(id.kind, 'user');
-    assert.deepEqual(id.roles, ['analyst'], 'realm roles; client roles only of the audience by default');
-    assert.deepEqual(id.scopes, ['openid', 'profile', 'tools.read']);
-    assert.equal(id.claims?.preferred_username, 'alice');
-    assert.equal(id.token, token);
+  test('accepts a valid token and maps id, kind, roles, scopes, name and the expiry; claims only on request', async () => {
+    const c = claims();
+    const token = signJwt(rs, c);
+    assert.deepEqual(await port().verify(token), { id: 'u-alice', kind: 'user', roles: ['analyst'], scopes: ['openid', 'profile', 'tools.read'], name: 'alice', credential: token, ext: { 'oidc.exp': c.exp } },
+      'realm roles; client roles only of the audience by default; no raw claims');
+    assert.deepEqual((await port({ keepClaims: true }).verify(token)).ext?.['oidc.claims'], c);
     assert.deepEqual((await port({ roleClients: ['api'] }).verify(token)).roles, ['analyst', 'api:editor']);
     assert.deepEqual((await port({ roleClients: ['api'], namespaceClientRoles: false }).verify(token)).roles, ['analyst', 'editor']);
   });
 
   test('accepts ES256, and EdDSA / PS256 only when allowed', async () => {
-    assert.equal((await port().verify(signJwt(es, claims()))).subject, 'u-alice');
+    assert.equal((await port().verify(signJwt(es, claims()))).id, 'u-alice');
     const ed = edKey('ed-1');
     const ps = rsaKey('ps-1', 2048, 'PS256');
     p.state.keys = [rs, es, ed, ps];
     try {
       await refused(port().verify(signJwt(ed, claims())), 'x', /not allowed/);
-      assert.equal((await port({ algorithms: ['EdDSA', 'PS256'] }).verify(signJwt(ed, claims()))).subject, 'u-alice');
-      assert.equal((await port({ algorithms: ['PS256'] }).verify(signJwt(ps, claims()))).subject, 'u-alice');
+      assert.equal((await port({ algorithms: ['EdDSA', 'PS256'] }).verify(signJwt(ed, claims()))).id, 'u-alice');
+      assert.equal((await port({ algorithms: ['PS256'] }).verify(signJwt(ps, claims()))).id, 'u-alice');
     } finally {
       p.state.keys = [rs, es];
     }
@@ -100,8 +98,8 @@ describe('verify', () => {
       const token = signJwt(rs, claims(over));
       await refused(port().verify(token), token, pattern);
     }
-    assert.equal((await port({ audience: ['tools-api', 'agent-runtime'] }).verify(signJwt(rs, claims({ aud: ['x', 'agent-runtime'] })))).subject, 'u-alice');
-    assert.equal((await port().verify(signJwt(rs, claims({ exp: nowSec() - 30 })))).subject, 'u-alice', 'within clock skew');
+    assert.equal((await port({ audience: ['tools-api', 'agent-runtime'] }).verify(signJwt(rs, claims({ aud: ['x', 'agent-runtime'] })))).id, 'u-alice');
+    assert.equal((await port().verify(signJwt(rs, claims({ exp: nowSec() - 30 })))).id, 'u-alice', 'within clock skew');
     const old = signJwt(rs, claims({ iat: nowSec() - 3600 }));
     await refused(port({ maxTokenAgeSec: 600 }).verify(old), old, /too old/);
     const noIat = signJwt(rs, claims({ iat: undefined }));
@@ -112,7 +110,7 @@ describe('verify', () => {
     assert.throws(() => createOidcIdentity({ issuer: p.issuer }), /audience/);
     assert.throws(() => createOidcIdentity({ issuer: p.issuer, audience: [] }), /audience/);
     const any = createOidcIdentity({ issuer: p.issuer, allowAnyAudience: true });
-    assert.equal((await any.verify(signJwt(rs, claims({ aud: 'whatever' })))).subject, 'u-alice');
+    assert.equal((await any.verify(signJwt(rs, claims({ aud: 'whatever' })))).id, 'u-alice');
   });
 
   test('refuses critical header parameters and, when configured, other token types', async () => {
@@ -121,8 +119,8 @@ describe('verify', () => {
     const b64Off = signJwt(rs, claims(), { crit: ['b64'], b64: false });
     await refused(port().verify(b64Off), b64Off, /critical/);
     const at = signJwt(rs, claims(), { typ: 'at+jwt' });
-    assert.equal((await port({ types: ['at+jwt'] }).verify(at)).subject, 'u-alice');
-    assert.equal((await port({ types: ['at+jwt'] }).verify(signJwt(rs, claims(), { typ: 'application/AT+JWT' }))).subject, 'u-alice');
+    assert.equal((await port({ types: ['at+jwt'] }).verify(at)).id, 'u-alice');
+    assert.equal((await port({ types: ['at+jwt'] }).verify(signJwt(rs, claims(), { typ: 'application/AT+JWT' }))).id, 'u-alice');
     const idToken = signJwt(rs, claims());
     await refused(port({ types: ['at+jwt'] }).verify(idToken), idToken, /type/);
   });
@@ -140,11 +138,11 @@ describe('verify', () => {
     assert.equal((await port().verify(signJwt(rs, sa))).kind, 'user', 'no allow-list: never agent');
     assert.equal((await port({ agentClients: ['agent-runtime'] }).verify(signJwt(rs, sa))).kind, 'user', 'sub is neither the client nor its configured subject');
     const agent = await port({ agentClients: ['agent-runtime'], agentSubjects: { 'agent-runtime': 'sa-uuid' } }).verify(signJwt(rs, sa));
-    assert.deepEqual([agent.kind, agent.subject], ['agent', 'sa-uuid']);
+    assert.deepEqual([agent.kind, agent.id], ['agent', 'sa-uuid']);
     const rfc9068 = await port({ agentClients: ['svc'] }).verify(signJwt(rs, claims({ sub: 'svc', client_id: 'svc', azp: undefined })));
-    assert.deepEqual([rfc9068.kind, rfc9068.subject], ['agent', 'svc']);
+    assert.deepEqual([rfc9068.kind, rfc9068.id], ['agent', 'svc']);
     const noSub = await port({ agentClients: ['svc'] }).verify(signJwt(rs, claims({ sub: undefined, azp: undefined, client_id: 'svc' })));
-    assert.deepEqual([noSub.kind, noSub.subject], ['agent', 'svc']);
+    assert.deepEqual([noSub.kind, noSub.id], ['agent', 'svc']);
 
     // A token exchanged by the agent client on behalf of a user carries azp = agent client but the user's sub.
     const exchanged = await port({ agentClients: ['agent-runtime'], agentSubjects: { 'agent-runtime': 'sa-uuid' } }).verify(signJwt(rs, claims({ azp: 'agent-runtime' })));
@@ -175,6 +173,64 @@ describe('verify', () => {
     } finally {
       p.state.keys = [rs, es];
     }
+  });
+});
+
+describe('claims to caller mappings', () => {
+  const mapped = (rules: readonly MappingRule[], o: Partial<OidcIdentityOptions> = {}, fns?: Map<string, MappingFn>) =>
+    port(o, { mappings: createMappings('identity', { in: rules }, fns ? { fns } : {}) });
+
+  test('replaced rules change roles, scopes and name; client roles and scp stay in code', async () => {
+    const token = signJwt(rs, claims({ groups: ['ops', 'ops'], scp: ['api.read', 'api.write tools.read'], tenant: 'acme' }));
+    const caller = await mapped([
+      { from: '/groups', to: '/roles' },
+      { from: '/scope', to: '/scopes', split: ' ' },
+      { from: '/tenant', to: '/ext/oidc.tenant' },
+    ], { roleClients: ['api'] }).verify(token);
+    assert.deepEqual(caller.roles, ['ops', 'api:editor']);
+    assert.deepEqual(caller.scopes, ['openid', 'profile', 'tools.read', 'api.read', 'api.write']);
+    assert.equal(caller.name, undefined, 'no name rule, no name');
+    assert.equal(caller.ext?.['oidc.tenant'], 'acme');
+    assert.deepEqual((await mapped([]).verify(token)).roles, [], 'no rules: no realm roles');
+    assert.deepEqual(CALLER_RULES.map((r) => r.to), ['/roles', '/scopes', '/name']);
+  });
+
+  test('id, kind and credential cannot be mapped: static rules fail at creation, functions at verification', async () => {
+    for (const to of ['/kind', '/id', '/credential']) assert.throws(() => mapped([{ from: '/azp', to }]), /may not write/, to);
+    assert.throws(() => mapped([{ drop: '/kind' }]), /may not write/);
+    const promote: MappingFn = (_c, target) => ({ ...(target as object), kind: 'agent' });
+    const token = signJwt(rs, claims());
+    await refused(mapped([{ fn: './x.ts#promote' }], {}, new Map([['./x.ts#promote', promote]])).verify(token), token, /caller mapping failed/);
+    const rename: MappingFn = (_c, target) => ({ ...(target as object), id: 'u-admin' });
+    await refused(mapped([{ fn: './x.ts#rename' }], {}, new Map([['./x.ts#rename', rename]])).verify(token), token, /caller mapping failed/);
+    const credential: MappingFn = (_c, target) => ({ ...(target as object), credential: 'forged', extra: true });
+    const caller = await mapped([{ fn: './x.ts#c' }], {}, new Map([['./x.ts#c', credential]])).verify(token);
+    assert.equal(caller.credential, token, 'the verified credential always wins');
+    assert.equal((caller as unknown as Record<string, unknown>).extra, undefined, 'unknown fields are dropped');
+  });
+
+  test('a failing or malformed mapping rejects the token without echoing it', async () => {
+    const token = signJwt(rs, claims({ realm_access: { roles: 'admin' } }));
+    await refused(mapped([{ from: '/realm_access/roles', to: '/roles' }]).verify(token), token, /roles is not a list/);
+    await refused(mapped([{ from: '/sub', to: '/roles/__proto__' }]).verify(token), token, /caller mapping failed/);
+    const throws: MappingFn = () => { throw new Error(`boom ${token}`); };
+    await assert.rejects(mapped([{ fn: './x.ts#t' }], {}, new Map([['./x.ts#t', throws]])).verify(token), (err: Error) => {
+      assert.match(err.message, /caller mapping failed \(rule in\[0\] failed\)/);
+      assert.equal(err.cause, undefined, 'no rule error text is kept');
+      return true;
+    });
+    const weird = signJwt(rs, claims({ realm_access: { roles: ['ok', 7, null, ''] }, preferred_username: 42 }));
+    const c = await port().verify(weird);
+    assert.deepEqual([c.roles, c.name], [['ok'], undefined], 'non-string claim values are dropped');
+  });
+
+  test('ext keeps the oidc namespace only; raw claims only with keepClaims', async () => {
+    const token = signJwt(rs, claims({ tenant: 'acme' }));
+    const rules = [...CALLER_RULES, { from: '/tenant', to: '/ext/oidc.claims' }];
+    const other: MappingFn = (_c, target) => ({ ...(target as object), ext: { 'other.key': 1, 'oidc.tenant': 'acme' } });
+    const caller = await mapped([...rules, { fn: './x.ts#o' }], {}, new Map([['./x.ts#o', other]])).verify(token);
+    assert.deepEqual(Object.keys(caller.ext ?? {}).sort(), ['oidc.exp', 'oidc.tenant']);
+    assert.equal((await mapped(rules, { keepClaims: true }).verify(token)).ext?.['oidc.claims'] instanceof Object, true);
   });
 });
 
@@ -240,7 +296,7 @@ describe('JWKS cache', () => {
       const next = rsaKey('rs-2');
       local.state.keys = [rs, next];
       t += 31_000;
-      assert.equal((await v.verify(signJwt(next, c))).subject, 'u-alice');
+      assert.equal((await v.verify(signJwt(next, c))).id, 'u-alice');
       assert.equal(local.count('/jwks'), 2);
 
       // Unknown kids within the refresh interval do not hit the provider again.
@@ -269,7 +325,7 @@ describe('JWKS cache', () => {
       await v.verify(token);
       local.state.jwksStatus = 503;
       t += 10_000;
-      assert.equal((await v.verify(token)).subject, 'u-alice', 'stale keys still verify');
+      assert.equal((await v.verify(token)).id, 'u-alice', 'stale keys still verify');
       assert.equal(local.count('/jwks'), 2);
 
       const cold = createOidcIdentity({ issuer: local.issuer, audience: 'agent-runtime', jwksMinRefreshMs: 5000 }, { now: () => t });
@@ -278,7 +334,7 @@ describe('JWKS cache', () => {
       assert.equal(local.count('/jwks'), 3, 'the second attempt is served from the remembered error');
       local.state.jwksStatus = 200;
       t += 6000;
-      assert.equal((await cold.verify(token)).subject, 'u-alice');
+      assert.equal((await cold.verify(token)).id, 'u-alice');
     } finally {
       await local.close();
     }
@@ -300,7 +356,7 @@ describe('JWKS cache', () => {
       ac.abort();
       await assert.rejects(aborted, { name: 'AbortError' });
       release();
-      assert.equal((await other).subject, 'u-alice');
+      assert.equal((await other).id, 'u-alice');
     } finally {
       await local.close();
     }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { Identity } from '@agent-layers/core';
+import type { Caller } from '@agent-layers/core';
 import { ACCESS_TOKEN_TYPE, createOidcCredentials, TOKEN_EXCHANGE_GRANT, type OidcCredentialsOptions } from '../src/index.ts';
 import { b64, json, nowSec, server, type Handler } from './helpers.ts';
 
@@ -23,7 +23,7 @@ async function tokenServer(answer?: (form: URLSearchParams, n: number) => Record
   return { ...s, forms, gate, endpoint: `${s.url}/token` };
 }
 
-const alice = (exp = nowSec() + 600): Identity => ({ subject: 'alice', kind: 'user', token: fakeJwt({ sub: 'alice', exp }), claims: { exp } });
+const alice = (exp = nowSec() + 600): Caller => ({ id: 'alice', kind: 'user', roles: [], scopes: [], credential: fakeJwt({ sub: 'alice', exp }), ext: { 'oidc.exp': exp } });
 const base = (endpoint: string, o: Partial<OidcCredentialsOptions> = {}): OidcCredentialsOptions =>
   ({ tokenEndpoint: endpoint, clientId: 'agent runtime', clientSecret: 's3cret:+/', mode: 'self', ...o });
 
@@ -32,8 +32,8 @@ describe('client_credentials (self)', () => {
     const s = await tokenServer();
     try {
       const c = createOidcCredentials(base(s.endpoint));
-      assert.equal(await c.token('tools-api', { scopes: ['b', 'a', 'a'], identity: alice() }), 'tok-1');
-      assert.equal(await c.token('tools-api', { scopes: ['a', 'b'] }), 'tok-1', 'cached; identity does not matter in self mode');
+      assert.equal(await c.token('tools-api', { scopes: ['b', 'a', 'a'], caller: alice() }), 'tok-1');
+      assert.equal(await c.token('tools-api', { scopes: ['a', 'b'] }), 'tok-1', 'cached; the caller does not matter in self mode');
       assert.equal(s.forms.length, 1);
       const f = s.forms[0]!;
       assert.deepEqual(Object.fromEntries(f), { grant_type: 'client_credentials', audience: 'tools-api', scope: 'a b' });
@@ -64,15 +64,15 @@ describe('token exchange (on-behalf-of)', () => {
     try {
       const c = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of' }));
       const a = alice();
-      assert.equal(await c.token('tools-api', { identity: a }), 'tok-1');
+      assert.equal(await c.token('tools-api', { caller: a }), 'tok-1');
       assert.deepEqual(Object.fromEntries(s.forms[0]!), {
-        grant_type: TOKEN_EXCHANGE_GRANT, subject_token: a.token, subject_token_type: ACCESS_TOKEN_TYPE, requested_token_type: ACCESS_TOKEN_TYPE, audience: 'tools-api',
+        grant_type: TOKEN_EXCHANGE_GRANT, subject_token: a.credential, subject_token_type: ACCESS_TOKEN_TYPE, requested_token_type: ACCESS_TOKEN_TYPE, audience: 'tools-api',
       });
-      assert.equal(await c.token('tools-api', { identity: a }), 'tok-1');
-      const bob: Identity = { subject: 'bob', kind: 'user', token: fakeJwt({ sub: 'bob', exp: nowSec() + 600 }) };
-      assert.equal(await c.token('tools-api', { identity: bob }), 'tok-2', 'never another caller\'s token');
-      const alice2 = { ...alice(), token: fakeJwt({ sub: 'alice', exp: nowSec() + 900 }) };
-      assert.equal(await c.token('tools-api', { identity: alice2 }), 'tok-3', 'keyed by the caller token, not only the subject');
+      assert.equal(await c.token('tools-api', { caller: a }), 'tok-1');
+      const bob: Caller = { id: 'bob', kind: 'user', roles: [], scopes: [], credential: fakeJwt({ sub: 'bob', exp: nowSec() + 600 }) };
+      assert.equal(await c.token('tools-api', { caller: bob }), 'tok-2', 'never another caller\'s token');
+      const alice2 = { ...alice(), credential: fakeJwt({ sub: 'alice', exp: nowSec() + 900 }) };
+      assert.equal(await c.token('tools-api', { caller: alice2 }), 'tok-3', 'keyed by the caller credential, not only the id');
     } finally {
       await s.close();
     }
@@ -82,10 +82,10 @@ describe('token exchange (on-behalf-of)', () => {
     const s = await tokenServer();
     try {
       const c = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of' }));
-      await assert.rejects(c.token('tools-api'), /needs the caller token/);
-      await assert.rejects(c.token('tools-api', { identity: { subject: 'x', kind: 'agent' } }), /needs the caller token/);
-      await assert.rejects(c.token('tools-api', { identity: alice(nowSec() - 5) }), /expired/);
-      await assert.rejects(c.token('', { identity: alice() }), /audience is required/);
+      await assert.rejects(c.token('tools-api'), /needs the caller credential/);
+      await assert.rejects(c.token('tools-api', { caller: { id: 'x', kind: 'agent', roles: [], scopes: [] } }), /needs the caller credential/);
+      await assert.rejects(c.token('tools-api', { caller: alice(nowSec() - 5) }), /expired/);
+      await assert.rejects(c.token('', { caller: alice() }), /audience is required/);
       assert.equal(s.forms.length, 0);
     } finally {
       await s.close();
@@ -98,13 +98,13 @@ describe('token exchange (on-behalf-of)', () => {
     try {
       const c = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of', refreshSkewSec: 10 }), { now: () => t });
       const a = alice(Math.floor(t / 1000) + 60);
-      assert.equal(await c.token('tools-api', { identity: a }), 'tok-1');
+      assert.equal(await c.token('tools-api', { caller: a }), 'tok-1');
       t += 45_000;
-      assert.equal(await c.token('tools-api', { identity: a }), 'tok-1');
+      assert.equal(await c.token('tools-api', { caller: a }), 'tok-1');
       t += 10_000; // 55 s: within the skew of the caller's exp
-      assert.equal(await c.token('tools-api', { identity: a }), 'tok-2');
+      assert.equal(await c.token('tools-api', { caller: a }), 'tok-2');
       t += 10_000; // 65 s: the caller token has expired
-      await assert.rejects(c.token('tools-api', { identity: a }), /expired/);
+      await assert.rejects(c.token('tools-api', { caller: a }), /expired/);
     } finally {
       await s.close();
     }
@@ -145,8 +145,8 @@ describe('single flight and failures', () => {
       const c = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of' }));
       const a = alice();
       const ac = new AbortController();
-      const first = c.token('tools-api', { identity: a, signal: ac.signal });
-      const rest = Array.from({ length: 5 }, () => c.token('tools-api', { identity: a }));
+      const first = c.token('tools-api', { caller: a, signal: ac.signal });
+      const rest = Array.from({ length: 5 }, () => c.token('tools-api', { caller: a }));
       await new Promise((r) => setTimeout(r, 50));
       ac.abort();
       await assert.rejects(first, { name: 'AbortError' });
@@ -155,7 +155,7 @@ describe('single flight and failures', () => {
       assert.equal(s.forms.length, 1);
       const pre = new AbortController();
       pre.abort();
-      await assert.rejects(c.token('fresh', { identity: a, signal: pre.signal }), { name: 'AbortError' });
+      await assert.rejects(c.token('fresh', { caller: a, signal: pre.signal }), { name: 'AbortError' });
     } finally {
       await s.close();
     }
@@ -164,9 +164,9 @@ describe('single flight and failures', () => {
   test('refusals and bad responses reject without echoing tokens or the client secret', async () => {
     const a = alice();
     const bodies: [number, Record<string, unknown>, RegExp][] = [
-      [400, { error: 'invalid_grant', error_description: `subject_token ${a.token} is not valid` }, /HTTP 400 \(invalid_grant: subject_token \[redacted\] is not valid\)/],
+      [400, { error: 'invalid_grant', error_description: `subject_token ${a.credential} is not valid` }, /HTTP 400 \(invalid_grant: subject_token \[redacted\] is not valid\)/],
       [401, { error: 'invalid_client' }, /HTTP 401 \(invalid_client\)/],
-      [500, { message: `echo ${a.token}` }, /HTTP 500$/],
+      [500, { message: `echo ${a.credential}` }, /HTTP 500$/],
       [200, { token_type: 'Bearer' }, /no valid access_token/],
       [200, { access_token: 'a b', token_type: 'Bearer' }, /no valid access_token/],
       [200, { access_token: 'x', token_type: 'mac' }, /token_type/],
@@ -176,9 +176,9 @@ describe('single flight and failures', () => {
       const s = await tokenServer(() => [status, body]);
       try {
         const c = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of' }));
-        await assert.rejects(c.token('tools-api', { identity: a }), (err: Error) => {
+        await assert.rejects(c.token('tools-api', { caller: a }), (err: Error) => {
           assert.match(err.message, pattern);
-          assert.ok(!err.message.includes(a.token!) && !err.message.includes('s3cret'), err.message);
+          assert.ok(!err.message.includes(a.credential!) && !err.message.includes('s3cret'), err.message);
           return true;
         });
       } finally {

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { limitValue, type CredentialPort, type Identity, type LimitValue } from '@agent-layers/core';
+import { limitValue, type Caller, type CredentialPort, type LimitValue } from '@agent-layers/core';
 import { abortable, discover, OidcError, requestJson, secureUrl, type FetchLike, type HttpLimits } from './http.ts';
+import { EXP_KEY } from './identity.ts';
 import { unverifiedExpiry } from './jwt.ts';
 import { CREDENTIAL_LIMITS as LIMITS } from './limits.ts';
 
@@ -53,10 +54,13 @@ function expiresInSec(v: unknown): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-/** Expiry of the caller's token in seconds: the verified `exp` claim when present, else the unverified one. */
-function callerExpiry(identity: Identity, maxTokenChars: number): number | undefined {
-  const verified = identity.claims?.exp;
-  const unverified = unverifiedExpiry(identity.token!, maxTokenChars);
+/**
+ * Expiry of the caller's credential in seconds: the earlier of the verified `exp` (`ext["oidc.exp"]`, written by the
+ * oidc identity adapter) and the credential's own unverified `exp` when it is a JWT.
+ */
+function callerExpiry(caller: Caller, maxTokenChars: number): number | undefined {
+  const verified = caller.ext?.[EXP_KEY];
+  const unverified = unverifiedExpiry(caller.credential!, maxTokenChars);
   const values = [verified, unverified].filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   return values.length ? Math.min(...values) : undefined;
 }
@@ -144,18 +148,18 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
     async token(audience, topts = {}) {
       if (typeof audience !== 'string' || !audience) throw new OidcError('credentials', 'oidc credentials: audience is required');
       const scopes = [...new Set(topts.scopes ?? [])].filter(Boolean).sort();
-      const identity = topts.identity;
+      const caller = topts.caller;
       let subjectKey = 'self';
       let subjectExpMs = Infinity;
       if (opts.mode === 'on-behalf-of') {
-        // Never fall back to the agent's own token: a call without a caller token gets no token at all.
-        if (!identity?.token) throw new OidcError('credentials', 'oidc credentials: on-behalf-of needs the caller token, and the run has none');
-        const exp = callerExpiry(identity, maxTokenChars);
+        // Never fall back to the agent's own token: a call without a caller credential gets no token at all.
+        if (typeof caller?.credential !== 'string' || !caller.credential) throw new OidcError('credentials', 'oidc credentials: on-behalf-of needs the caller credential, and the run has none');
+        const exp = callerExpiry(caller, maxTokenChars);
         if (exp !== undefined) {
           subjectExpMs = exp * 1000;
           if (subjectExpMs <= now()) throw new OidcError('credentials', 'oidc credentials: the caller token has expired');
         }
-        subjectKey = `obo:${sha(identity.token)}`;
+        subjectKey = `obo:${sha(caller.credential)}`;
       }
       const key = JSON.stringify([audience, scopes, subjectKey]);
       const hit = cache.get(key);
@@ -166,7 +170,7 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
       if (!pending) {
         const params: Record<string, string> = opts.mode === 'self'
           ? { grant_type: 'client_credentials' }
-          : { grant_type: TOKEN_EXCHANGE_GRANT, subject_token: identity!.token!, subject_token_type: ACCESS_TOKEN_TYPE, requested_token_type: ACCESS_TOKEN_TYPE };
+          : { grant_type: TOKEN_EXCHANGE_GRANT, subject_token: caller!.credential!, subject_token_type: ACCESS_TOKEN_TYPE, requested_token_type: ACCESS_TOKEN_TYPE };
         if (audienceParam !== 'none') params[audienceParam] = audience;
         if (scopes.length) params.scope = scopes.join(' ');
         // Shared by every identical caller, so it does not use any caller's signal; each caller races its own.

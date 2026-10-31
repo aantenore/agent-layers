@@ -9,7 +9,7 @@ OPA, and this adapter's live test (`test/live.test.ts`) runs against it.
 
 ## IdentityPort: verify inbound tokens
 
-`verify(token)` checks a JWT access token and returns the identity it proves:
+`verify(token)` checks a JWT access token and returns the `Caller` it proves:
 
 - Keys from OIDC discovery (`<issuer>/.well-known/openid-configuration`, whose `issuer` must match) and the JWKS. The
   key set is cached (`jwksMaxAgeMs`), refetched on an unknown `kid` at most once per `jwksMinRefreshMs`, and the
@@ -22,9 +22,25 @@ OPA, and this adapter's live test (`test/live.test.ts`) runs against it.
   `client_id`): no `sub`, or `sub` equal to that client's entry in `agentSubjects` (when none is set, to the client id,
   as in RFC 9068). Everything else is `user`; without `agentClients` no token is ever `agent`. Usernames never count.
   A token without `sub` that is not an allow-listed agent is refused.
-- Roles: `realm_access.roles`, the issuer-set `roles` claim, and `resource_access` roles of the `roleClients` only
-  (default: the `audience` values), named `<client>:<role>` unless `namespaceClientRoles` is false. Scopes come from
-  `scope` and `scp`. `claims` holds the verified payload.
+- `id` is `sub` (the client id for an agent token without `sub`), `credential` is the token (kept in memory only).
+- Roles, scopes and name come from the claims through `in` mapping rules on `Caller`. Defaults (the descriptor's
+  `mappingDefaults`, replaceable through `mappings.identity.in` in the stack config):
+
+  | Claim | Caller | Rule |
+  |---|---|---|
+  | `realm_access.roles` ∪ `roles` | `roles` | `{ "from": ["/realm_access/roles", "/roles"], "to": "/roles", "join": "union" }` |
+  | `scope` (space separated) | `scopes` | `{ "from": "/scope", "to": "/scopes", "split": " " }` |
+  | `preferred_username` | `name` | `{ "from": "/preferred_username", "to": "/name" }` |
+
+  Two things stay in code, whatever the rules: `resource_access` roles of the `roleClients` only (default: the
+  `audience` values), named `<client>:<role>` unless `namespaceClientRoles` is false, and the `scp` claim, merged into
+  the scopes. Rules may write `/ext/oidc.<name>` (for example a tenant claim); other namespaces are dropped.
+- `id`, `kind` and `credential` come from verification only: a rule that writes or drops them is refused when the
+  adapter is created, and a mapping function that changes them rejects the token. A failing rule, or one that leaves
+  `roles` or `scopes` as something other than a list, rejects the token; the error names the rule, never its text.
+  Non-string list items and a non-string name are dropped.
+- `ext["oidc.exp"]` is always the verified `exp`. The verified claims are kept under `ext["oidc.claims"]` only with
+  `keepClaims: true`; otherwise guards, policies and events see none.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
@@ -48,17 +64,19 @@ OPA, and this adapter's live test (`test/live.test.ts`) runs against it.
 | `agentSubjects` | {client: sub} | none | Service-account `sub` per agent client (Keycloak: the service-account user id) |
 | `roleClients` | string[] | `audience` | Clients whose `resource_access` roles count; other clients are never read |
 | `namespaceClientRoles` | boolean | `true` | Client roles as `<client>:<role>` |
+| `keepClaims` | boolean | `false` | Keep the verified claims under `ext["oidc.claims"]` |
 
 ## CredentialPort: outbound tokens
 
-`token(audience, { identity, scopes })` asks the token endpoint for a token for `audience`:
+`token(audience, { caller, scopes })` asks the token endpoint for a token for `audience`:
 
-- `mode: "on-behalf-of"`: OAuth 2.0 Token Exchange (RFC 8693) with the caller's token as `subject_token`. A run
-  without a caller token gets no token: it never falls back to the agent's own identity.
+- `mode: "on-behalf-of"`: OAuth 2.0 Token Exchange (RFC 8693) with `caller.credential` as `subject_token`. A run
+  without a caller credential gets no token: it never falls back to the agent's own identity.
 - `mode: "self"`: `client_credentials`, the agent's own identity.
 
-Tokens are cached per audience, scopes and caller token until `refreshSkewSec` before they expire, never past the
-caller's own token, and never shared between callers. Identical concurrent requests share one call; a caller that
+Tokens are cached per audience, scopes and caller credential until `refreshSkewSec` before they expire, never past
+the caller's own token (the earlier of `ext["oidc.exp"]` and the credential's own `exp`), and never shared between
+callers. Identical concurrent requests share one call; a caller that
 cancels does not cancel the others.
 
 | Option | Type | Default | Meaning |

@@ -1,10 +1,10 @@
 import { defineAdapter, limitProperties, PORT_VERSIONS } from '@agent-layers/core';
 import { createOidcCredentials, type OidcCredentialsOptions } from './credentials.ts';
-import { createOidcIdentity, type OidcIdentityOptions } from './identity.ts';
+import { CALLER_RULES, CLAIMS_KEY, createOidcIdentity, EXP_KEY, type OidcIdentityOptions } from './identity.ts';
 import { JWS_ALGORITHMS } from './jwt.ts';
 import { CREDENTIAL_LIMITS, IDENTITY_LIMITS } from './limits.ts';
 
-export { agentKind, clientOf, createOidcIdentity, rolesOf, scopesOf, DEFAULT_ALGORITHMS, type AgentClients } from './identity.ts';
+export { agentKind, CALLER_RULES, CLAIMS_KEY, clientOf, clientRolesOf, createOidcIdentity, DEFAULT_ALGORITHMS, EXP_KEY, type AgentClients } from './identity.ts';
 export type { OidcIdentityHooks, OidcIdentityOptions, OidcIdentityPort } from './identity.ts';
 export { createOidcCredentials, ACCESS_TOKEN_TYPE, TOKEN_EXCHANGE_GRANT } from './credentials.ts';
 export type { OidcCredentialsHooks, OidcCredentialsOptions, OidcCredentialPort } from './credentials.ts';
@@ -40,6 +40,7 @@ export const identityAdapter = defineAdapter<'IdentityPort', OidcIdentityOptions
       agentSubjects: { type: 'object', additionalProperties: { type: 'string', minLength: 1 } },
       roleClients: strings,
       namespaceClientRoles: { type: 'boolean' },
+      keepClaims: { type: 'boolean' },
       ...limitProperties(IDENTITY_LIMITS, {
         clockSkewSec: 'Tolerance for exp, nbf and iat', jwksMinRefreshMs: 'Minimum interval between key set fetches after an unknown kid or a failure',
         jwksMaxAgeMs: 'Key set cache lifetime', timeoutMs: 'Time limit per discovery or key set request', maxKeyTries: 'Most keys tried for a token without a kid',
@@ -51,7 +52,9 @@ export const identityAdapter = defineAdapter<'IdentityPort', OidcIdentityOptions
     additionalProperties: false,
   },
   limits: IDENTITY_LIMITS,
-  create: (options, ctx) => createOidcIdentity(options, {}, ctx.name),
+  ext: { produces: [CLAIMS_KEY, EXP_KEY] },
+  mappingDefaults: { in: { shape: 'Caller', rules: CALLER_RULES } },
+  create: (options, ctx) => createOidcIdentity(options, { mappings: ctx.mappings }, ctx.name),
 });
 
 export const credentialAdapter = defineAdapter<'CredentialPort', OidcCredentialsOptions>({
@@ -85,6 +88,7 @@ export const credentialAdapter = defineAdapter<'CredentialPort', OidcCredentials
     additionalProperties: false,
   },
   limits: CREDENTIAL_LIMITS,
+  ext: { produces: [] },
   create: (options, ctx) => createOidcCredentials(options, {}, ctx.name),
 });
 
