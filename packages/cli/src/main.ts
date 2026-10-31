@@ -16,16 +16,17 @@ export { processIo, type Io } from './io.ts';
 const HELP = `agent-layers <command> [options]
 
   init [dir]                 scaffold a project (--template minimal|rag, --runtime <adapter>, --name, --agent, --force, --yes)
-  dev                        run the agent in the terminal with a trace line per layer (--agent, --message, --no-deploy)
+  dev                        run the agent in the terminal with a trace line per layer (--agent, --message, --no-deploy, --token)
   check                      validate config, resolve adapters, readiness gate, conformance (--skip-conformance)
-  test                       conformance plus reference and project tests (--layer <id>)
-  eval <dataset.jsonl>       run and score a dataset (--agent, --out <file>, --min <0..1>)
+  test                       conformance plus reference and project tests (--layer <id>, --token)
+  eval <dataset.jsonl>       run and score a dataset (--agent, --out <file>, --min <0..1>, --token)
   deploy                     plan and start the services through the deploy slot (--dry-run)
   up | down                  start or stop the services of a profile
   diff <profileA> <profileB> what changes between two profiles, slot by slot
   layers                     the eleven layers: ports, versions, adapters in use and installed
   gateway                    run the network gateway (@agent-layers/gateway)
 
+Callers: --token <t> or AGENT_LAYERS_TOKEN authenticates dev, eval and test runs (prototype profiles default to the static-identity dev token)
 Common options: --config <file> (default agent-layers.json), --profile <name> (or AGENT_LAYERS_PROFILE)`;
 
 const OPTIONS = {
@@ -33,7 +34,7 @@ const OPTIONS = {
   template: { type: 'string' }, runtime: { type: 'string' }, name: { type: 'string' }, out: { type: 'string' },
   min: { type: 'string' }, message: { type: 'string' }, force: { type: 'boolean' }, yes: { type: 'boolean' },
   'dry-run': { type: 'boolean' }, 'skip-conformance': { type: 'boolean' }, 'no-deploy': { type: 'boolean' },
-  trace: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+  trace: { type: 'boolean' }, token: { type: 'string' }, help: { type: 'boolean', short: 'h' },
 } as const;
 
 /** Runs one command. Resolves to the exit code; never calls process.exit. */
@@ -47,10 +48,10 @@ export async function main(argv: string[], io: Io = processIo()): Promise<number
     const common = { ...(v.config ? { config: v.config } : {}), ...(v.profile ? { profile: v.profile } : {}) };
     switch (command) {
       case 'init': return await init(io, { ...(pos[0] ? { dir: pos[0] } : {}), ...pick(v, ['template', 'runtime', 'name', 'agent', 'force', 'yes']) });
-      case 'dev': return await dev(io, { ...common, ...pick(v, ['agent', 'message', 'trace']), ...(v['no-deploy'] ? { noDeploy: true } : {}) });
+      case 'dev': return await dev(io, { ...common, ...pick(v, ['agent', 'message', 'trace', 'token']), ...(v['no-deploy'] ? { noDeploy: true } : {}) });
       case 'check': return await check(io, { ...common, ...(v.layer ? { layer: v.layer as Layer } : {}), ...(v['skip-conformance'] ? { skipConformance: true } : {}) });
-      case 'test': return await test(io, { ...common, ...pick(v, ['layer']) });
-      case 'eval': return await evaluate(io, { ...common, ...(pos[0] ? { dataset: pos[0] } : {}), ...pick(v, ['agent', 'out', 'min']) });
+      case 'test': return await test(io, { ...common, ...pick(v, ['layer', 'token']) });
+      case 'eval': return await evaluate(io, { ...common, ...(pos[0] ? { dataset: pos[0] } : {}), ...pick(v, ['agent', 'out', 'min', 'token']) });
       case 'deploy': case 'up': return await deploy(io, { ...common, ...(v['dry-run'] ? { dryRun: true } : {}) });
       case 'down': return await down(io, { ...common, ...(v['dry-run'] ? { dryRun: true } : {}) });
       case 'diff': return await diff(io, { ...common, ...(pos[0] ? { a: pos[0] } : {}), ...(pos[1] ? { b: pos[1] } : {}) });

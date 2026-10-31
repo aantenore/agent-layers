@@ -36,3 +36,12 @@ test('no match falls back to the default, deny unless set', async () => {
   const open = await createRulesAuthorization({ rules: [], default: 'allow' }).evaluate(req);
   assert.deepEqual(open, { decision: true, context: { reason: 'no rule matched (default allow)' } });
 });
+
+test('when.authenticated scopes a rule to verified subjects', async () => {
+  const port = createRulesAuthorization({ rules: [{ effect: 'allow', risk: ['read'], when: { authenticated: true } }] });
+  const user = sampleAccess({ tool: 'docs__read', risk: 'read' });
+  assert.equal((await port.evaluate(user)).decision, true);
+  const anon = sampleAccess({ tool: 'docs__read', risk: 'read' });
+  anon.subject = { type: 'anonymous', id: 'anonymous', properties: { roles: [], scopes: [], authenticated: false } };
+  assert.equal((await port.evaluate(anon)).decision, false);
+});

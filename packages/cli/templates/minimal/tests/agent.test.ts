@@ -2,18 +2,28 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { compose, loadConfig, type EvalCase } from '@agent-layers/core';
+import { compose, loadConfig, type EvalCase, type ResolvedConfig, type Stack } from '@agent-layers/core';
 
 const config = fileURLToPath(new URL('../agent-layers.json', import.meta.url));
 const cases = (await readFile(new URL('../evals/smoke.jsonl', import.meta.url), 'utf8'))
   .split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l) as EvalCase);
 
+/** The caller: AGENT_LAYERS_TOKEN, or the dev token of the static-identity options in the config. Anonymous without one. */
+async function caller(stack: Stack, resolved: ResolvedConfig) {
+  const ref = resolved.layers.identity;
+  const tokens = ref?.adapter === 'static-identity' ? ref.options?.tokens : undefined;
+  const token = process.env.AGENT_LAYERS_TOKEN || (tokens && typeof tokens === 'object' ? Object.keys(tokens)[0] : undefined);
+  return token && stack.ports.identity ? { identity: await stack.verify(token) } : {};
+}
+
 test('smoke dataset passes offline with the scripted model', async () => {
-  const stack = await compose(await loadConfig(config, { profile: 'test' }));
+  const resolved = await loadConfig(config, { profile: 'test' });
+  const stack = await compose(resolved);
   try {
     const agent = await stack.agent('{{agent}}');
+    const ctx = await caller(stack, resolved);
     for (const c of cases) {
-      const run = await agent.run(c.input);
+      const run = await agent.run(c.input, ctx);
       assert.equal(run.status, 'completed', `${c.id}: ${run.reason}`);
       const scores = (await Promise.all(stack.ports.eval.map((e) => e.score(c, run)))).flat();
       assert.ok(scores.length > 0 && scores.every((s) => s.value === 1), `${c.id}: output "${run.output}"`);
@@ -33,9 +43,10 @@ test('the agent answers through the local model', { timeout: 180_000 }, async (t
   } catch {
     return t.skip(`no model server at ${base}`);
   }
-  const stack = await compose(await loadConfig(config, { profile: 'local' }));
+  const resolved = await loadConfig(config, { profile: 'local' });
+  const stack = await compose(resolved);
   try {
-    const run = await (await stack.agent('{{agent}}')).run('Convert 100 C to Fahrenheit');
+    const run = await (await stack.agent('{{agent}}')).run('Convert 100 C to Fahrenheit', await caller(stack, resolved));
     assert.equal(run.status, 'completed', run.reason);
     assert.ok(run.output.length > 0);
   } finally {

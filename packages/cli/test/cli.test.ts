@@ -92,6 +92,13 @@ test('dev --message runs the agent once through every layer', async () => {
   assert.match(errors(), /\[L7 guardrail\] guard\.check/);
 });
 
+test('a rejected token stops dev before any run and is never printed', async () => {
+  const { io, text, errors } = captureIo(dir);
+  assert.equal(await main(['dev', '--profile', 'test', '--message', 'hi', '--token', 'wrong-token'], io), 1);
+  assert.match(errors(), /credential was rejected/);
+  assert.doesNotMatch(text() + errors(), /wrong-token/);
+});
+
 test('eval scores the smoke dataset', async () => {
   const { io, text, errors } = captureIo(dir);
   assert.equal(await main(['eval', 'evals/smoke.jsonl', '--agent', 'assistant', '--profile', 'test', '--min', '1'], io), 0, errors());

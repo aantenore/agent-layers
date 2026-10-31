@@ -1,8 +1,11 @@
 import { defineAdapter, evaluatePolicy, PORT_VERSIONS, subjectOf, type AuthorizationPort, type PolicyRule } from '@agent-layers/core';
 
+/** Policy rule plus `when.authenticated`: true matches only a verified subject, false only an anonymous one. */
+export type RulesAuthorizationRule = Omit<PolicyRule, 'when'> & { when?: NonNullable<PolicyRule['when']> & { authenticated?: boolean } };
+
 export interface RulesAuthorizationOptions {
   /** Rules in order; the first one that matches decides. */
-  rules: PolicyRule[];
+  rules: RulesAuthorizationRule[];
   /** Decision when no rule matches. */
   default?: 'allow' | 'deny';
 }
@@ -16,7 +19,9 @@ export function createRulesAuthorization(options: RulesAuthorizationOptions, nam
   return {
     name,
     async evaluate(req) {
-      switch (evaluatePolicy(options.rules, subjectOf(req))) {
+      const subject = subjectOf(req);
+      const applicable = options.rules.filter((r) => r.when?.authenticated === undefined || r.when.authenticated === (subject.identity !== undefined));
+      switch (evaluatePolicy(applicable, subject)) {
         case 'allow': return { decision: true, context: { reason: 'allowed by rule' } };
         case 'deny': return { decision: false, context: { reason: 'denied by rule' } };
         case 'ask': return { decision: false, context: { reason: 'approval required' } };
@@ -50,7 +55,7 @@ export const adapter = defineAdapter<'AuthorizationPort', RulesAuthorizationOpti
             risk: { type: 'array', items: { enum: ['read', 'write', 'exec'] } },
             when: {
               type: 'object',
-              properties: { roles: strings, scopes: strings, kind: { enum: ['user', 'agent'] } },
+              properties: { roles: strings, scopes: strings, kind: { enum: ['user', 'agent'] }, authenticated: { type: 'boolean' } },
               additionalProperties: false,
             },
           },

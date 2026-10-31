@@ -30,6 +30,11 @@ npx agent-layers dev --profile local     # same stack, real model on this machin
 | L9 telemetry | What happened? | `console-telemetry` | `otlp` | same |
 | L10 eval | Was it good, and if not, which layer failed? | `expected-eval` | same | same |
 
+Every run has a caller. In the prototype profiles `static-identity` holds a dev token, and `dev`, `eval` and
+`npm test` authenticate with it, so the allow rule of `rules-authorization` (scoped with `when.authenticated`) applies.
+An anonymous call is denied in every profile. To run as another caller, pass `--token <t>` or set
+`AGENT_LAYERS_TOKEN`; a token the identity adapter rejects stops the command before any run.
+
 The `test` profile is prototype with telemetry written to `.agent-layers/telemetry.jsonl` and no terminal channel.
 The `local` profile is prototype with a real model. Adapters named in pilot and production that are not installed
 yet are reported as "not installed" by `agent-layers check --profile <name>`.

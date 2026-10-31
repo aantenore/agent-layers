@@ -44,7 +44,7 @@
         "credentials": { "adapter": "static-identity", "options": { "default": "dev-downstream-token" } },
         "authorization": {
           "adapter": "rules-authorization",
-          "options": { "rules": [{ "effect": "allow", "risk": ["read"] }], "default": "deny" }
+          "options": { "rules": [{ "effect": "allow", "risk": ["read"], "when": { "authenticated": true } }], "default": "deny" }
         },
         "approval": { "adapter": "memory-approval" },
         "guardrails": [

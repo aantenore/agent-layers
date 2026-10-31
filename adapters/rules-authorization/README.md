@@ -11,8 +11,11 @@ this port, so an `ask` rule that arrives here counts as not allowed without appr
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `rules` | object[] | required | Rules with `effect` (`allow`, `ask`, `deny`), optional `tools` globs, `risk` list and `when` (`roles`, `scopes`, `kind`) |
+| `rules` | object[] | required | Rules with `effect` (`allow`, `ask`, `deny`), optional `tools` globs, `risk` list and `when` (`roles`, `scopes`, `kind`, `authenticated`) |
 | `default` | `allow` \| `deny` | `deny` | Decision when no rule matches |
+
+`when.authenticated: true` matches any verified subject (user or agent) and never an anonymous caller; scope allow and
+`ask` rules with it so the default posture stays anonymous denied.
 
 ```json
 {
@@ -22,8 +25,8 @@ this port, so an `ask` rule that arrives here counts as not allowed without appr
       "options": {
         "rules": [
           { "effect": "deny", "tools": ["shell__*"] },
-          { "effect": "ask", "risk": ["write", "exec"] },
-          { "effect": "allow", "risk": ["read"] }
+          { "effect": "ask", "risk": ["write", "exec"], "when": { "authenticated": true } },
+          { "effect": "allow", "risk": ["read"], "when": { "authenticated": true } }
         ],
         "default": "deny"
       }

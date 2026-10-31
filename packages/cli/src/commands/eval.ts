@@ -2,9 +2,10 @@ import { compose, errorMessage, type EvalCase, type EvalResult } from '@agent-la
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { UsageError, type Io } from '../io.ts';
+import { authenticate, callerContext } from '../identity.ts';
 import { openProject } from '../project.ts';
 
-export interface EvalArgs { config?: string; profile?: string; dataset?: string; agent?: string; out?: string; min?: string }
+export interface EvalArgs { config?: string; profile?: string; dataset?: string; agent?: string; out?: string; min?: string; token?: string }
 
 /** Runs every case of a JSON Lines dataset through an agent and scores it with the configured evaluators. */
 export async function evaluate(io: Io, args: EvalArgs): Promise<number> {
@@ -21,9 +22,10 @@ export async function evaluate(io: Io, args: EvalArgs): Promise<number> {
     if (!stack.ports.eval.length) throw new UsageError('no evaluators configured (layers.eval)');
     const name = args.agent ?? stack.agents()[0];
     if (!name) throw new UsageError('no agents configured');
+    const identity = await authenticate(stack, p, args.token);
     const agent = await stack.agent(name);
     for (const c of cases) {
-      const run = await agent.run(c.input).catch((err: unknown) => ({ runId: '', status: 'failed', output: '', reason: errorMessage(err) }));
+      const run = await agent.run(c.input, callerContext(identity)).catch((err: unknown) => ({ runId: '', status: 'failed', output: '', reason: errorMessage(err) }));
       const scores = (await Promise.all(stack.ports.eval.map((e) => e.score(c, run)))).flat();
       const result: EvalResult = { id: c.id, runId: run.runId, output: run.output, status: String(run.status), scores };
       lines.push(JSON.stringify(result));

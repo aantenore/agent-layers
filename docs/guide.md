@@ -221,6 +221,12 @@ corporate model gateway through an OpenAI-compatible URL. Then `agent-layers dep
 | `layers` | The eleven layers by plane: ports and versions, adapter in use, installed adapters (standard and native) |
 | `gateway` | Runs `@agent-layers/gateway` when installed |
 
+`dev`, `eval` and `test` run as an authenticated caller. The credential comes from `--token <t>`, then the
+`AGENT_LAYERS_TOKEN` environment variable, then (prototype-tier profiles only) the first token of the `static-identity`
+adapter in the identity slot. It is verified through the identity slot and passed to every run; a rejected credential
+stops the command with no run, and the token is never printed. Without an identity adapter or a credential the run is
+anonymous, which rules-based authorization denies.
+
 ## Extension rules
 
 1. A new technology is an adapter plus its conformance test, never a core change.
