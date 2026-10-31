@@ -18,6 +18,7 @@ export const LIMITS = defineLimits({
   healthIntervalS: { path: 'options.healthIntervalS', default: 5, unit: 's', min: 1, max: 3600, safe: { max: 60 } },
   healthTimeoutS: { path: 'options.healthTimeoutS', default: 3, unit: 's', min: 1, max: 3600, safe: { max: 30 } },
   healthRetries: { path: 'options.healthRetries', default: 12, unit: 'count', min: 1, max: 1000, safe: { max: 60 } },
+  commandTimeoutMs: { path: 'options.commandTimeoutMs', default: 600_000, unit: 'ms', min: 1000, unbounded: 'warn', safe: { max: 3_600_000 } },
   errorOutputChars: { path: 'options.errorOutputChars', default: 500, unit: 'chars', min: 0, max: 100_000, safe: { max: 2000 } },
 });
 

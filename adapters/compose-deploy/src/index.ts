@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import {
-  defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type DeployOptions, type DeployPlan, type DeployPort, type Endpoint, type Layer, type ServiceSpec,
+  anySignal, defineAdapter, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal,
+  type DeployOptions, type DeployPlan, type DeployPort, type Endpoint, type Layer, type LimitValue, type ServiceSpec,
 } from '@agent-layers/core';
 import { composeFor, LIMITS, type HealthOptions } from './generate.ts';
 import { layerFile } from './resolve.ts';
@@ -26,6 +27,8 @@ export interface ComposeDeployOptions extends HealthOptions {
   command?: string[];
   /** Wait for services to be running or healthy on `up` (default true). */
   wait?: boolean;
+  /** Longest one Compose invocation may run before it is stopped (default 600000 ms; `"unbounded"` disables it). */
+  commandTimeoutMs?: LimitValue;
   /** Characters of the command output kept in the error message when Compose fails (default 500). */
   errorOutputChars?: number;
 }
@@ -44,6 +47,7 @@ export function createComposeDeploy(
   const command = options.command ?? ['docker', 'compose'];
   const searchDirs = options.searchDirs ?? ['reference'];
   const wait = options.wait ?? true;
+  const commandTimeoutMs = limitValue(LIMITS.commandTimeoutMs, options.commandTimeoutMs);
   const errorOutputChars = limitValue(LIMITS.errorOutputChars, options.errorOutputChars);
 
   /** One Compose invocation per file: relative paths inside a reference file keep resolving against its own folder. */
@@ -84,7 +88,13 @@ export function createComposeDeploy(
       await writeFile(path, p.generated.content);
     }
     for (const [cmd, ...args] of p.lines) {
-      const res = await run(cmd!, args, { cwd: root, ...(opts.signal ? { signal: opts.signal } : {}) });
+      const timeout = timeoutSignal(commandTimeoutMs);
+      const signal = anySignal(opts.signal, timeout);
+      const res = await run(cmd!, args, { cwd: root, ...(signal ? { signal } : {}) });
+      if (res.code !== 0 && timeout?.aborted && !opts.signal?.aborted) {
+        // The output of a killed command is partial and may carry secrets: it stays out of the message.
+        throw new Error(`compose ${verb} timed out after ${commandTimeoutMs} ms and was stopped`);
+      }
       if (res.code !== 0) throw new Error(`compose ${verb} failed (exit ${res.code}): ${(res.stderr || res.stdout).trim().slice(0, errorOutputChars)}`);
     }
     return p.endpoints;
@@ -127,6 +137,7 @@ export const adapter = defineAdapter<'DeployPort', ComposeDeployOptions>({
         healthIntervalS: 'Seconds between health checks of the generated services',
         healthTimeoutS: 'Seconds a health check may take',
         healthRetries: 'Failed health checks before a service counts as unhealthy',
+        commandTimeoutMs: 'Longest one docker compose invocation may run before it is stopped',
         errorOutputChars: 'Characters of the command output kept in the error message when Compose fails',
       }),
     },
