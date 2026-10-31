@@ -9,6 +9,7 @@ verifies it. The token is never stored with the task, returned, or logged.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -22,6 +23,8 @@ from fasta2a.broker import InMemoryBroker
 from fasta2a.pydantic_ai import AgentWorker
 from fasta2a.schema import TaskIdParams, TaskSendParams
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+from .settings import GATEWAY_SECRET_HEADER
 
 CALLER_TOKEN: ContextVar[str | None] = ContextVar('caller_token', default=None)
 
@@ -76,15 +79,19 @@ def _host_name(host: str) -> str:
 class CallerMiddleware:
     """Requires a bearer credential on every request except the public ones (agent card, health).
 
-    The credential is not verified here: the gateway verifies it on each model and tool call. Requests that carry an
+    The credential is not verified here: the gateway verifies it on each model and tool call. When a gateway secret is
+    set, a request without it is answered like one without a credential. Requests that carry an
     `Origin` header are refused (the agent is called server to server), and, when bound to loopback, so are `Host`
     names that are not loopback ones (DNS rebinding).
     """
 
-    def __init__(self, app: ASGIApp, *, public_paths: frozenset[str], loopback_only: bool) -> None:
+    def __init__(
+        self, app: ASGIApp, *, public_paths: frozenset[str], loopback_only: bool, gateway_secret: str | None = None
+    ) -> None:
         self.app = app
         self.public_paths = public_paths
         self.loopback_only = loopback_only
+        self.gateway_secret = gateway_secret.encode() if gateway_secret else None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope['type'] != 'http':
@@ -101,7 +108,7 @@ class CallerMiddleware:
             await self.app(scope, receive, send)
             return
         token = bearer_of(headers.get('authorization'))
-        if token is None:
+        if token is None or not self._from_gateway(headers):
             await _reply(send, 401, {'error': 'unauthorized'}, {'www-authenticate': 'Bearer realm="agent"'})
             return
         reset = CALLER_TOKEN.set(token)
@@ -109,6 +116,12 @@ class CallerMiddleware:
             await self.app(scope, receive, send)
         finally:
             CALLER_TOKEN.reset(reset)
+
+
+    def _from_gateway(self, headers: dict[str, str]) -> bool:
+        if self.gateway_secret is None:
+            return True
+        return hmac.compare_digest(headers.get(GATEWAY_SECRET_HEADER, '').encode(), self.gateway_secret)
 
 
 async def _reply(send: Send, status: int, body: dict[str, Any], headers: dict[str, str] | None = None) -> None:

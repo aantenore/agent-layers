@@ -1,145 +1,195 @@
-"""Who owns which task and conversation.
+"""Tasks and conversations kept per caller.
 
-FastA2A keeps every task in one shared store and answers any caller that knows an id. Here each task and each
-`contextId` has an owner, recorded when it is created, and every other caller is told the task does not exist: the
-answer for an unknown id, so ids cannot be probed.
+FastA2A keeps every task in one shared store and answers any caller that knows an id. Here the store is split by
+owner: each owner has a namespace of its own for tasks and conversations, and the task manager sees the store only
+through `CallerStorage`, which resolves every lookup in the namespace of the caller being served. An id that belongs to
+someone else is therefore not found, exactly like an unknown id, and a `contextId` that someone else uses is just a
+separate conversation. The wire ids are unchanged.
 
 The owner key is the SHA-256 of the caller's bearer token. This agent does not verify the token (the gateway does, on
 every model and tool call), so it cannot know the subject behind it. Only the digest is kept; the token itself is
 never stored, returned or logged.
+
+The worker is the only code that reads the store by task id alone (it created the task for its owner); it finds the
+conversation of a run in the namespace of the run's owner.
 """
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from fasta2a.schema import (
+    Artifact,
     CancelTaskRequest,
     CancelTaskResponse,
-    GetTaskRequest,
-    GetTaskResponse,
     JSONRPCError,
     Message,
-    ResubscribeTaskRequest,
     SendMessageRequest,
     SendMessageResponse,
     StreamMessageRequest,
     StreamMessageResponse,
     Task,
     TaskNotFoundError,
+    TaskState,
+    TaskStatus,
 )
-from fasta2a.storage import InMemoryStorage
+from fasta2a.storage import Storage
 from fasta2a.task_manager import TaskManager
 
-from .caller import RUN_OWNER, owner_key
+from .caller import RUN_OWNER, MissingCaller, owner_key
 
 FINAL_STATES = frozenset({'completed', 'canceled', 'failed', 'rejected'})
 
 
-class ContextNotOwned(Exception):
-    """A message named a conversation that belongs to another caller."""
-
-
 class TooManyTasks(Exception):
-    """The caller is at its cap of tasks or conversations and none of them can be dropped."""
+    """The new task would exceed a cap, and the caller has nothing of its own that can be dropped."""
 
 
-class OwnedStorage(InMemoryStorage[list[Any]]):
-    """In-memory storage that records the owner of each task and conversation, and keeps a bounded number of them.
+@dataclass
+class _Space:
+    """What one owner has: tasks in creation order, conversations from least to most recently used."""
 
-    At most `max_tasks` tasks and `max_tasks` conversations are kept, and `max_tasks // 4` of each per owner. Beyond a
-    cap the oldest finished task, or the least recently used conversation without a task in flight, is dropped (the
-    owner's own first); when nothing can be dropped the owner's new task is refused. A dropped conversation leaves a
-    tombstone with its owner, so its id cannot be claimed by anyone else; its owner may use it again, from scratch.
-    The tombstones are bounded too (`max_tasks`, oldest first). A task or conversation without an owner is never served.
+    tasks: dict[str, Task] = field(default_factory=dict)
+    contexts: dict[str, list[Any]] = field(default_factory=dict)
+
+    def idle_context(self) -> str | None:
+        busy = {t['context_id'] for t in self.tasks.values() if t['status']['state'] not in FINAL_STATES}
+        return next((c for c in self.contexts if c not in busy), None)
+
+    def finished_task(self) -> str | None:
+        return next((i for i, t in self.tasks.items() if t['status']['state'] in FINAL_STATES), None)
+
+
+class TaskStore(Storage[list[Any]]):
+    """The worker's storage: tasks and conversations in a namespace per owner, in memory.
+
+    At most `max_tasks` tasks and `max_tasks` conversations are kept, and `max_tasks // 4` of each per owner. At a cap,
+    only the requesting owner's own oldest finished task, or least recently used conversation without a task in flight,
+    is dropped to make room; when it has none the new task is refused. Nothing of another owner is ever dropped, and
+    nothing submitted or working is.
     """
 
     def __init__(self, max_tasks: int) -> None:
-        super().__init__()
         self.max_tasks = max_tasks
         self.per_owner = max(1, max_tasks // 4)
-        self.task_owners: dict[str, str] = {}
-        self.context_owners: dict[str, str] = {}
-        self.evicted_contexts: dict[str, str] = {}
+        self._spaces: dict[str, _Space] = {}
+        self._task_owner: dict[str, str] = {}
 
-    async def submit_task(self, context_id: str, message: Message) -> Task:
-        owner = owner_key()
-        if owner is None:
-            raise ContextNotOwned()
-        current = self.context_owners.get(context_id)
-        if current not in (None, owner) or (current is None and self.evicted_contexts.get(context_id, owner) != owner):
-            raise ContextNotOwned()
-        # Room is made, or the task refused, before anything changes.
-        context_victim = task_victim = None
-        if current is None and self._count(self.context_owners, owner) >= self.per_owner:
-            context_victim = self._idle_context(owner)
-            if context_victim is None:
-                raise TooManyTasks()
-        if self._count(self.task_owners, owner) >= self.per_owner:
-            task_victim = self._finished_task(owner)
-            if task_victim is None:
-                raise TooManyTasks()
-        if context_victim is not None:
-            self._drop_context(context_victim)
-        if task_victim is not None:
-            self._drop_task(task_victim)
-        # Re-inserting keeps the most recently used conversation last.
-        self.context_owners.pop(context_id, None)
-        self.context_owners[context_id] = owner
-        self.evicted_contexts.pop(context_id, None)
-        task = await super().submit_task(context_id, message)
-        self.task_owners[task['id']] = owner
-        self._trim()
+    # Worker side: by task id, and by the owner of the run.
+
+    async def load_task(self, task_id: str, history_length: int | None = None) -> Task | None:
+        owner = self._task_owner.get(task_id)
+        return self.task_of(owner, task_id, history_length) if owner else None
+
+    async def update_task(
+        self,
+        task_id: str,
+        state: TaskState,
+        new_artifacts: list[Artifact] | None = None,
+        new_messages: list[Message] | None = None,
+    ) -> Task:
+        task = self._spaces[self._task_owner[task_id]].tasks[task_id]
+        task['status'] = TaskStatus(state=state, timestamp=datetime.now().isoformat())
+        if new_artifacts:
+            task.setdefault('artifacts', []).extend(new_artifacts)
+        if new_messages:
+            history = task.setdefault('history', [])
+            for message in new_messages:
+                message['task_id'] = task_id
+                message['context_id'] = task['context_id']
+                history.append(message)
         return task
 
     async def load_context(self, context_id: str) -> list[Any] | None:
-        return await super().load_context(context_id) if self._runs_for(context_id) else None
+        space = self._spaces.get(RUN_OWNER.get() or '')
+        history = space.contexts.get(context_id) if space else None
+        return list(history) if history is not None else None
 
     async def update_context(self, context_id: str, context: list[Any]) -> None:
-        # Only the owner of the running task writes, and only while the conversation is still its own.
-        if self._runs_for(context_id):
-            await super().update_context(context_id, context)
+        space = self._spaces.get(RUN_OWNER.get() or '')
+        if space is not None and context_id in space.contexts:
+            space.contexts[context_id] = context
 
-    def owns_task(self, task_id: str) -> bool:
-        owner = owner_key()
-        return owner is not None and self.task_owners.get(task_id) == owner
+    async def submit_task(self, context_id: str, message: Message) -> Task:
+        raise NotImplementedError('tasks are submitted for an owner: see `submit`')
 
-    def _runs_for(self, context_id: str) -> bool:
-        owner = RUN_OWNER.get()
-        return owner is not None and self.context_owners.get(context_id) == owner
+    # Caller side: always for one owner.
+
+    def task_of(self, owner: str | None, task_id: str, history_length: int | None = None) -> Task | None:
+        space = self._spaces.get(owner or '')
+        task = space.tasks.get(task_id) if space else None
+        if task is not None and history_length and 'history' in task:
+            task = Task(**{**task, 'history': task['history'][-history_length:]})
+        return task
+
+    def submit(self, owner: str, context_id: str, message: Message) -> Task:
+        space = self._spaces.get(owner) or _Space()
+        context_victim = task_victim = None
+        if context_id not in space.contexts and (
+            len(space.contexts) >= self.per_owner or sum(len(s.contexts) for s in self._spaces.values()) >= self.max_tasks
+        ):
+            context_victim = space.idle_context()
+            if context_victim is None:
+                raise TooManyTasks()
+        if len(space.tasks) >= self.per_owner or len(self._task_owner) >= self.max_tasks:
+            task_victim = space.finished_task()
+            if task_victim is None:
+                raise TooManyTasks()
+        if context_victim is not None:
+            del space.contexts[context_victim]
+        if task_victim is not None:
+            del space.tasks[task_victim]
+            del self._task_owner[task_victim]
+
+        task_id = str(uuid.uuid4())
+        message['task_id'] = task_id
+        message['context_id'] = context_id
+        task = Task(
+            id=task_id,
+            context_id=context_id,
+            status=TaskStatus(state='submitted', timestamp=datetime.now().isoformat()),
+            history=[message],
+        )
+        # Re-inserting keeps the most recently used conversation last.
+        space.contexts[context_id] = space.contexts.pop(context_id, [])
+        space.tasks[task_id] = task
+        self._spaces[owner] = space
+        self._task_owner[task_id] = owner
+        return task
+
+
+class CallerStorage(Storage[list[Any]]):
+    """The task manager's view of the store: every call is for the owner of the request being served."""
+
+    def __init__(self, store: TaskStore) -> None:
+        self.store = store
 
     @staticmethod
-    def _count(owners: dict[str, str], owner: str) -> int:
-        return sum(1 for o in owners.values() if o == owner)
+    def _owner() -> str:
+        owner = owner_key()
+        if owner is None:
+            raise MissingCaller()
+        return owner
 
-    def _idle_context(self, owner: str | None = None) -> str | None:
-        busy = {t['context_id'] for t in self.tasks.values() if t['status']['state'] not in FINAL_STATES}
-        return next((c for c, o in self.context_owners.items() if c not in busy and owner in (None, o)), None)
+    async def load_task(self, task_id: str, history_length: int | None = None) -> Task | None:
+        return self.store.task_of(self._owner(), task_id, history_length)
 
-    def _finished_task(self, owner: str | None = None) -> str | None:
-        return next(
-            (t for t, o in self.task_owners.items() if owner in (None, o) and self.tasks[t]['status']['state'] in FINAL_STATES),
-            None,
-        )
+    async def submit_task(self, context_id: str, message: Message) -> Task:
+        return self.store.submit(self._owner(), context_id, message)
 
-    def _drop_context(self, context_id: str) -> None:
-        self.evicted_contexts[context_id] = self.context_owners.pop(context_id)
-        self.contexts.pop(context_id, None)
-        while len(self.evicted_contexts) > self.max_tasks:
-            del self.evicted_contexts[next(iter(self.evicted_contexts))]
+    async def update_task(self, task_id: str, state: TaskState, new_artifacts: Any = None, new_messages: Any = None) -> Task:
+        raise NotImplementedError('only the worker updates tasks')
 
-    def _drop_task(self, task_id: str) -> None:
-        del self.task_owners[task_id]
-        del self.tasks[task_id]
+    async def load_context(self, context_id: str) -> list[Any] | None:
+        raise NotImplementedError('only the worker reads conversations')
 
-    def _trim(self) -> None:
-        while len(self.context_owners) > self.max_tasks and (victim := self._idle_context()) is not None:
-            self._drop_context(victim)
-        while len(self.task_owners) > self.max_tasks and (victim := self._finished_task()) is not None:
-            self._drop_task(victim)
+    async def update_context(self, context_id: str, context: list[Any]) -> None:
+        raise NotImplementedError('only the worker writes conversations')
 
 
 def _not_found() -> TaskNotFoundError:
@@ -147,43 +197,36 @@ def _not_found() -> TaskNotFoundError:
 
 
 def _too_many() -> JSONRPCError[int, str]:
-    return JSONRPCError(code=-32000, message='Too many tasks for this caller')
+    return JSONRPCError(code=-32000, message='Too many tasks')
 
 
 @dataclass
 class OwnedTaskManager(TaskManager):
-    """FastA2A's task manager, answering only the caller that owns the task or conversation.
+    """FastA2A's task manager over `CallerStorage`, with the few checks its flow needs before it touches a task.
 
     `cancel_run` stops the run of a task before the cancel is queued; it is the worker's.
     """
 
     cancel_run: Callable[[str], Awaitable[None]] | None = None
 
-    @property
-    def owned_storage(self) -> OwnedStorage:
-        assert isinstance(self.storage, OwnedStorage)
-        return self.storage
-
-    def _may_send(self, message: Message) -> bool:
+    async def _may_send(self, message: Message) -> bool:
+        """A message that names a task continues one of the caller's own."""
         task_id = message.get('task_id')
-        return task_id is None or self.owned_storage.owns_task(task_id)
+        return task_id is None or await self.storage.load_task(task_id) is not None
 
     def _refusal_event(self, request_id: Any, error: Any = None) -> bytes:
         return self._format_sse_event(StreamMessageResponse(jsonrpc='2.0', id=request_id, error=error or _not_found()))
 
     async def send_message(self, request: SendMessageRequest) -> SendMessageResponse:
-        refused = SendMessageResponse(jsonrpc='2.0', id=request['id'], error=_not_found())
-        if not self._may_send(request['params']['message']):
-            return refused
+        if not await self._may_send(request['params']['message']):
+            return SendMessageResponse(jsonrpc='2.0', id=request['id'], error=_not_found())
         try:
             return await super().send_message(request)
-        except ContextNotOwned:
-            return refused
         except TooManyTasks:
             return SendMessageResponse(jsonrpc='2.0', id=request['id'], error=_too_many())
 
     async def stream_message(self, request: StreamMessageRequest) -> AsyncIterator[bytes]:
-        if not self._may_send(request['params']['message']):
+        if not await self._may_send(request['params']['message']):
             yield self._refusal_event(request['id'])
             return
         try:
@@ -191,28 +234,14 @@ class OwnedTaskManager(TaskManager):
             async with aclosing(super().stream_message(request)) as events:
                 async for event in events:
                     yield event
-        except ContextNotOwned:
-            yield self._refusal_event(request['id'])
         except TooManyTasks:
             yield self._refusal_event(request['id'], _too_many())
 
-    async def get_task(self, request: GetTaskRequest) -> GetTaskResponse:
-        if not self.owned_storage.owns_task(request['params']['id']):
-            return GetTaskResponse(jsonrpc='2.0', id=request['id'], error=_not_found())
-        return await super().get_task(request)
-
     async def cancel_task(self, request: CancelTaskRequest) -> CancelTaskResponse:
+        # FastA2A queues the cancel before it looks the task up.
         task_id = request['params']['id']
-        if not self.owned_storage.owns_task(task_id):
+        if await self.storage.load_task(task_id) is None:
             return CancelTaskResponse(jsonrpc='2.0', id=request['id'], error=_not_found())
         if self.cancel_run is not None:
             await self.cancel_run(task_id)
         return await super().cancel_task(request)
-
-    async def resubscribe_task(self, request: ResubscribeTaskRequest) -> AsyncIterator[bytes]:
-        if not self.owned_storage.owns_task(request['params']['id']):
-            yield self._refusal_event(request['id'])
-            return
-        async with aclosing(super().resubscribe_task(request)) as events:
-            async for event in events:
-                yield event

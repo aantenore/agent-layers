@@ -151,6 +151,6 @@ async def test_shutdown_lets_a_run_in_flight_finish():
             res = await client.post('/', json=rpc('SendMessage', {'message': message}), headers={'authorization': f'Bearer {TOKEN}'})
             task_id = res.json()['result']['task']['id'] if 'task' in res.json()['result'] else res.json()['result']['id']
             await anyio.sleep(0.05)
-    task = await app.task_manager.storage.load_task(task_id)
+    task = await app.task_manager.storage.store.load_task(task_id)
     assert task['status']['state'] == 'completed'
     await model_client.aclose()

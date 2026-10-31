@@ -93,27 +93,47 @@ mode with the audience the gateway's identity layer accepts.
 
 ## Task ownership
 
-Each task and each `contextId` belongs to the caller that created it (a new `contextId` to its first caller). `GetTask`,
-`CancelTask`, `SubscribeToTask`, and a `SendMessage` or `SendStreamingMessage` that names a `contextId` or `taskId` of
-someone else are answered like an unknown id (`TaskNotFoundError`, code -32001), so ids cannot be probed. The one
-difference left: a `contextId` nobody has used is accepted and claimed by its caller.
+Tasks and conversations are kept per caller. The store has a namespace for each owner, and the A2A server reads it
+only through the namespace of the caller being served. The owner key is `sha256(bearer token)`; the token itself is
+not stored, returned or logged.
 
-The owner key is `sha256(bearer token)`, kept in memory beside the task; the token itself is not stored. This is
-weaker than a verified subject, because the agent does not verify the token (the gateway does) and the gateway has no
-introspection endpoint:
+- `GetTask`, `CancelTask` and `SubscribeToTask` on the id of another caller's task answer like an unknown id
+  (`TaskNotFoundError`, -32001), so ids cannot be probed. A message that names a `taskId` must name one of the
+  caller's own tasks.
+- A `contextId` is the caller's own name for a conversation: another caller using the same `contextId` gets a separate
+  conversation, and cannot read or extend yours. A run reads and writes the history in the namespace of its owner.
+- At most `MAX_TASKS` tasks and `MAX_TASKS` conversations are kept, and `MAX_TASKS // 4` of each per owner. At a cap
+  the new task makes room by dropping only its own owner's oldest finished task or least recently used conversation
+  with no task in flight. With nothing of its own to drop it is refused with the JSON-RPC error -32000 "Too many
+  tasks". Nothing of another owner and nothing submitted or working is ever dropped.
 
-- A caller that presents a different token loses its earlier tasks and conversations. On-behalf-of tokens are re-minted
-  when they expire, so a long conversation (the gateway sends the session id as `contextId`) can outlive its token.
-- Callers that share one credential share tasks. The static dev credentials of the `polyglot` profile hand every caller
-  the same token.
+Limits, because the agent does not verify the token (the gateway does, and has no introspection endpoint):
 
-At most `MAX_TASKS` tasks and `MAX_TASKS` conversations are kept, and `MAX_TASKS // 4` of each per caller key. Beyond a
-cap the oldest finished task, or the least recently used conversation with no task in flight, is dropped (the caller's
-own first); a task in flight is never dropped. A caller at its cap with nothing to drop gets the JSON-RPC error -32000
-"Too many tasks for this caller". A dropped conversation leaves a tombstone naming its owner, so no other caller can
-claim its `contextId`; its owner can use it again with an empty history. Tombstones are bounded too (`MAX_TASKS`,
-oldest first), so a very old dropped `contextId` becomes free again. A run writes to its conversation only while the
-conversation still belongs to the owner of that run.
+- A caller that presents a different token starts from nothing: on-behalf-of tokens are re-minted when they expire,
+  so a long conversation (the gateway sends the session id as `contextId`) can outlive its token and lose its history.
+- Callers that share one credential share one namespace. The static dev credentials of the `polyglot` profile hand
+  every caller the same token.
+- Anyone who can reach the endpoint can use any token string, including made-up ones, and fill the global cap with
+  tasks of its own that only it can drop. That is why the agent must be reachable only by the gateway, as below.
+
+## Reaching the agent
+
+The agent is meant to be called only by the gateway.
+
+- It listens on loopback by default. A non-loopback `A2A_HOST` is refused at startup unless `A2A_ALLOW_REMOTE=1`; then
+  keep it on a private network and set a gateway secret.
+- With `A2A_GATEWAY_SECRET` set, every request except the agent card and `/healthz` must carry the header
+  `X-Agent-Layers-Gateway: <secret>`, compared in constant time; without it the answer is the 401 of a missing bearer.
+  The secret is not logged or echoed. Send it from the stack with the static `headers` option of the `a2a` runtime
+  adapter:
+
+  ```json
+  { "adapter": "a2a", "options": { "url": "http://127.0.0.1:9100/.well-known/agent-card.json",
+    "auth": { "audience": "agent-gateway" },
+    "headers": { "X-Agent-Layers-Gateway": "${secret:A2A_GATEWAY_SECRET}" } } }
+  ```
+
+  `${env:A2A_GATEWAY_SECRET}` works the same when the secret is an environment variable of the gateway.
 
 Also refused: requests with an `Origin` header (the agent is called server to server) and, when bound to loopback,
 `Host` names that are not loopback ones. The agent card and `/healthz` are public.
@@ -126,11 +146,13 @@ Also refused: requests with an `Origin` header (the agent is called server to se
 | `AGENT_NAME` | from the file | Agent name |
 | `GATEWAY_URL` | `http://127.0.0.1:8787` | Root of the agent-layers gateway |
 | `GATEWAY_MODEL` | the file's `model` | Model alias of the gateway |
-| `A2A_HOST` | `127.0.0.1` | Interface to listen on |
+| `A2A_HOST` | `127.0.0.1` | Interface to listen on; anything but loopback needs `A2A_ALLOW_REMOTE=1` |
+| `A2A_ALLOW_REMOTE` | unset | `1` allows a non-loopback `A2A_HOST` |
+| `A2A_GATEWAY_SECRET` | unset | When set, requests must carry it in `X-Agent-Layers-Gateway` (see Reaching the agent) |
 | `A2A_PORT` | `9100` | Port of the A2A server |
 | `A2A_PUBLIC_URL` | `http://localhost:<port>/` | JSON-RPC URL written in the agent card |
 | `MAX_CONCURRENT_RUNS` | `8` | Runs in parallel |
-| `MAX_TASKS` | `1000` | Tasks, and conversations, kept in memory; a quarter of it per caller key (see Task ownership) |
+| `MAX_TASKS` | `1000` | Tasks, and conversations, kept in memory; `MAX_TASKS // 4` per caller key (see Task ownership) |
 | `SHUTDOWN_GRACE_S` | `10` | On SIGTERM or SIGINT, how long runs in flight may finish before they are cancelled |
 | `MODEL_TIMEOUT_S` | `120` | Time limit of one model request |
 | `LOG_LEVEL` | `info` | Log level |

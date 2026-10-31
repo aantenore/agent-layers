@@ -1,5 +1,6 @@
 """Tasks and conversations belong to the caller that created them; everyone else is told they do not exist."""
 
+import hashlib
 import json
 import logging
 
@@ -28,6 +29,10 @@ def anyio_backend():
     return 'asyncio'
 
 
+def digest(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 class Model:
     """A model that answers after `delay` seconds, and counts the runs that got to the end."""
 
@@ -48,7 +53,7 @@ class Server:
         self.client = client
         self.app = app
         self.model = model
-        self.storage = app.task_manager.storage
+        self.storage = app.task_manager.storage.store
 
     async def rpc(self, token: str, method: str, params: dict) -> dict:
         body = {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}
@@ -148,47 +153,34 @@ async def test_cancel_by_the_owner_stops_the_run():
     await model_client.aclose()
 
 
-async def test_a_message_naming_another_callers_context_is_refused(server):
+async def test_a_context_id_used_by_another_caller_is_a_separate_conversation(server):
     first = await server.created(TOKEN_A, text='first', context_id='ctx-a')
     await server.wait_for(first['id'], 'completed')
-    tasks = dict(server.storage.tasks)
-    history = list(server.storage.contexts['ctx-a'])
+    spaces = server.storage._spaces
+    history = list(spaces[digest(TOKEN_A)].contexts['ctx-a'])
 
-    refused = await server.send(TOKEN_B, text='intrusion', context_id='ctx-a')
-    assert refused['error']['code'] == NOT_FOUND
-    assert server.storage.tasks.keys() == tasks.keys()
-    assert server.storage.contexts['ctx-a'] == history
-    assert server.model.calls == 1
+    other = await server.created(TOKEN_B, text='mine', context_id='ctx-a')
+    await server.wait_for(other['id'], 'completed')
+    assert spaces[digest(TOKEN_A)].contexts['ctx-a'] == history
+    assert len(spaces[digest(TOKEN_B)].contexts['ctx-a']) == 2  # only B's own message and answer
+    assert [t['id'] for t in spaces[digest(TOKEN_A)].tasks.values()] == [first['id']]
 
     second = await server.created(TOKEN_A, text='second', context_id='ctx-a')
     await server.wait_for(second['id'], 'completed')
-    assert len(server.storage.contexts['ctx-a']) > len(history)
+    assert len(spaces[digest(TOKEN_A)].contexts['ctx-a']) > len(history)
+    assert len(spaces[digest(TOKEN_B)].contexts['ctx-a']) == 2
 
 
-async def test_a_new_context_belongs_to_its_first_caller(server):
-    task = await server.created(TOKEN_B, context_id='ctx-b')
-    await server.wait_for(task['id'], 'completed')
-    assert (await server.send(TOKEN_A, context_id='ctx-b'))['error']['code'] == NOT_FOUND
-    assert 'error' not in await server.send(TOKEN_B, context_id='ctx-b')
-    generated = await server.created(TOKEN_A)
-    assert (await server.send(TOKEN_B, context_id=generated['contextId']))['error']['code'] == NOT_FOUND
-
-
-async def test_a_message_naming_another_callers_task_is_refused(server):
+async def test_a_message_naming_a_task_of_another_caller_is_refused(server):
     task = await server.created(TOKEN_A)
     assert (await server.send(TOKEN_B, task_id=task['id']))['error']['code'] == NOT_FOUND
     assert (await server.send(TOKEN_B, task_id='no-such-task'))['error']['code'] == NOT_FOUND
+    assert 'error' not in await server.send(TOKEN_A, task_id=task['id'])
 
 
-async def test_streaming_and_resubscribe_are_refused_to_other_callers(server):
+async def test_streaming_and_resubscribe_do_not_reach_other_callers(server):
     task = await server.created(TOKEN_A, context_id='ctx-s')
     await server.wait_for(task['id'], 'completed')
-    tasks = dict(server.storage.tasks)
-
-    message = {'messageId': 'm-s', 'role': 'ROLE_USER', 'parts': [{'text': 'Hi'}], 'contextId': 'ctx-s'}
-    events = await server.stream(TOKEN_B, 'SendStreamingMessage', {'message': message})
-    assert [e['error']['code'] for e in events] == [NOT_FOUND]
-    assert server.storage.tasks.keys() == tasks.keys()
 
     events = await server.stream(TOKEN_B, 'SubscribeToTask', {'id': task['id']})
     assert [e['error']['code'] for e in events] == [NOT_FOUND]
@@ -197,7 +189,10 @@ async def test_streaming_and_resubscribe_are_refused_to_other_callers(server):
     events = await server.stream(TOKEN_A, 'SubscribeToTask', {'id': task['id']})
     assert events[0]['result']['task']['id'] == task['id']
 
-    events = await server.stream(TOKEN_A, 'SendStreamingMessage', {'message': {**message, 'messageId': 'm-s2'}})
+    message = {'messageId': 'm-s', 'role': 'ROLE_USER', 'parts': [{'text': 'Hi'}], 'contextId': 'ctx-s'}
+    refused = await server.stream(TOKEN_B, 'SendStreamingMessage', {'message': {**message, 'taskId': task['id']}})
+    assert [e['error']['code'] for e in refused] == [NOT_FOUND]
+    events = await server.stream(TOKEN_A, 'SendStreamingMessage', {'message': message})
     assert 'error' not in events[0] and events[0]['result']['task']['contextId'] == 'ctx-s'
 
 
@@ -210,78 +205,57 @@ async def test_the_raw_token_is_never_kept_or_logged(server, caplog):
     for token in (TOKEN_A, TOKEN_B):
         assert token not in kept
         assert token not in caplog.text
+    assert digest(TOKEN_A) in kept
     assert TOKEN_A not in json.dumps(await server.rpc(TOKEN_A, 'GetTask', {'id': task['id']}))
 
 
-async def test_owners_are_bounded_with_the_stored_tasks():
-    app, model, model_client = await start({'MAX_TASKS': '4'})
+async def test_a_run_reads_and_writes_the_conversation_of_its_owner_only(server):
+    store = server.storage
+    for token in (TOKEN_A, TOKEN_B):
+        task = await server.created(token, context_id='ctx-w')
+        await server.wait_for(task['id'], 'completed')
+    spaces = store._spaces
+    a, b = digest(TOKEN_A), digest(TOKEN_B)
+    history_a, history_b = list(spaces[a].contexts['ctx-w']), list(spaces[b].contexts['ctx-w'])
+
+    async def as_run_of(owner, action):
+        reset = RUN_OWNER.set(owner)
+        try:
+            return await action
+        finally:
+            RUN_OWNER.reset(reset)
+
+    await as_run_of(a, store.update_context('ctx-w', ['written by A']))
+    assert spaces[a].contexts['ctx-w'] == ['written by A'] and spaces[b].contexts['ctx-w'] == history_b
+    assert await as_run_of(b, store.load_context('ctx-w')) == history_b
+    # No run owner, an owner without that conversation, or an unknown owner: nothing is read or written.
+    await store.update_context('ctx-w', ['no owner'])
+    await as_run_of(digest('nobody'), store.update_context('ctx-w', ['stranger']))
+    await as_run_of(a, store.update_context('ctx-other', ['not registered']))
+    assert await store.load_context('ctx-w') is None
+    assert spaces[a].contexts['ctx-w'] == ['written by A'] and spaces[b].contexts['ctx-w'] == history_b
+    assert 'ctx-other' not in spaces[a].contexts and history_a != spaces[a].contexts['ctx-w']
+
+
+async def test_the_global_cap_never_drops_what_belongs_to_another_caller():
+    app, model, model_client = await start({'MAX_TASKS': '4'}, delay=0.3)
     async with app.router.lifespan_context(app):
         async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
             server = Server(client, app, model)
-            ids = []
-            for n in range(6):
-                token = f'token-{n}'
-                task = await server.created(token, text=f't{n}', context_id=f'ctx-{n}')
+            tokens = [f'token-{n}' for n in range(4)]
+            tasks = [await server.created(t, context_id=f'ctx-{n}') for n, t in enumerate(tokens)]
+            # The cap is reached by tasks in flight: a newcomer is refused, and nobody loses anything.
+            refused = await server.send('token-new', context_id='ctx-new')
+            assert refused['error'] == {'code': TOO_MANY, 'message': 'Too many tasks'}
+            for task in tasks:
                 await server.wait_for(task['id'], 'completed')
-                ids.append((token, task['id']))
-            storage = server.storage
-            assert len(storage.tasks) == 4 and set(storage.task_owners) == set(storage.tasks)
-            assert len(storage.context_owners) == 4 and set(storage.contexts) <= set(storage.context_owners)
-            assert ids[0][1] not in storage.tasks and ids[0][1] not in storage.task_owners
-            assert (await server.rpc(*ids[0][:1], 'GetTask', {'id': ids[0][1]}))['error']['code'] == NOT_FOUND
-            assert (await server.rpc(*ids[5][:1], 'GetTask', {'id': ids[5][1]}))['result']['id'] == ids[5][1]
-            assert 'ctx-0' not in storage.contexts
-    await model_client.aclose()
-
-
-async def test_a_run_writes_history_only_while_its_owner_holds_the_conversation(server):
-    task = await server.created(TOKEN_A, context_id='ctx-w')
-    await server.wait_for(task['id'], 'completed')
-    storage = server.storage
-    history = list(storage.contexts['ctx-w'])
-    owner_a = storage.task_owners[task['id']]
-
-    # The conversation changes hands behind the run's back: its writes and reads are dropped.
-    storage.context_owners['ctx-w'] = 'someone-else'
-    reset = RUN_OWNER.set(owner_a)
-    try:
-        await storage.update_context('ctx-w', ['overwritten'])
-        assert await storage.load_context('ctx-w') is None
-    finally:
-        RUN_OWNER.reset(reset)
-    assert storage.contexts['ctx-w'] == history
-
-    # Without a run owner nothing is written either.
-    storage.context_owners['ctx-w'] = owner_a
-    await storage.update_context('ctx-w', ['overwritten'])
-    assert storage.contexts['ctx-w'] == history
-    reset = RUN_OWNER.set(owner_a)
-    try:
-        await storage.update_context('ctx-w', ['own write'])
-    finally:
-        RUN_OWNER.reset(reset)
-    assert storage.contexts['ctx-w'] == ['own write']
-
-
-async def test_a_conversation_with_a_task_in_flight_is_not_dropped():
-    app, model, model_client = await start({'MAX_TASKS': '8'}, delay=0.4)
-    async with app.router.lifespan_context(app):
-        async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
-            server = Server(client, app, model)
-            idle = await server.created(TOKEN_A, context_id='ctx-idle')
-            await server.wait_for(idle['id'], 'completed')
-            busy = await server.created(TOKEN_A, context_id='ctx-busy')
-            await server.wait_for(busy['id'], 'working')
-            # The owner is at its cap of 2 conversations: the idle one goes, never the one with a task in flight.
-            third = await server.created(TOKEN_A, context_id='ctx-3')
-            storage = server.storage
-            assert set(storage.context_owners) == {'ctx-busy', 'ctx-3'} and 'ctx-idle' in storage.evicted_contexts
-            # Both remaining conversations have a task in flight: a fourth is refused.
-            refused = await server.send(TOKEN_A, context_id='ctx-4')
-            assert refused['error']['code'] == TOO_MANY
-            assert set(storage.context_owners) == {'ctx-busy', 'ctx-3'}
-            for task in (busy, third):
-                await server.wait_for(task['id'], 'completed')
+            # All finished, still at the cap: the newcomer has nothing of its own to drop, so it is refused too.
+            assert (await server.send('token-new', context_id='ctx-new'))['error']['code'] == TOO_MANY
+            assert set(server.storage._task_owner) == {t['id'] for t in tasks}
+            # An owner with a finished task of its own makes room by dropping only that one.
+            fresh = await server.created(tokens[0], context_id='ctx-0')
+            assert set(server.storage._task_owner) == {t['id'] for t in tasks[1:]} | {fresh['id']}
+            assert (await server.rpc('token-new', 'GetTask', {'id': fresh['id']}))['error']['code'] == NOT_FOUND
     await model_client.aclose()
 
 
@@ -296,17 +270,38 @@ async def test_an_owner_at_its_cap_loses_its_own_oldest_finished_task_first_then
             second = await server.created(TOKEN_A, context_id='ctx-1')
             # At its cap (2): the finished task goes, the other caller's task stays.
             third = await server.created(TOKEN_A, context_id='ctx-1')
-            assert first['id'] not in server.storage.tasks and other['id'] in server.storage.tasks
-            assert second['id'] in server.storage.tasks
+            tasks = server.storage._task_owner
+            assert first['id'] not in tasks and other['id'] in tasks and second['id'] in tasks
             # Two tasks in flight and none finished: refused with a plain error that says nothing of others.
             refused = await server.send(TOKEN_A, context_id='ctx-1')
-            assert refused['error'] == {'code': TOO_MANY, 'message': 'Too many tasks for this caller'}
+            assert refused['error'] == {'code': TOO_MANY, 'message': 'Too many tasks'}
             events = await server.stream(TOKEN_A, 'SendStreamingMessage', {'message': {
                 'messageId': 'm-x', 'role': 'ROLE_USER', 'parts': [{'text': 'x'}], 'contextId': 'ctx-1'}})
             assert [e['error']['code'] for e in events] == [TOO_MANY]
-            assert len(server.storage.tasks) == 3
+            assert len(tasks) == 3
             await server.wait_for(third['id'], 'completed')
             assert 'error' not in await server.send(TOKEN_A, context_id='ctx-1')
+    await model_client.aclose()
+
+
+async def test_a_conversation_with_a_task_in_flight_is_not_dropped():
+    app, model, model_client = await start({'MAX_TASKS': '8'}, delay=0.4)
+    async with app.router.lifespan_context(app):
+        async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
+            server = Server(client, app, model)
+            idle = await server.created(TOKEN_A, context_id='ctx-idle')
+            await server.wait_for(idle['id'], 'completed')
+            busy = await server.created(TOKEN_A, context_id='ctx-busy')
+            await server.wait_for(busy['id'], 'working')
+            # At its cap of 2 conversations: the idle one goes, never the one with a task in flight.
+            third = await server.created(TOKEN_A, context_id='ctx-3')
+            contexts = server.storage._spaces[digest(TOKEN_A)].contexts
+            assert set(contexts) == {'ctx-busy', 'ctx-3'}
+            # Both remaining conversations have a task in flight: a fourth is refused.
+            assert (await server.send(TOKEN_A, context_id='ctx-4'))['error']['code'] == TOO_MANY
+            assert set(contexts) == {'ctx-busy', 'ctx-3'}
+            for task in (busy, third):
+                await server.wait_for(task['id'], 'completed')
     await model_client.aclose()
 
 
@@ -315,48 +310,8 @@ async def test_an_owner_at_its_conversation_cap_loses_its_least_recently_used_id
     async with app.router.lifespan_context(app):
         async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
             server = Server(client, app, model)
-            for context in ('ctx-1', 'ctx-2'):
+            for context in ('ctx-1', 'ctx-2', 'ctx-1', 'ctx-3'):  # ctx-2 is the least recently used
                 task = await server.created(TOKEN_A, context_id=context)
                 await server.wait_for(task['id'], 'completed')
-            task = await server.created(TOKEN_A, context_id='ctx-1')  # ctx-2 is now the least recently used
-            await server.wait_for(task['id'], 'completed')
-            task = await server.created(TOKEN_A, context_id='ctx-3')
-            await server.wait_for(task['id'], 'completed')
-            storage = server.storage
-            assert set(storage.context_owners) == {'ctx-1', 'ctx-3'}
-            assert 'ctx-2' in storage.evicted_contexts and 'ctx-2' not in storage.contexts
-    await model_client.aclose()
-
-
-async def test_a_dropped_conversation_id_is_refused_to_others_and_reclaimable_by_its_owner():
-    app, model, model_client = await start({'MAX_TASKS': '8'})
-    async with app.router.lifespan_context(app):
-        async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
-            server = Server(client, app, model)
-            for context in ('ctx-1', 'ctx-2', 'ctx-3'):
-                task = await server.created(TOKEN_A, context_id=context)
-                await server.wait_for(task['id'], 'completed')
-            storage = server.storage
-            assert 'ctx-1' not in storage.context_owners and 'ctx-1' in storage.evicted_contexts
-            assert (await server.send(TOKEN_B, context_id='ctx-1'))['error']['code'] == NOT_FOUND
-            assert 'ctx-1' not in storage.context_owners
-            task = await server.created(TOKEN_A, context_id='ctx-1')
-            await server.wait_for(task['id'], 'completed')
-            assert storage.context_owners['ctx-1'] == storage.task_owners[task['id']]
-            assert 'ctx-1' not in storage.evicted_contexts
-            # Fresh history: only this run's messages.
-            assert len(storage.contexts['ctx-1']) == 2
-    await model_client.aclose()
-
-
-async def test_the_tombstones_are_bounded():
-    app, model, model_client = await start({'MAX_TASKS': '4'})
-    async with app.router.lifespan_context(app):
-        async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
-            server = Server(client, app, model)
-            for n in range(12):
-                task = await server.created(TOKEN_A, context_id=f'ctx-{n}')
-                await server.wait_for(task['id'], 'completed')
-            assert len(server.storage.evicted_contexts) <= 4
-            assert 'ctx-10' in server.storage.evicted_contexts or 'ctx-9' in server.storage.evicted_contexts
+            assert list(server.storage._spaces[digest(TOKEN_A)].contexts) == ['ctx-1', 'ctx-3']
     await model_client.aclose()

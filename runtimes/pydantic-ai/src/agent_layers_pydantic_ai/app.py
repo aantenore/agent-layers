@@ -16,7 +16,7 @@ from starlette.routing import Route
 
 from .agent import build_agent, model_http_client
 from .caller import CallerBroker, CallerMiddleware, CallerWorker
-from .owners import OwnedStorage, OwnedTaskManager
+from .owners import CallerStorage, OwnedTaskManager, TaskStore
 from .settings import Settings
 from .spec import AgentSpec
 
@@ -39,12 +39,13 @@ def create_app(
     """The ASGI app. `agent` and `http_client` replace the gateway-backed ones (tests)."""
     client = http_client or model_http_client(settings)
     the_agent = agent or build_agent(spec, settings, client)
-    storage = OwnedStorage(settings.max_tasks)
+    store = TaskStore(settings.max_tasks)
+    storage = CallerStorage(store)
     broker = CallerBroker()
     worker = CallerWorker(
         agent=the_agent,
         broker=broker,
-        storage=storage,
+        storage=store,
         max_concurrent_runs=settings.max_concurrent_runs,
         shutdown_grace_s=settings.shutdown_grace_s,
     )
@@ -78,6 +79,7 @@ def create_app(
                 CallerMiddleware,
                 public_paths=frozenset({AGENT_CARD_PATH, HEALTH_PATH}),
                 loopback_only=settings.loopback,
+                gateway_secret=settings.gateway_secret,
             )
         ],
         lifespan=lifespan,

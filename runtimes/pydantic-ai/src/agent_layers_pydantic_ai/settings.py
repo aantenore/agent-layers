@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 LOOPBACK_BIND = frozenset({'127.0.0.1', 'localhost', '::1'})
+GATEWAY_SECRET_HEADER = 'x-agent-layers-gateway'
 
 
 class SettingsError(ValueError):
@@ -31,6 +32,8 @@ class Settings:
     shutdown_grace_s: float
     model_timeout_s: float
     log_level: str
+    gateway_secret: str | None = field(default=None, repr=False)
+    """When set, every request except the agent card and health check must carry it in `GATEWAY_SECRET_HEADER`."""
 
     @property
     def loopback(self) -> bool:
@@ -69,6 +72,11 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
     host = env.get('A2A_HOST', '127.0.0.1').strip()
     port = _int(env, 'A2A_PORT', 9100, low=0)
     shown = 'localhost' if host in LOOPBACK_BIND or host in ('0.0.0.0', '::') else host
+    if host not in LOOPBACK_BIND and env.get('A2A_ALLOW_REMOTE', '').strip() != '1':
+        raise SettingsError(
+            f'A2A_HOST {host!r} is not a loopback address: this agent does not verify tokens and must be reachable '
+            'only by the gateway; set A2A_ALLOW_REMOTE=1 to bind it anyway (and set A2A_GATEWAY_SECRET)'
+        )
     model = env.get('GATEWAY_MODEL', '').strip() or None
     if model and model.startswith('agent:'):
         raise SettingsError('GATEWAY_MODEL must be a model alias, not agent:<name>: the gateway would run this agent again')
@@ -85,4 +93,5 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         shutdown_grace_s=_float(env, 'SHUTDOWN_GRACE_S', 10.0),
         model_timeout_s=_float(env, 'MODEL_TIMEOUT_S', 120.0),
         log_level=env.get('LOG_LEVEL', 'info').strip().lower() or 'info',
+        gateway_secret=env.get('A2A_GATEWAY_SECRET', '').strip() or None,
     )
