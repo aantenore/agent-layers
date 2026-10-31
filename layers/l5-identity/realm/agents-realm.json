@@ -1,0 +1,89 @@
+{
+  "realm": "agents",
+  "enabled": true,
+  "sslRequired": "external",
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      { "name": "analyst", "description": "May call read and write tools" },
+      { "name": "viewer", "description": "May call read tools" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "agent-runtime",
+      "name": "Agent runtime",
+      "description": "Confidential client of the agent runtime: own identity (client_credentials) and on-behalf-of token exchange",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": { "standard.token.exchange.enabled": "true" },
+      "protocolMappers": [
+        {
+          "name": "audience tools-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.client.audience": "tools-api", "access.token.claim": "true", "id.token.claim": "false", "introspection.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "clientId": "tools-api",
+      "name": "Tools API",
+      "description": "Audience of downstream tool calls; issues no tokens itself",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "unused-tools-api-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "agents-test",
+      "name": "Test client (tests only)",
+      "description": "Public client with the password grant, used ONLY by the layer tests to obtain user tokens",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "audience agent-runtime",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.client.audience": "agent-runtime", "access.token.claim": "true", "id.token.claim": "false", "introspection.token.claim": "true" }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@example.test",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Analyst",
+      "realmRoles": ["analyst"],
+      "credentials": [{ "type": "password", "value": "alice-test-only", "temporary": false }]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@example.test",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Viewer",
+      "realmRoles": ["viewer"],
+      "credentials": [{ "type": "password", "value": "bob-test-only", "temporary": false }]
+    }
+  ]
+}

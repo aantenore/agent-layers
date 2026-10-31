@@ -1,0 +1,41 @@
+name: l5-identity
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.2
+    # Development mode with the test realm imported at start. Not a production setup (HTTP, H2, dev defaults).
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-me}
+      KC_HTTP_PORT: "8080"
+      KC_HEALTH_ENABLED: "true"
+      # Substituted into realm/agents-realm.json at import.
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-change-me}
+    ports:
+      # KEYCLOAK_PORT only when 8080 is taken on the host; then set OIDC_ISSUER to match.
+      - "127.0.0.1:${KEYCLOAK_PORT:-8080}:8080"
+    volumes:
+      - ./realm:/opt/keycloak/data/import:ro
+    healthcheck:
+      # The image ships no curl or wget: plain HTTP over bash's /dev/tcp to the management port.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  opa:
+    # The -debug variant only adds a busybox shell, used by the healthcheck.
+    image: openpolicyagent/opa:1.10.1-debug
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=info", "/policies"]
+    ports:
+      - "127.0.0.1:8181:8181"
+    volumes:
+      - ./policies:/policies:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8181/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s

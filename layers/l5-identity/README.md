@@ -1,0 +1,114 @@
+# L5 Identity and access
+
+Who an agent run acts as (a user, on their behalf, or the agent itself), which tools it may call, and which
+credentials it carries to downstream APIs. Contract: [docs/contracts.md](../../docs/contracts.md#l5-identity-and-access).
+
+## Standards
+
+| Concern | Standard |
+|---|---|
+| Inbound authentication | OAuth 2 bearer tokens (RFC 6750), JWT access tokens (RFC 7519 / RFC 9068) verified via OpenID Connect Discovery 1.0 + JWKS (RFC 7517) |
+| On behalf of a user | OAuth 2.0 Token Exchange (RFC 8693), caller token as `subject_token` |
+| The agent's own identity | OAuth 2 `client_credentials` (RFC 6749 §4.4) |
+| Authorization | OpenID AuthZEN Authorization API 1.0 (access evaluation); OPA data API as an adapter |
+
+## Reference implementation
+
+| Component | Image | License |
+|---|---|---|
+| Keycloak (OpenID provider, token exchange V2) | `quay.io/keycloak/keycloak:26.4.2`, `start-dev --import-realm` | Apache-2.0 |
+| Open Policy Agent (PDP) | `openpolicyagent/opa:1.10.1-debug` (the `-debug` tag only adds busybox for the healthcheck) | Apache-2.0 |
+
+| Path | Content |
+|---|---|
+| `compose.yml` | Keycloak on `127.0.0.1:8080`, OPA on `127.0.0.1:8181` |
+| `realm/agents-realm.json` | Realm `agents` (imported at start) |
+| `policies/agents.rego` | `data.agents.allow` (boolean) and `data.agents.decision` (`{allow, reason}`) |
+| `policies/agents_test.rego` | Policy unit tests (`opa test`) |
+| `test/identity.test.mjs` | Live tests against Keycloak and OPA through reinloop |
+
+Realm `agents`:
+
+| Client / user | Purpose |
+|---|---|
+| `agent-runtime` | Confidential client of the runtime. Service account on (agent identity), standard token exchange on. Audience mapper adds `tools-api`. Secret from `OIDC_CLIENT_SECRET` (default `change-me`) |
+| `tools-api` | Audience of downstream tool calls; issues no tokens |
+| `agents-test` | Public client with the password grant, **for the tests only**. Audience mapper adds `agent-runtime` so its user tokens can be exchanged |
+| `alice` / `alice-test-only` | Realm role `analyst` |
+| `bob` / `bob-test-only` | Realm role `viewer` |
+
+The passwords, the client secret default and the admin password default (`change-me`) are test values. Never reuse
+the realm file outside local development: remove `agents-test`, set real secrets and run Keycloak in production mode.
+
+Policy (`agents.rego`):
+
+| Subject | read | write | exec |
+|---|---|---|---|
+| user with `viewer` | allow | deny | deny |
+| user with `analyst` | allow | allow | deny |
+| agent (authenticated client credentials) | allow | deny | deny |
+| anything else, unauthenticated runs included | deny | deny | deny |
+
+## Extension points (reinloop)
+
+| Interface | Built in | Register more |
+|---|---|---|
+| `IdentityVerifier.verify(token)` → `Identity` | `oidcVerifier` | `registry.verifiers` |
+| `CredentialFactory(identity)` → `CredentialProvider.token(audience, { scopes })` | `oidcCredentials` (`on-behalf-of`, `self`) | `registry.credentials` |
+| `Authorizer.evaluate(AccessRequest)` → `{ decision, reason? }` | `opaAuthorizer`, `authzenAuthorizer` | `registry.authorizers` (Cedar, OpenFGA, Cerbos...) |
+
+Local policy rules run first and take `when: { roles, scopes, kind }` (roles and scopes any-of). A local `deny` is
+final; for `allow`/`ask` the PDP is consulted; a PDP `deny` denies (reason `pdp: ...`); a PDP failure applies
+`onError` (default `deny`). Full reference: reinloop `docs/layers/identity.md`.
+
+```json
+{
+  "identity": {
+    "verifier":    { "issuer": "${env:OIDC_ISSUER}", "audience": "${env:OIDC_CLIENT_ID}" },
+    "credentials": { "issuer": "${env:OIDC_ISSUER}", "clientId": "${env:OIDC_CLIENT_ID}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
+  },
+  "policy": { "risk": { "write": "allow" }, "pdp": { "type": "opa", "url": "${env:OPA_URL}" } },
+  "mcpServers": { "tools": { "url": "http://localhost:8090/mcp", "auth": { "audience": "${env:TOOLS_AUDIENCE}" } } }
+}
+```
+
+## Swapping
+
+- **Another OpenID provider** (Auth0, Okta, Entra ID, Zitadel, Authentik, Dex...): set `OIDC_ISSUER`; anything with
+  discovery and a JWKS works for verification. On-behalf-of needs RFC 8693 support at the token endpoint; otherwise use
+  `self` mode or a custom `CredentialFactory`. If the provider marks agent tokens differently, pass a `kind` function.
+- **Another PDP**: any AuthZEN endpoint via `{ "type": "authzen", "url": ... }`; OPA-compatible servers via `opa` with a
+  `path`; anything else as a plugin `Authorizer`, checked with `checkAuthorizer`.
+- **Adapter SDK**: `checkIdentityVerifier`, `checkCredentialProvider`, `checkAuthorizer` (reinloop
+  `src/conformance/identity.ts`) return a list of failures, no test framework needed.
+
+## Run and test
+
+```bash
+make up LAYER=l5-identity            # waits for both healthchecks (Keycloak takes ~20-40 s)
+REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=l5-identity
+docker compose -f layers/l5-identity/compose.yml exec opa /opa test /policies -v
+make down LAYER=l5-identity
+```
+
+If host port 8080 is taken, start with `KEYCLOAK_PORT=18080` and run the tests with
+`OIDC_ISSUER=http://localhost:18080/realms/agents` (Keycloak derives the issuer from the request host in dev mode).
+
+The live tests skip with a message when Keycloak or OPA is unreachable. They check: alice's token verifies into an
+Identity with role `analyst`; the on-behalf-of exchange yields a token with `aud` `tools-api`, alice's `sub` and `azp`
+`agent-runtime`; `client_credentials` gives kind `agent`; through a reinloop run (mock model) OPA allows alice and
+denies bob on a write tool and denies exec to both; `reinloop serve` answers 401 without a token and runs as alice
+with hers.
+
+## Threat notes
+
+- Tokens (caller and exchanged) never appear in run events, stores, sinks or decision reasons; verifier errors name the
+  failed check only.
+- Only asymmetric algorithms are accepted (`RS256`, `ES256` by default; never `none` or `HS*`); the key type is bound
+  to the algorithm; `iss`, `aud`, `exp`, `nbf`, `iat` are checked with 60 s skew.
+- Set the verifier `audience`: without it any token of the issuer is accepted.
+- Unknown-`kid` JWKS refetches are rate limited (30 s), so forged `kid`s cannot hammer the IdP.
+- Exchanged tokens are cached per caller token and never outlive it; on-behalf-of without a caller token fails
+  instead of falling back to the agent identity.
+- PDP outages deny by default. Tool arguments are not sent to the PDP unless `includeArgs` is set.
+- Keycloak `start-dev` is HTTP with an embedded database: local development only.
