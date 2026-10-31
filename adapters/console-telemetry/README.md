@@ -4,7 +4,7 @@ Maps **terminal output** → **TelemetryPort** (layer `telemetry`). Tier: protot
 
 Prints finished spans, events and (optionally) metrics to the terminal, one line each, tagged with the layer they
 belong to. It is meant for development and demos; use a file or collector adapter for anything that must be kept.
-Pretty lines look like `[L4 knowledge] knowledge.search 12ms ok knowledge.source=docs knowledge.passages=3`.
+Pretty lines look like `[L4 knowledge] agent.knowledge.search 12ms ok agent.knowledge.source=docs agent.knowledge.passages=3`.
 
 ## Options
 
