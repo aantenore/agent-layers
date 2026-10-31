@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { EvalRun } from '@agent-layers/core';
+import type { EvalRun, RunStatus } from '@agent-layers/core';
 import { createExpectedEval, type ExpectedEvalOptions } from '../src/index.ts';
 
-const run = (output: string, status = 'completed'): EvalRun => ({ runId: 'r', output, status });
+const run = (output: string, status: RunStatus = 'completed'): EvalRun => ({ runId: 'r', output, status });
 
 async function value(expected: unknown, output: string, options: ExpectedEvalOptions = {}) {
   const [score] = await createExpectedEval(options).score({ id: 'c', input: 'q', expected }, run(output));
@@ -38,9 +38,11 @@ test('a list matches on any answer, all requires every answer', async () => {
   assert.equal(await value({ all: ['blue', 'green'] }, 'only blue'), 0);
 });
 
-test('runs that did not complete score 0 with the status as reason', async () => {
-  const [score] = await createExpectedEval().score({ id: 'c', input: 'q', expected: 'x' }, run('x', 'stopped'));
-  assert.deepEqual(score, { metric: 'expected', value: 0, reason: 'run stopped' });
+test('runs that did not complete score 0 with the status as reason, a waiting run included', async () => {
+  for (const status of ['stopped', 'failed', 'waiting'] as const) {
+    const [score] = await createExpectedEval().score({ id: 'c', input: 'q', expected: 'x' }, run('x', status));
+    assert.deepEqual(score, { metric: 'expected', value: 0, reason: `run ${status}` });
+  }
 });
 
 test('metric and layer options apply to the score', async () => {
