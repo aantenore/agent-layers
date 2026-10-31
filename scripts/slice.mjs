@@ -5,8 +5,8 @@
 //
 // Starts what each step needs (reference services with docker compose, the gateway, the Python agent) with bounded
 // timeouts and stops all of it at the end, volumes included; --keep leaves the services up. Results go to
-// examples/slice/.agent-layers/slice-results.json and .md. Needs Docker, uv, and Ollama serving qwen3:4b on the host
-// for pilot and production.
+// examples/slice/.agent-layers/slice-results.json and .md. Needs uv (the Python agent runs in every tier); pilot and
+// production also need Docker and Ollama serving qwen3:4b on the host.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -42,7 +42,7 @@ const STEP = { service: 300, start: 90_000, ask: 240_000 };
 // `node --env-file=.env ...`), else the local `fast` group. Values are never printed.
 const REAL_MODEL = process.env.HOSTED_MODEL ? 'hosted' : 'fast';
 
-const { scoreLayers } = await import('@agent-layers/adapter-layer-signals').catch(() => {
+const [{ scoreLayers }, { ATTR, SPAN }] = await Promise.all([import('@agent-layers/adapter-layer-signals'), import('@agent-layers/core')]).catch(() => {
   console.error('run with: node --conditions=source scripts/slice.mjs');
   process.exit(2);
 });
@@ -158,9 +158,11 @@ async function ask(token, text) {
       task = (await (await fetch(`${GW}/a2a/assistant`, { method: 'POST', headers, body: rpc('GetTask', { id: task.id }), signal })).json()).result;
     }
     const answer = (task?.artifacts ?? []).flatMap((a) => a.parts).map((p) => p.text ?? '').join('') || (task?.status?.message?.parts ?? []).map((p) => p.text ?? '').join('');
+    // Usage ({ inputTokens, outputTokens }) and cost travel in the task's metadata["agent-layers"].
+    const figures = task?.metadata?.['agent-layers'] ?? {};
     return {
       state: String(task?.status?.state ?? 'none').replace('TASK_STATE_', '').toLowerCase(), answer, latencyMs: Math.round(performance.now() - t0), traceId,
-      ...(task?.metadata?.usage ? { usage: task.metadata.usage } : {}), ...(task?.metadata?.costUsd !== undefined ? { costUsd: task.metadata.costUsd } : {}),
+      ...(figures.usage ? { usage: figures.usage } : {}), ...(figures.costUsd !== undefined ? { costUsd: figures.costUsd } : {}),
     };
   } catch (err) {
     return { state: err?.name === 'TimeoutError' ? 'timeout' : 'error', answer: '', latencyMs: Math.round(performance.now() - t0), traceId };
@@ -175,14 +177,15 @@ function records(cell, traceId) {
 
 /** Layer health from the trace of one run, and the layer it points at: the worst layer other than the harness. */
 function attribute(recs) {
-  const runSpan = recs.filter((r) => r.type === 'span' && r.name === 'invoke_agent').at(-1);
-  const status = String(runSpan?.attrs['run.status'] ?? 'unknown');
-  const reason = runSpan?.attrs['run.reason'];
-  const scores = scoreLayers(recs, { status, ...(typeof reason === 'string' ? { reason } : {}) });
+  const runSpan = recs.filter((r) => r.type === 'span' && r.name === SPAN.run).at(-1);
+  const status = String(runSpan?.attrs[ATTR.runStatus] ?? 'unknown');
+  // The span carries the stop code only; scoreLayers reads it from the span when no structured reason is given.
+  const reason = runSpan?.attrs[ATTR.runReason];
+  const scores = scoreLayers(recs, { status });
   const bad = scores.filter((s) => s.value < 1).sort((a, b) => a.value - b.value);
   const blamed = bad.find((s) => s.layer !== 'harness') ?? bad[0];
-  const tokens = recs.filter((r) => r.type === 'span' && r.name === 'chat')
-    .reduce((n, r) => n + Number(r.attrs['gen_ai.usage.input_tokens'] ?? 0) + Number(r.attrs['gen_ai.usage.output_tokens'] ?? 0), 0);
+  const tokens = recs.filter((r) => r.type === 'span' && r.name === SPAN.modelCall)
+    .reduce((n, r) => n + Number(r.attrs[ATTR.tokensInput] ?? 0) + Number(r.attrs[ATTR.tokensOutput] ?? 0), 0);
   return { status, reason, scores: Object.fromEntries(scores.map((s) => [s.layer, { value: s.value, reason: s.reason }])), attributed: blamed?.layer ?? 'none', tokens, spans: recs.filter((r) => r.type === 'span').length };
 }
 
@@ -358,11 +361,13 @@ try {
   rmSync(join(SLICE, '.agent-layers', 'state.db'), { force: true });
   for (const [a, b] of [['prototype', 'pilot'], ['pilot', 'production']]) results.diffs[`${a} ${b}`] = cli(['diff', a, b]).out.trim();
 
+  // Every tier runs the Python agent (the pydantic runtime), the prototype one included.
+  const sync = sh('uv', ['sync', '--frozen', '--quiet'], { cwd: PY_DIR, timeoutS: 300 });
+  if (sync.code !== 0) throw new Error(`uv sync failed:\n${sync.out}`);
+
   if (only.has('prototype')) for (const rt of RUNTIMES) await runCell('prototype', rt);
 
   if (only.has('pilot') || only.has('production')) {
-    const sync = sh('uv', ['sync', '--frozen', '--quiet'], { cwd: PY_DIR, timeoutS: 300 });
-    if (sync.code !== 0) throw new Error(`uv sync failed:\n${sync.out}`);
     up('cache');
     up('knowledge');
     up('telemetry', ['otel-collector', 'jaeger']);
