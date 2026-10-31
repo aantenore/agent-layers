@@ -46,13 +46,16 @@ test('check passes for the prototype profile', async () => {
   assert.match(text(), /check passed/);
 });
 
-test('check --profile production reports not installed and prototype-only adapters', async () => {
-  const { io, text } = captureIo(dir);
-  assert.equal(await main(['check', '--profile', 'production', '--skip-conformance'], io), 1);
+test('check --profile production finds every adapter installed; only secrets and services can be missing', async () => {
+  const missing = captureIo(dir);
+  assert.equal(await main(['check', '--profile', 'production', '--skip-conformance'], missing.io), 1);
+  assert.match(missing.errors(), /OIDC_CLIENT_SECRET is not set \(profile production\)/);
+  const { io, text } = captureIo(dir, { OIDC_CLIENT_SECRET: 'test-secret' });
+  assert.equal(await main(['check', '--profile', 'production', '--skip-conformance'], io), 0, text());
   assert.match(text(), /tier production/);
-  assert.match(text(), /runtime: adapter "reinloop" is not installed/);
-  assert.match(text(), /eval: |requires: identity, authorization, guardrails, telemetry, state/);
-  assert.match(text(), /check failed/);
+  assert.match(text(), /requires: identity, authorization, guardrails, telemetry, state/);
+  assert.doesNotMatch(text(), /not installed|prototype-only|FAIL/);
+  assert.match(text(), /check passed/);
 });
 
 test('a production profile on prototype adapters fails the readiness gate', async () => {
@@ -82,7 +85,7 @@ test('diff prints per-slot changes between profiles', async () => {
   assert.equal(await main(['diff', 'prototype', 'pilot'], io), 0);
   assert.match(text(), /^prototype → pilot/);
   assert.match(text(), /model\s+changed\s+mock-model → openai-compatible/);
-  assert.match(text(), /knowledge\s+changed\s+docs=markdown-knowledge → docs=qdrant/);
+  assert.match(text(), /knowledge\s+changed\s+docs=markdown-knowledge → docs=mcp/);
   assert.match(text(), /guardrails\s+same\s+regex-guard/);
 });
 
@@ -154,7 +157,10 @@ test('gateway hosts the profile on the network until stopped; production needs t
   for (const route of ['POST /v1/chat/completions (openai-compatible)', 'POST|GET|DELETE /mcp (mcp)', 'GET /.well-known/agent-card.json (a2a)', 'POST /v1/events (cloudevents)']) {
     assert.ok(errors().includes(route), route);
   }
+  const cfg = JSON.parse(readFileSync(join(dir, 'agent-layers.json'), 'utf8'));
+  cfg.profiles.hardened = { extends: 'prototype', tier: 'production' };
+  await writeFile(join(dir, 'hardened.json'), JSON.stringify(cfg));
   const prod = captureIo(dir);
-  assert.equal(await main(['gateway', '--profile', 'production'], prod.io), 1);
-  assert.match(prod.errors(), /not installed/);
+  assert.equal(await main(['gateway', '--config', 'hardened.json', '--profile', 'hardened'], prod.io), 1);
+  assert.match(prod.errors(), /fails the readiness gate[\s\S]*prototype-only/);
 });

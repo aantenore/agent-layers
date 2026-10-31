@@ -42,7 +42,9 @@ export async function init(io: Io, args: InitArgs): Promise<number> {
     const base = basename(target);
     if (RENAMES[base]) target = join(target, '..', RENAMES[base]);
     const text = await readFile(file, 'utf8');
-    await writeFile(file, fill(text, values));
+    const filled = fill(text, values);
+    // `--runtime` may name an adapter the template already depends on: parsing keeps one entry per package.
+    await writeFile(file, base === 'package.json' ? `${JSON.stringify(JSON.parse(filled), null, 2)}\n` : filled);
     if (target !== file) await rename(file, target);
     written.push(relative(dir, target) || rel);
   }

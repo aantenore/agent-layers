@@ -20,9 +20,9 @@ npx agent-layers dev --profile local     # same stack, real model on this machin
 |---|---|---|---|---|
 | L0 infra | Where does it run and how does it get there? | `compose-deploy` | same | same |
 | L1 llm | Who thinks? | `mock-model` (scripted, offline) | `openai-compatible` → local server | `openai-compatible` → corporate gateway |
-| L2 cache | Which model, at what cost and latency? | `static-router`, `memory-cache` | same | gateway routes; `valkey` cache |
-| L3 harness | How does the agent loop run and keep state? | `{{runtime}}`, `memory-state` | same | `reinloop`, `postgres-state` |
-| L4 knowledge | What does it know? | `markdown-knowledge` on `knowledge/` | `qdrant` | same |
+| L2 cache | Which model, at what cost and latency? | `static-router`, `memory-cache` | same | the model gateway routes and caches (LiteLLM + Valkey); no in-process cache |
+| L3 harness | How does the agent loop run and keep state? | `{{runtime}}`, `memory-state` | same | `reinloop`, `sqlite-state` |
+| L4 knowledge | What does it know? | `markdown-knowledge` on `knowledge/` | `mcp` → Qdrant (`mcp-server-qdrant`) | same |
 | L5 tool | What can it do? | `functions` from `tools/convert.ts` | same | same |
 | L6 identity | Who is it, on whose behalf, and what is allowed? | `static-identity`, `rules-authorization`, `memory-approval` | same | `oidc`, `opa` |
 | L7 guardrail | Is this content acceptable? | `regex-guard` | same | `presidio`, `llm-guard` |
@@ -41,8 +41,11 @@ over A2A (`/.well-known/agent-card.json`) and CloudEvents at `/v1/events`. Every
 `Authorization: Bearer dev-token` (the static-identity dev token); see the gateway guide of agent-layers.
 
 The `test` profile is prototype with telemetry written to `.agent-layers/telemetry.jsonl` and no terminal channel.
-The `local` profile is prototype with a real model. Adapters named in pilot and production that are not installed
-yet are reported as "not installed" by `agent-layers check --profile <name>`.
+The `local` profile is prototype with a real model. Every adapter named in pilot and production is a dependency of
+this project, so `agent-layers check --profile production` only reports what is genuinely missing: the services those
+adapters reach (identity provider, OPA, Presidio, LLM Guard, the model gateway, Qdrant, the OTLP collector) when they
+are not running. Production keeps session state in a SQLite file (`sqlite-state`, single node) and has no in-process
+cache: the model gateway behind `openai-compatible` caches responses (LiteLLM with Valkey).
 
 ## Swap a technology
 
@@ -50,7 +53,7 @@ Change one adapter name (and its options) in the profile that should use it. Not
 file, not the tools, not the tests.
 
 ```json
-"knowledge": { "docs": { "adapter": "qdrant", "options": { "url": "${env:QDRANT_URL}", "collection": "docs" } } }
+"state": { "adapter": "sqlite-state", "options": { "path": ".agent-layers/state.db" } }
 ```
 
 `npx agent-layers layers` lists every port, the adapter each slot uses, and the adapters installed for it.
@@ -60,7 +63,7 @@ file, not the tools, not the tests.
 Profiles extend each other (`prototype` → `local` → `pilot` → `production`) and list only the layers that differ.
 Move one layer at a time:
 
-1. Install the adapter for the target system, for example `npm install @agent-layers/adapter-qdrant`.
+1. Install the adapter for the target system (`npm install @agent-layers/adapter-<name>`) if it is not a dependency yet.
 2. Set it in the next profile up, with options from environment variables (`.env.example` lists them).
 3. `npx agent-layers diff pilot production` shows what moves; `npx agent-layers check --profile production` fails
    while any layer still uses a prototype-only adapter or a required layer is missing.
