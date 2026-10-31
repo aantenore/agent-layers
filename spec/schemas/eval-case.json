@@ -7,13 +7,20 @@
   "required": ["id", "input"],
   "properties": {
     "id": { "type": "string" },
-    "input": { "type": "string" },
-    "expected": { "description": "Reference answer or structured expectation; free-form." },
+    "input": { "$ref": "common.json#/$defs/RunInput" },
+    "expected": {},
     "tags": { "type": "array", "items": { "type": "string" } },
-    "layer": {
-      "enum": ["infra", "llm", "cache", "harness", "knowledge", "tool", "identity", "guardrail", "interface", "telemetry", "eval"],
-      "description": "Layer the case is meant to exercise."
-    }
+    "layer": { "$ref": "common.json#/$defs/Layer" },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "refund-window",
+      "input": "How long do refunds take?",
+      "expected": "14 days",
+      "tags": ["faq"],
+      "layer": "knowledge"
+    }
+  ]
 }

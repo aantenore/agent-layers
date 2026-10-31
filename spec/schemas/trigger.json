@@ -4,13 +4,26 @@
   "title": "Trigger",
   "description": "Something that starts a run: an event or a schedule tick (layer interface, TriggerPort).",
   "type": "object",
-  "required": ["id", "type", "source"],
+  "required": ["id", "kind", "source"],
   "properties": {
-    "id": { "type": "string" },
-    "type": { "type": "string" },
+    "id": { "type": "string", "description": "The SDK's id; the upstream event id goes in ext." },
+    "kind": { "type": "string" },
     "source": { "type": "string" },
-    "time": { "type": "string", "format": "date-time" },
-    "agent": { "type": "string" },
-    "data": {}
-  }
+    "at": { "$ref": "common.json#/$defs/Time" },
+    "agent": { "type": "string", "description": "Agent to run; the host picks one when omitted." },
+    "data": {},
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "trg_01",
+      "kind": "order.created",
+      "source": "/shop",
+      "at": "2026-10-31T09:30:00Z",
+      "agent": "support",
+      "data": { "orderId": "A-1042" },
+      "ext": { "cloudevents.id": "evt-77" }
+    }
+  ]
 }

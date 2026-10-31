@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/model-delta.json",
+  "title": "ModelDelta",
+  "description": "One streamed fragment of a model answer (layer llm, ModelPort.stream). A stream ends with exactly one end.",
+  "anyOf": [
+    { "$ref": "#/$defs/TextDelta" },
+    { "$ref": "#/$defs/ReasoningDelta" },
+    { "$ref": "#/$defs/CallDelta" },
+    { "$ref": "#/$defs/EndDelta" }
+  ],
+  "$defs": {
+    "TextDelta": {
+      "type": "object",
+      "required": ["type", "text"],
+      "properties": { "type": { "const": "text" }, "text": { "type": "string" } },
+      "additionalProperties": false,
+      "description": "Streamed text."
+    },
+    "ReasoningDelta": {
+      "type": "object",
+      "required": ["type", "text"],
+      "properties": { "type": { "const": "reasoning" }, "text": { "type": "string" } },
+      "additionalProperties": false,
+      "description": "Streamed reasoning."
+    },
+    "CallDelta": {
+      "type": "object",
+      "required": ["type", "index"],
+      "properties": {
+        "type": { "const": "call" },
+        "index": { "type": "integer", "minimum": 0 },
+        "id": { "type": "string" },
+        "tool": { "type": "string" },
+        "argsText": {
+          "type": "string",
+          "description": "Fragments of call index; they concatenate to the JSON arguments."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Fragments of the call at position index."
+    },
+    "EndDelta": {
+      "type": "object",
+      "required": ["type", "finish"],
+      "properties": {
+        "type": { "const": "end" },
+        "finish": { "$ref": "common.json#/$defs/Finish" },
+        "usage": { "$ref": "common.json#/$defs/Usage" },
+        "model": { "type": "string" },
+        "id": { "type": "string" },
+        "ext": { "$ref": "common.json#/$defs/Ext" }
+      },
+      "additionalProperties": false,
+      "description": "Exactly one, last."
+    }
+  },
+  "examples": [
+    { "type": "call", "index": 0, "id": "call_1", "tool": "crm__lookup", "argsText": "{\"customer\":" }
+  ]
+}

@@ -2,16 +2,35 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/aantenore/agent-layers/spec/schemas/agent-spec.json",
   "title": "AgentSpec",
-  "description": "Runtime-neutral agent definition, bound to a runnable agent by a RuntimePort.",
+  "description": "Runtime-neutral agent definition, bound to a runnable agent by a RuntimePort (layer harness).",
   "type": "object",
   "required": ["name", "instructions", "model", "tools"],
   "properties": {
     "name": { "type": "string", "minLength": 1 },
     "instructions": { "type": "string" },
     "model": { "type": "string" },
-    "tools": { "type": "array", "items": { "type": "string" }, "description": "Tool name globs over prefixed names (<source>__<tool>)." },
-    "knowledge": { "type": "array", "items": { "type": "string" }, "description": "Knowledge sources injected before model calls; all when omitted." },
-    "params": { "type": "object" }
+    "tools": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Tool name globs over prefixed names (<source>__<tool>)."
+    },
+    "knowledge": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Knowledge sources injected before model calls; all when omitted."
+    },
+    "settings": { "$ref": "common.json#/$defs/ModelSettings" },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "examples": [
+    {
+      "name": "support",
+      "instructions": "Answer from the handbook. Be brief.",
+      "model": "qwen3:4b",
+      "tools": ["crm__*"],
+      "knowledge": ["handbook"],
+      "settings": { "temperature": 0.2, "maxOutputTokens": 512 }
+    }
+  ]
 }

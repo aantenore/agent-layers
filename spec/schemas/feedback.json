@@ -2,17 +2,30 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/aantenore/agent-layers/spec/schemas/feedback.json",
   "title": "Feedback",
-  "description": "Feedback on a run (layer eval, FeedbackPort).",
+  "description": "Feedback on a run from a person or an app (layer eval, FeedbackPort).",
   "type": "object",
   "required": ["runId"],
   "properties": {
     "id": { "type": "string" },
     "runId": { "type": "string" },
     "agent": { "type": "string" },
-    "rating": { "type": "number", "minimum": -1, "maximum": 1 },
+    "rating": { "type": "number", "minimum": -1, "maximum": 1, "description": "-1 (bad) to 1 (good)." },
     "label": { "type": "string" },
     "comment": { "type": "string" },
-    "subject": { "type": "string" },
-    "time": { "type": "string", "format": "date-time" }
-  }
+    "by": { "type": "string", "description": "Who gave it (a caller id)." },
+    "at": { "$ref": "common.json#/$defs/Time" },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "fb_01",
+      "runId": "run_02",
+      "agent": "support",
+      "rating": 1,
+      "label": "helpful",
+      "by": "u-1042",
+      "at": "2026-10-31T10:02:00Z"
+    }
+  ]
 }

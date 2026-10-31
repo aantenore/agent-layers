@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/caller.json",
+  "title": "Caller",
+  "description": "Who a run acts for (layer identity, IdentityPort.verify). This is the public caller: the inbound credential is a property of the in-memory Caller and is never serialised, logged or traced, so no credential property exists here.",
+  "$ref": "common.json#/$defs/PublicCaller",
+  "examples": [
+    {
+      "id": "u-1042",
+      "kind": "user",
+      "roles": ["support"],
+      "scopes": ["orders:read"],
+      "name": "Mara Rossi",
+      "ext": { "oidc.tenant": "acme" }
+    }
+  ]
+}

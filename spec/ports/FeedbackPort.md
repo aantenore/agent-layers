@@ -1,6 +1,6 @@
 # FeedbackPort
 
-Layer: `eval` (L10 Evaluation & improvement) · Version: 0.1.0 · Conformance: `checkFeedback`
+Layer: `eval` (L10 Evaluation & improvement) · Version: 1.0.0 · Conformance: `checkFeedback`
 
 ## Purpose
 
@@ -11,7 +11,7 @@ Collect ratings and comments from people and apps about specific runs, so real u
 - `submit(feedback: Feedback) → String`
   Store the feedback and return its id.
 - `list(q?: {runId?: String, agent?: String, since?: String, limit?: Integer}) → [Feedback]`
-  Return stored feedback matching the filters. All filters are optional and combine with AND. `since` is a date-time.
+  Return stored feedback matching the filters. All filters are optional and combine with AND. `since` is an ISO 8601 time.
 
 ## Data shapes
 
@@ -25,8 +25,9 @@ Collect ratings and comments from people and apps about specific runs, so real u
 | `rating?` | Number from -1 (bad) to 1 (good) | Score. |
 | `label?` | String | Free category, for example `wrong-tool`. |
 | `comment?` | String | Free text. |
-| `subject?` | String | Who gave it. |
-| `time?` | String (date-time) | When. |
+| `by?` | String | Who gave it (a caller id). |
+| `at?` | String (ISO 8601 time) | When. |
+| `ext?` | Ext | Store- or channel-specific fields. |
 
 ## Semantics
 
@@ -35,7 +36,7 @@ Collect ratings and comments from people and apps about specific runs, so real u
 - `limit` caps the number of results.
 - Feedback is user data: comments may contain personal information. Store and expose it with the same care as session events.
 - Feedback does not change a run; it is input for evaluation, not for the live agent.
-- A `subject` is an identifier chosen by the caller; the port does not verify it. Use the identity port at the channel that receives the feedback.
+- `by` is an identifier chosen by the caller; the port does not verify it. Use the identity port at the channel that receives the feedback.
 
 ## Errors
 
@@ -44,7 +45,7 @@ Collect ratings and comments from people and apps about specific runs, so real u
 
 ## Escape hatch
 
-`label` and `comment` are free-form. `native()` returns the underlying store.
+`label` and `comment` are free-form. `ext` carries store- or channel-specific data under namespaced keys declared in the adapter descriptor's `ext.produces` / `ext.reads`. `native()` returns the underlying store.
 
 ## Conformance
 
@@ -53,7 +54,9 @@ Collect ratings and comments from people and apps about specific runs, so real u
 - The fixture feedback validates against `feedback.json`.
 - `submit` resolves to a non-empty id.
 - `list` filtered by the run id returns the submitted feedback.
+- `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `by` (was `subject`) and `at` (was `time`)
 - 0.1.0 — initial

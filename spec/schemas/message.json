@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/message.json",
+  "title": "Message",
+  "description": "One message of a conversation (layer llm, ModelPort). Parts are always a list.",
+  "$ref": "common.json#/$defs/Message",
+  "examples": [
+    {
+      "role": "assistant",
+      "parts": [
+        { "type": "text", "text": "Let me look that up." },
+        { "type": "call", "id": "call_1", "tool": "crm__lookup", "args": { "customer": "C-77" } }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # ApprovalPort
 
-Layer: `identity` (L6 Identity & access) · Version: 0.2.0 · Conformance: `checkApproval`
+Layer: `identity` (L6 Identity & access) · Version: 1.0.0 · Conformance: `checkApproval`
 
 ## Purpose
 
@@ -28,8 +28,9 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 | `request` | ApprovalRequest, required | What is being asked. |
 | `decidedBy?` | String | Who answered. |
 | `reason?` | String | Why. |
+| `ext?` | Ext | Adapter-specific fields. |
 
-`ApprovalRequest`: `access: AccessRequest` (see [AuthorizationPort](AuthorizationPort.md)), `agent: String`, `runId: String`, `reason?: String`, `expiresAt?: String` (time after which a pending approval becomes `expired`).
+`ApprovalRequest`: `question: AccessQuestion` (see [AuthorizationPort](AuthorizationPort.md)), `agent: String`, `runId: String` (these three required), `reason?: String`, `expiresAt?: String` (ISO 8601 time after which a pending approval becomes `expired`), `ext?: Ext`.
 
 ## Semantics
 
@@ -37,7 +38,7 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 - Status changes once: `pending` → `approved`, `denied` or `expired`. A decided approval stays decided; deciding it again is an error.
 - `expired` is derived: a pending approval past its `expiresAt` reads as `expired` without any call being made. A port may also apply a default lifetime.
 - `wait` must not poll in a way that misses a decision: it returns as soon as `decide` is called. On timeout it returns the pending approval and does not fail; the caller decides what to do.
-- In the tool pipeline: for an `ask` effect, the stack calls `request`. Without an approval port, `ask` denies. With one, the call waits up to a configured time (default: it does not wait). If the answer is still pending, the call returns an error result naming the approval id, and the run may continue or retry once a human has answered. Only `approved` lets the call proceed; `denied` and `expired` deny, with the reason when present.
+- In the tool pipeline: for an `ask` effect, the stack calls `request`. Without an approval port, `ask` denies. With one, the call waits up to a configured time (default: it does not wait). If the answer is still pending, the tool result has `ok: false`, carries `ext["sdk.approval"]` (the approval id) and `ext["sdk.outcome"] = "pending"`, and the runtime may end the run as `waiting` (see [RuntimePort](RuntimePort.md)) so a human can answer and a later run resume. Only `approved` lets the call proceed; `denied` and `expired` deny, with the reason when present.
 - Approvals contain the tool arguments. Keep them as private as the run itself and do not log them beyond what the audit trail needs.
 - Answering is not tied to a channel: any component with access to `decide` (a chat button, a web page, a command) can answer.
 
@@ -49,7 +50,7 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 
 ## Escape hatch
 
-`AccessRequest.properties` and `context` pass through inside the request. `native()` returns the underlying store.
+`ext` on the request and the approval passes through; keys are namespaced and declared in the adapter descriptor's `ext.produces` / `ext.reads`. `native()` returns the underlying store.
 
 ## Conformance
 
@@ -59,9 +60,11 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 - `get` returns the same approval; `get` of an unknown id resolves to nothing.
 - `wait` with a short timeout on an undecided approval resolves with status `pending`.
 - A `wait` in progress resolves with `approved` after `decide` approves the approval, and `decide` returns status `approved`.
+- `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `ApprovalRequest.question` (was `access`), an `AccessQuestion`; pending approvals surface as `ext["sdk.approval"]` and the run status `waiting`
 - 0.2.0 — the embedded access request may carry an `anonymous` subject; `subject.properties.authenticated` added
 - 0.1.0 — initial
 

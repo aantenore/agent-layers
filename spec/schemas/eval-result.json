@@ -9,23 +9,42 @@
     "id": { "type": "string", "description": "EvalCase id." },
     "runId": { "type": "string" },
     "output": { "type": "string" },
-    "status": { "type": "string", "description": "Run status as reported by the harness, e.g. completed, failed, stopped." },
+    "status": { "$ref": "common.json#/$defs/RunStatus" },
     "scores": { "type": "array", "items": { "$ref": "#/$defs/EvalScore" } },
-    "usage": { "$ref": "chat-response.json#/properties/usage" },
-    "costUsd": { "type": "number", "minimum": 0, "description": "Cost of the run in US dollars, as the run reported it." }
+    "reason": { "$ref": "common.json#/$defs/StopReason" },
+    "usage": { "$ref": "common.json#/$defs/Usage" },
+    "costUsd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Cost of the run in US dollars, as the run reported it."
+    },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
   },
+  "additionalProperties": false,
   "$defs": {
     "EvalScore": {
       "type": "object",
       "required": ["metric", "value"],
       "properties": {
         "metric": { "type": "string" },
-        "value": { "type": "number" },
-        "layer": { "enum": ["infra", "llm", "cache", "harness", "knowledge", "tool", "identity", "guardrail", "interface", "telemetry", "eval"] },
-        "reason": { "type": "string" }
+        "value": { "type": "number", "minimum": 0, "maximum": 1 },
+        "layer": { "$ref": "common.json#/$defs/Layer" },
+        "reason": { "type": "string" },
+        "ext": { "$ref": "common.json#/$defs/Ext" }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "One metric of one run. value in [0, 1]."
     }
   },
-  "additionalProperties": false
+  "examples": [
+    {
+      "id": "refund-window",
+      "runId": "run_02",
+      "output": "Refunds take 14 days.",
+      "status": "completed",
+      "scores": [{ "metric": "correctness", "value": 1, "layer": "knowledge" }],
+      "usage": { "inputTokens": 412, "outputTokens": 58 },
+      "costUsd": 0.0009
+    }
+  ]
 }

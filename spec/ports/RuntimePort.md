@@ -1,6 +1,6 @@
 # RuntimePort
 
-Layer: `harness` (L3 Agent runtime) · Version: 0.2.0 · Conformance: `checkRuntime`
+Layer: `harness` (L3 Agent runtime) · Version: 1.0.0 · Conformance: `checkRuntime`
 
 ## Purpose
 
@@ -30,7 +30,10 @@ A `RunnableAgent` has:
 | `model` | String, required | Model id requested for the agent. |
 | `tools` | [String], required | Tool name globs, matched against prefixed names (`<source>__<tool>`). |
 | `knowledge?` | [String] | Knowledge source names injected before model calls; all configured sources when omitted. |
-| `params?` | {String: Any} | Runtime- or model-specific parameters. |
+| `settings?` | `{temperature?, maxOutputTokens?, stop?}` | Sampling settings, the same shape as `ModelRequest.settings` in [ModelPort](ModelPort.md). |
+| `ext?` | Ext | Runtime- or adapter-specific settings, namespaced. |
+
+`params` was removed at 1.0: an agent file that still has it is rejected with an error that names `settings` and `ext`.
 
 `RunInput` is a string, or `{messages: [Message]}` using the message shape of [ModelPort](ModelPort.md).
 
@@ -39,41 +42,73 @@ A `RunnableAgent` has:
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `runId` | String, required | Run identifier. |
-| `status` | String, required | `completed`, `failed` or `stopped`; other values allowed. |
+| `status` | String, required | `completed`, `failed`, `stopped` or `waiting`. |
 | `output` | String, required | Final text. Empty when there is none. |
-| `reason?` | String | Why the run stopped or failed, for example `guardrail:<guard>:<stage>`. |
-| `usage?` | Usage | Token usage as in [ModelPort](ModelPort.md). |
+| `reason?` | [StopReason](#stop-reason) | Why the run did not complete. Required when `status` is not `completed`. |
+| `usage?` | `{inputTokens, outputTokens}` | Token usage as in [ModelPort](ModelPort.md). |
 | `costUsd?` | Number, >= 0 | What the run cost in US dollars, summed over its model calls. Present when the runtime knows the prices of the models it called, or a remote agent reports it; absent when unknown (not 0). |
-| `events?` | [RunEvent] | `{type: String, ...}`. |
+| `events?` | [[RunEvent](../schemas/run-event.json)] | What happened during the run. |
+| `ext?` | Ext | Adapter-specific fields. |
 
-`RunEvent` is runtime-specific; `type` is the only shared field.
+Statuses: `completed` (the agent answered), `failed` (an error ended the run), `stopped` (something ended the run on purpose: a guard, a denial, a limit, a cancellation), `waiting` (the run stopped for a human answer and can be resumed).
+
+### Stop reason
+
+`reason` is `{code, layer?, by?, stage?, detail?}`:
+
+| Field | Meaning |
+| --- | --- |
+| `code` | `guard_block`, `denied`, `aborted`, `timeout`, `limit`, `needs_input`, `needs_auth`, `rejected` or `error`. Config may add codes that behave like one of these. |
+| `layer?` | Layer that stopped the run. |
+| `by?` | Instance that stopped it: a guard name, an approval adapter, a remote agent. |
+| `stage?` | Guard stage, for `guard_block`. |
+| `detail?` | Internal text for people. Never parsed, never shown to the caller. |
+
+A run that waits for an approval ends with status `waiting` and reason `{code: "needs_input", layer: "identity", by: <approval instance>, detail: <approval id>}`. The governed tool result that asked for the approval carries `ext["sdk.approval"]` (the approval id), so a runtime can end the run without parsing text. A later run with the same session resumes the conversation.
+
+### Run events
+
+`RunEvent` is `{type, at?, ...}`. Core types have fixed payloads:
+
+| Type | Payload |
+| --- | --- |
+| `run.start` | `runId`, `agent` |
+| `model.reply` | `turn`, `model`, `finish`, `calls` |
+| `tool.call` | `id`, `tool` |
+| `tool.result` | `id`, `tool`, `ok`, `durationMs?` |
+| `text` | `text` |
+| `run.end` | `status`, `reason?`, `usage?`, `costUsd?` |
+
+Adapter events are named `<namespace>.<name>` (for example `reinloop.compaction`). They are stored and replayed, and never read by the core. `at` is an ISO 8601 time.
 
 ## Semantics
 
-- Agent identity flows through: `ctx.identity` is passed to every model, knowledge and tool call made during the run, and its token is never written to events, logs or traces.
+- The caller flows through: `ctx.caller` is passed to every model, knowledge and tool call made during the run, and its `credential` is never written to events, logs or traces.
 - The runtime sees only the tools the agent's globs match, and calls them by prefixed name.
-- A guardrail block ends the run with a non-completed status and a `reason`, rather than crashing the caller.
+- A guardrail block ends the run with status `stopped` and a reason `{code: "guard_block", layer: "guardrail", by: <guard>, stage}`, rather than crashing the caller.
 - A run honours `ctx.signal`.
 - Session continuity (history across runs) is provided through [StatePort](StatePort.md) when the runtime supports it; the contract does not require it.
 - Each run produces telemetry spans tagged with `agent.layer` (see [TelemetryPort](TelemetryPort.md)).
 
 ## Errors
 
-- `bind` rejects when the spec cannot be honoured (unknown model setup, invalid parameters).
-- Run problems the agent can describe are returned as a `RunResult` with `status: failed` or `stopped` and a `reason`. Cancellation rejects.
+- `bind` rejects when the spec cannot be honoured (unknown model setup, invalid settings).
+- Run problems the agent can describe are returned as a `RunResult` with status `failed`, `stopped` or `waiting` and a structured `reason`. Cancellation rejects.
 
 ## Escape hatch
 
-`AgentSpec.params` carries runtime-specific settings. `RunEvent` allows extra fields. `native()` returns the underlying agent framework object.
+`AgentSpec.ext` carries runtime-specific settings; `RunResult.ext` and adapter events (`<namespace>.<name>`) carry runtime-specific output. Keys and event types are namespaced and declared in the adapter descriptor's `ext.produces` / `ext.reads`. `native()` returns the underlying agent framework object. For an agent behind a remote standard (A2A), status and metadata mappings go through the stack config `mappings` block; see [Mappings](../language.md#mappings).
 
 ## Conformance
 
 `checkRuntime` verifies:
 
 - `bind` is a function.
-- With a stack and an agent fixture: `bind` resolves, the agent's `name` equals the spec's, and `run` returns a result that validates against `run-result.json`. Without fixtures the run checks are skipped.
+- With a stack and an agent fixture: `bind` resolves, the agent's `name` equals the spec's, and `run` returns a result that validates against `run-result.json`; a result whose status is not `completed` has a `reason`. Without fixtures the run checks are skipped.
+- `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `AgentSpec.settings` and `ext` replace `params`; status `waiting`; structured `RunResult.reason`; core event types with fixed payloads
 - 0.2.0 — optional `costUsd` on RunResult
 - 0.1.0 — initial

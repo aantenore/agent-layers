@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/run-event.json",
+  "title": "RunEvent",
+  "description": "One event of a run (layer harness, StatePort and the run stream). Six core events with fixed payloads, plus adapter events named <namespace>.<name>.",
+  "anyOf": [
+    { "$ref": "#/$defs/RunStartEvent" },
+    { "$ref": "#/$defs/ModelReplyEvent" },
+    { "$ref": "#/$defs/ToolCallEvent" },
+    { "$ref": "#/$defs/ToolResultEvent" },
+    { "$ref": "#/$defs/TextEvent" },
+    { "$ref": "#/$defs/RunEndEvent" },
+    { "$ref": "#/$defs/ExtRunEvent" }
+  ],
+  "$defs": {
+    "RunStartEvent": {
+      "type": "object",
+      "required": ["type", "runId", "agent"],
+      "properties": {
+        "type": { "const": "run.start" },
+        "runId": { "type": "string" },
+        "agent": { "type": "string" },
+        "at": { "$ref": "common.json#/$defs/Time" }
+      },
+      "additionalProperties": false
+    },
+    "ModelReplyEvent": {
+      "type": "object",
+      "required": ["type", "turn", "model", "finish", "calls"],
+      "properties": {
+        "type": { "const": "model.reply" },
+        "turn": { "type": "integer", "minimum": 0 },
+        "model": { "type": "string" },
+        "finish": { "$ref": "common.json#/$defs/Finish" },
+        "calls": { "type": "integer", "minimum": 0 },
+        "at": { "$ref": "common.json#/$defs/Time" }
+      },
+      "additionalProperties": false
+    },
+    "ToolCallEvent": {
+      "type": "object",
+      "required": ["type", "id", "tool"],
+      "properties": {
+        "type": { "const": "tool.call" },
+        "id": { "type": "string" },
+        "tool": { "type": "string" },
+        "at": { "$ref": "common.json#/$defs/Time" }
+      },
+      "additionalProperties": false
+    },
+    "ToolResultEvent": {
+      "type": "object",
+      "required": ["type", "id", "tool", "ok"],
+      "properties": {
+        "type": { "const": "tool.result" },
+        "id": { "type": "string" },
+        "tool": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "at": { "$ref": "common.json#/$defs/Time" }
+      },
+      "additionalProperties": false
+    },
+    "TextEvent": {
+      "type": "object",
+      "required": ["type", "text"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string" },
+        "at": { "$ref": "common.json#/$defs/Time" }
+      },
+      "additionalProperties": false
+    },
+    "RunEndEvent": {
+      "type": "object",
+      "required": ["type", "status"],
+      "properties": {
+        "type": { "const": "run.end" },
+        "status": { "$ref": "common.json#/$defs/RunStatus" },
+        "reason": { "$ref": "common.json#/$defs/StopReason" },
+        "usage": { "$ref": "common.json#/$defs/Usage" },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "at": { "$ref": "common.json#/$defs/Time" }
+      },
+      "additionalProperties": false
+    },
+    "ExtRunEvent": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "pattern": "^(?!(sdk|agent|run|model|tool)\\.)[a-z][a-z0-9-]*\\.[A-Za-z0-9_.-]+$"
+        },
+        "at": { "$ref": "common.json#/$defs/Time" }
+      },
+      "description": "Adapter event, type <namespace>.<name>. The reserved namespaces sdk, agent, run, model and tool are the core's. Stored and replayed, never read by the core."
+    }
+  },
+  "examples": [
+    {
+      "type": "run.end",
+      "status": "completed",
+      "usage": { "inputTokens": 412, "outputTokens": 58 },
+      "costUsd": 0.0012,
+      "at": "2026-10-31T09:30:04Z"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # DeployPort
 
-Layer: `infra` (L0 Infrastructure & delivery) · Version: 0.1.0 · Conformance: `checkDeploy`
+Layer: `infra` (L0 Infrastructure & delivery) · Version: 1.0.0 · Conformance: `checkDeploy`
 
 ## Purpose
 
@@ -50,7 +50,7 @@ Other shapes (no schema yet):
 
 ## Escape hatch
 
-`native()` returns the underlying deployment client or file model. `ServiceSpec.layer` and `profile` are hints; adapters may ignore hints they do not understand.
+The shapes of this port have no `ext`. An adapter that needs more keeps it in its own configuration, and its descriptor declares any `ext` keys it writes or reads in `ext.produces` / `ext.reads` (namespaced). `native()` returns the underlying deployment client or file model. `ServiceSpec.layer` and `profile` are hints; adapters may ignore hints they do not understand.
 
 ## Conformance
 
@@ -60,9 +60,11 @@ Other shapes (no schema yet):
 - `plan` with `dryRun: true` resolves; artifacts are `{path, content}` strings and steps are strings.
 - The plan does not inline secret values (a placeholder secret in the fixture must not appear).
 - When the live fixture is enabled: `up` resolves to a list of endpoints and `down` completes. Otherwise this part is skipped.
+- `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): baseline only, no shape changes
 - 0.1.0 — initial
 
 Example adapters: `compose-deploy` (maps a Compose file).

@@ -2,6 +2,10 @@
 
 Every port has its own semantic version, `MAJOR.MINOR.PATCH`. The versions are listed in the [port index](ports/README.md) and on each port page, and are exposed by the core as `PORT_VERSIONS`. Schemas are versioned with the port that uses them.
 
+## Language version
+
+The data that crosses ports is one language, described in [language.md](language.md) and versioned as a whole. It is at 1.0: every port moved to `1.0.0` together. From there each port keeps its own semver, as below.
+
 ## What changes the version
 
 | Change | Bump |
@@ -15,6 +19,8 @@ Every port has its own semantic version, `MAJOR.MINOR.PATCH`. The versions are l
 If a change could make a previously conformant adapter fail its suite, it is breaking.
 
 ## The 0.x rule
+
+No port is on 0.x any more; the rule stays here for history and for adapters that still declare a 0.x port version.
 
 While the major version is 0, a minor bump may be breaking. Compatibility is therefore stricter:
 

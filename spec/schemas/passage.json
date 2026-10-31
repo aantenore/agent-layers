@@ -4,13 +4,34 @@
   "title": "Passage",
   "description": "One retrieved unit of knowledge (layer knowledge). The uniform result of KnowledgePort.search, whatever the backend.",
   "type": "object",
-  "required": ["id", "text"],
+  "required": ["id", "text", "source"],
   "properties": {
     "id": { "type": "string" },
     "text": { "type": "string" },
-    "source": { "type": "string", "description": "File path, URL or document id the text came from." },
-    "score": { "type": "number" },
-    "metadata": { "type": "object" }
+    "source": {
+      "type": "string",
+      "description": "Instance name of the source; the core fills it when the adapter does not."
+    },
+    "title": { "type": "string" },
+    "url": { "type": "string" },
+    "score": {
+      "type": "number",
+      "description": "Higher is better. Comparable only within one source; after fusion, the fused score."
+    },
+    "attrs": { "$ref": "common.json#/$defs/Attrs" },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "refunds#2",
+      "text": "Refunds are issued within 14 days of the request.",
+      "source": "handbook",
+      "title": "Refund policy",
+      "url": "https://example.com/handbook/refunds",
+      "score": 0.0328,
+      "attrs": { "lang": "en" },
+      "ext": { "sdk.raw_score": 7.41, "sdk.rank": 1 }
+    }
+  ]
 }

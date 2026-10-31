@@ -2,16 +2,56 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/aantenore/agent-layers/spec/schemas/run-result.json",
   "title": "RunResult",
-  "description": "Outcome of one run of a RunnableAgent.",
+  "description": "Outcome of one run of a RunnableAgent (layer harness, RuntimePort).",
   "type": "object",
   "required": ["runId", "status", "output"],
   "properties": {
     "runId": { "type": "string" },
-    "status": { "type": "string", "examples": ["completed", "failed", "stopped"] },
+    "status": { "$ref": "common.json#/$defs/RunStatus" },
     "output": { "type": "string" },
-    "reason": { "type": "string", "description": "Why the run stopped, e.g. guardrail:<guard>:<stage>." },
-    "usage": { "$ref": "chat-response.json#/properties/usage" },
-    "costUsd": { "type": "number", "minimum": 0, "description": "What the run cost in US dollars, when the runtime knows the model prices or the remote agent reports it." },
-    "events": { "type": "array", "items": { "type": "object", "required": ["type"], "properties": { "type": { "type": "string" } } } }
-  }
+    "reason": {
+      "$ref": "common.json#/$defs/StopReason",
+      "description": "Required when status is not completed."
+    },
+    "usage": { "$ref": "common.json#/$defs/Usage" },
+    "costUsd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Cost of the run in US dollars, when known: model prices, or reported by a remote agent."
+    },
+    "events": { "type": "array", "items": { "$ref": "run-event.json" } },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "if": { "required": ["status"], "properties": { "status": { "enum": ["failed", "stopped", "waiting"] } } },
+  "then": { "required": ["reason"] },
+  "examples": [
+    {
+      "runId": "run_01",
+      "status": "stopped",
+      "output": "",
+      "reason": {
+        "code": "guard_block",
+        "layer": "guardrail",
+        "by": "pii",
+        "stage": "input",
+        "detail": "card number in input"
+      },
+      "usage": { "inputTokens": 412, "outputTokens": 58 },
+      "events": [
+        { "type": "run.start", "runId": "run_01", "agent": "support", "at": "2026-10-31T09:30:00Z" },
+        {
+          "type": "run.end",
+          "status": "stopped",
+          "reason": {
+            "code": "guard_block",
+            "layer": "guardrail",
+            "by": "pii",
+            "stage": "input",
+            "detail": "card number in input"
+          }
+        }
+      ]
+    }
+  ]
 }

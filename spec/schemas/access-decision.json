@@ -2,16 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/aantenore/agent-layers/spec/schemas/access-decision.json",
   "title": "AccessDecision",
-  "description": "Authorization decision (layer identity, AuthorizationPort).",
+  "description": "Answer of AuthorizationPort (layer identity). Fail closed: errors are a deny.",
   "type": "object",
-  "required": ["decision"],
+  "required": ["allowed"],
   "properties": {
-    "decision": { "type": "boolean" },
-    "context": {
-      "type": "object",
-      "properties": {
-        "reason": { "type": "string" }
-      }
-    }
-  }
+    "allowed": { "type": "boolean" },
+    "reason": { "type": "string", "description": "Kept inside the stack, never shown to the caller." },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "examples": [{ "allowed": false, "reason": "role support may not call exec tools" }]
 }

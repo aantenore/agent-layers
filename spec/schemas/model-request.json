@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/model-request.json",
+  "title": "ModelRequest",
+  "description": "One model call (layer llm, ModelPort; also CachePort keys and RouterPort.select).",
+  "type": "object",
+  "required": ["model", "messages"],
+  "properties": {
+    "model": { "type": "string" },
+    "messages": { "type": "array", "minItems": 1, "items": { "$ref": "common.json#/$defs/Message" } },
+    "tools": { "type": "array", "items": { "$ref": "common.json#/$defs/ToolInfo" } },
+    "toolMode": { "$ref": "common.json#/$defs/ToolMode" },
+    "settings": { "$ref": "common.json#/$defs/ModelSettings" },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "model": "qwen3:4b",
+      "messages": [
+        { "role": "system", "parts": [{ "type": "text", "text": "You are a support agent." }] },
+        { "role": "user", "parts": [{ "type": "text", "text": "Where is order A-1042?" }] }
+      ],
+      "tools": [
+        {
+          "name": "crm__lookup",
+          "description": "Look up a customer.",
+          "params": { "type": "object", "properties": { "customer": { "type": "string" } } }
+        }
+      ],
+      "toolMode": "auto",
+      "settings": { "temperature": 0.2, "maxOutputTokens": 512 }
+    }
+  ]
+}

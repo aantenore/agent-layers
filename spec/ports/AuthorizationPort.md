@@ -1,40 +1,47 @@
 # AuthorizationPort
 
-Layer: `identity` (L6 Identity & access) · Version: 0.2.0 · Conformance: `checkAuthorization`
+Layer: `identity` (L6 Identity & access) · Version: 1.0.0 · Conformance: `checkAuthorization`
 
 ## Purpose
 
-Decide whether a subject may perform an action on a resource, outside the agent code. A developer moves permissions to a policy engine, and the stack asks it before each governed action.
+Decide whether a caller may perform an action on a target, outside the agent code. A developer moves permissions to a policy engine, and the stack asks it before each governed action.
 
 Boundary: this port answers "may they". "Who are they" is [IdentityPort](IdentityPort.md); "is this content acceptable" is [GuardPort](GuardPort.md).
 
 ## Operations
 
-- `evaluate(req: AccessRequest, opts?: {signal?: Signal}) → AccessDecision`
-  Return an allow or deny decision for the request.
+- `evaluate(q: AccessQuestion, opts?: {signal?: Signal}) → AccessDecision`
+  Return an allow or deny decision for the question.
 
 ## Data shapes
 
-[AccessRequest](../schemas/access-request.json):
+[AccessQuestion](../schemas/access-question.json):
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `subject` | {`type`: String, `id`: String, `properties?`: {`roles?`, `scopes?`, `authenticated?`, ...}} | Who acts. With a verified identity, `type` is its kind (`user` or `agent`), `id` its subject and `authenticated: true`. Without one, the subject is `{type: anonymous, id: anonymous}` with `authenticated: false`. |
-| `action` | {`name`: String, `properties?`: object} | What they do. Tool calls use `call`. |
-| `resource` | {`type`: String, `id`: String, `properties?`: {`risk?`: `read`/`write`/`exec`, `agent?`: String, ...}} | What it is done to. Tool calls use `type: tool` and the prefixed tool name as `id`; `properties` carry the tool's risk (missing risk is `exec`), the agent name and the tool's layer. |
-| `context?` | {`args?`: Any, ...} | The arguments of the call, and other facts. |
+| `caller` | public [Caller](../schemas/caller.json) (no `credential`) or `{kind: "anonymous", id: "anonymous", roles: [], scopes: []}` | Who acts. Anonymous is explicit, never the agent. |
+| `action` | String, required | What they do. Tool calls use `call`. Config may add values that behave like `call`. |
+| `target` | {`kind`, `id`, `layer`, `risk`, `agent`, `attrs?`} | What it is done to. Tool calls use `kind: "tool"` and the prefixed tool name as `id`; `layer` is the tool's layer, `risk` its risk (missing risk is `exec`), `agent` the agent name, `attrs` the tool's [Attrs](README.md#language). |
+| `args?` | {String: Any} | The arguments of the call. Present only when the adapter is configured to send arguments. |
+| `ext?` | Ext | Adapter-specific context. |
 
-[AccessDecision](../schemas/access-decision.json): `decision: Boolean` (required), `context?: {reason?: String, ...}`.
+[AccessDecision](../schemas/access-decision.json):
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `allowed` | Boolean, required | The decision. |
+| `reason?` | String | Why. Kept inside the stack, never shown to the caller. |
+| `ext?` | Ext | Engine-specific fields. |
 
 ## Semantics
 
 - Fail closed. If the engine cannot decide, the answer is deny. The stack also treats a rejection as a denial with the reason `authorization unavailable`, so a broken engine never opens access.
-- Only `decision: true` allows. A missing or non-boolean decision is a deny.
+- Only `allowed: true` allows. A missing or non-boolean value is a deny.
 - Order in the stack: local policy rules come first; only when they do not deny does this port get asked. When neither policy rules nor this port is configured, tool calls are allowed. A deployment that needs deny by default configures a catch-all deny rule or an authorization adapter.
-- A deny carries a human-readable `context.reason` when available; the model sees it as part of an error result.
-- The request is built from the run: roles and scopes come from the verified identity. Callers cannot add their own claims to it.
-- An unauthenticated call is never presented as the agent's own identity. Engines must not match `user` or `agent` rules for an `anonymous` subject, nor for one with `authenticated: false`; only the exact types `user` and `agent` carry roles, scopes and kind.
-- Decisions are side-effect free and repeatable for the same request, except where the policy depends on time or external state.
+- A deny carries a human-readable `reason` when available; it stays inside the stack and the model sees a generic denial.
+- The question is built from the run: roles and scopes come from the verified caller. Callers cannot add their own claims to it.
+- An unauthenticated call is never presented as the agent's own identity. The caller is the explicit anonymous caller, and engines must not match `user` or `agent` rules for it.
+- Decisions are side-effect free and repeatable for the same question, except where the policy depends on time or external state.
 - Approval is separate: an `ask` effect from the local policy is resolved by [ApprovalPort](ApprovalPort.md) before this port is asked.
 
 ## Errors
@@ -44,18 +51,20 @@ Boundary: this port answers "may they". "Who are they" is [IdentityPort](Identit
 
 ## Escape hatch
 
-`properties` on subject, action and resource, and `context`, accept additional keys so engines can use attributes the contract does not name. `native()` returns the policy engine client.
+`ext` on the question and the decision carries engine-specific data (for example `authzen.context`); keys are namespaced and declared in the adapter descriptor's `ext.produces` / `ext.reads`. `native()` returns the policy engine client. Policy engines with their own request format (AuthZEN) translate at the adapter; how the question's fields land on that format is configurable through the stack config `mappings` block (`authorization`, `out` rules); see [Mappings](../language.md#mappings). A mapping error denies the call.
 
 ## Conformance
 
 `checkAuthorization` verifies:
 
-- `evaluate` of a sample tool-call request resolves to a decision that validates against `access-decision.json`.
-- Every fixture request expected to be allowed gets `decision: true`.
-- Every fixture request expected to be denied gets `decision: false`.
+- `evaluate` of a sample tool-call question resolves to a decision that validates against `access-decision.json`.
+- Every fixture question expected to be allowed gets `allowed: true`.
+- Every fixture question expected to be denied gets `allowed: false`.
+- `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `AccessQuestion {caller, action, target, args?}` replaces `AccessRequest`; `AccessDecision.allowed` (was `decision`) and `reason`; anonymous is an explicit caller
 - 0.2.0 — unauthenticated calls use an explicit `anonymous` subject; `subject.properties.authenticated` added
 - 0.1.0 — initial
 

@@ -1,6 +1,6 @@
 # IngestionPort
 
-Layer: `knowledge` (L4 Knowledge & memory) · Version: 0.1.0 · Conformance: `checkIngestion`
+Layer: `knowledge` (L4 Knowledge & memory) · Version: 1.0.0 · Conformance: `checkIngestion`
 
 ## Purpose
 
@@ -8,14 +8,24 @@ Fill and maintain a knowledge backend: load documents, refresh them when they ch
 
 ## Operations
 
-- `ingest(docs: [KnowledgeDocument], opts?: {signal?: Signal}) → [String]`
+- `ingest(docs: [Document], opts?: {signal?: Signal}) → [String]`
   Insert or replace documents by id. Returns the ids stored.
 - `delete(ids: [String], opts?: {signal?: Signal}) → ()`
   Remove documents by id.
 
 ## Data shapes
 
-[KnowledgeDocument](../schemas/knowledge-document.json): `id: String`, `text: String` (both required), `source?: String`, `metadata?: {String: Any}`.
+[Document](../schemas/document.json):
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | String, required | Document id. |
+| `text` | String, required | Content to index. |
+| `source?` | String | Where the document comes from. |
+| `title?` | String | Human title. |
+| `url?` | String | Where the document lives. |
+| `attrs?` | [Attrs](README.md#language) | Filterable attributes; they come back on the passages. |
+| `ext?` | Ext | Backend-specific fields. |
 
 ## Semantics
 
@@ -32,16 +42,18 @@ Fill and maintain a knowledge backend: load documents, refresh them when they ch
 
 ## Escape hatch
 
-`KnowledgeDocument.metadata` passes through to the backend. `native()` returns the backend client.
+`Document.ext` passes through to the backend; keys are namespaced and declared in the adapter descriptor's `ext.produces` / `ext.reads`. `native()` returns the backend client. Mapping a document's fields to the backend's payload goes through the stack config `mappings` block; see [Mappings](../language.md#mappings).
 
 ## Conformance
 
 `checkIngestion` verifies:
 
-- Fixture documents validate against `knowledge-document.json`.
+- Fixture documents validate against `document.json`.
 - `ingest` returns one id per document.
 - `delete` of the returned ids completes.
+- `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `Document` (was `KnowledgeDocument`) with `title`, `url`, `attrs` instead of `metadata`
 - 0.1.0 — initial

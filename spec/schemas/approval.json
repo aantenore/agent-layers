@@ -7,19 +7,61 @@
   "required": ["id", "status", "request"],
   "properties": {
     "id": { "type": "string" },
-    "status": { "enum": ["pending", "approved", "denied", "expired"] },
-    "request": {
+    "status": { "$ref": "common.json#/$defs/ApprovalStatus" },
+    "request": { "$ref": "#/$defs/ApprovalRequest" },
+    "decidedBy": { "type": "string" },
+    "reason": { "type": "string" },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "ApprovalRequest": {
       "type": "object",
-      "required": ["access", "agent", "runId"],
+      "required": ["question", "agent", "runId"],
       "properties": {
-        "access": { "$ref": "access-request.json" },
+        "question": { "$ref": "access-question.json" },
         "agent": { "type": "string" },
         "runId": { "type": "string" },
         "reason": { "type": "string" },
-        "expiresAt": { "type": "string", "format": "date-time" }
+        "expiresAt": {
+          "$ref": "common.json#/$defs/Time",
+          "description": "After this time a pending approval becomes expired."
+        },
+        "ext": { "$ref": "common.json#/$defs/Ext" }
+      },
+      "additionalProperties": false,
+      "description": "What is being asked, by which run."
+    }
+  },
+  "examples": [
+    {
+      "id": "apr_01",
+      "status": "pending",
+      "request": {
+        "question": {
+          "caller": {
+            "id": "u-1042",
+            "kind": "user",
+            "roles": ["support"],
+            "scopes": ["orders:read"],
+            "name": "Mara Rossi"
+          },
+          "action": "call",
+          "target": {
+            "kind": "tool",
+            "id": "crm__delete",
+            "layer": "tool",
+            "risk": "exec",
+            "agent": "support",
+            "attrs": { "owner": "sales" }
+          },
+          "args": { "customer": "C-77" }
+        },
+        "agent": "support",
+        "runId": "run_03",
+        "reason": "exec tools need a person",
+        "expiresAt": "2026-10-31T11:00:00Z"
       }
-    },
-    "decidedBy": { "type": "string" },
-    "reason": { "type": "string" }
-  }
+    }
+  ]
 }

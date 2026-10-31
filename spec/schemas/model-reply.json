@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/model-reply.json",
+  "title": "ModelReply",
+  "description": "One model answer (layer llm, ModelPort). One answer per call. finish is tools exactly when the message has at least one call part.",
+  "type": "object",
+  "required": ["model", "message", "finish"],
+  "properties": {
+    "model": { "type": "string", "description": "Model that answered." },
+    "message": {
+      "allOf": [
+        { "$ref": "common.json#/$defs/Message" },
+        { "properties": { "role": { "const": "assistant" } } }
+      ]
+    },
+    "finish": { "$ref": "common.json#/$defs/Finish" },
+    "usage": { "$ref": "common.json#/$defs/Usage" },
+    "id": { "type": "string", "description": "Backend response id." },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "model": "qwen3:4b",
+      "message": {
+        "role": "assistant",
+        "parts": [{ "type": "text", "text": "Order A-1042 shipped yesterday." }]
+      },
+      "finish": "end",
+      "usage": { "inputTokens": 412, "outputTokens": 58 },
+      "id": "resp-9f2"
+    }
+  ]
+}

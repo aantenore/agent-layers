@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/document.json",
+  "title": "Document",
+  "description": "A document to load into a knowledge backend (layer knowledge, IngestionPort.ingest).",
+  "type": "object",
+  "required": ["id", "text"],
+  "properties": {
+    "id": { "type": "string" },
+    "text": { "type": "string" },
+    "source": { "type": "string" },
+    "title": { "type": "string" },
+    "url": { "type": "string" },
+    "attrs": { "$ref": "common.json#/$defs/Attrs" },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "refunds",
+      "text": "Refunds are issued within 14 days of the request.",
+      "source": "handbook",
+      "title": "Refund policy",
+      "attrs": { "lang": "en" }
+    }
+  ]
+}

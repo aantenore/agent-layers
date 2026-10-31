@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/guard-check.json",
+  "title": "GuardCheck",
+  "description": "Text put to GuardPort.check at one of four stages (layer guardrail).",
+  "type": "object",
+  "required": ["stage", "text", "agent", "runId"],
+  "properties": {
+    "stage": { "$ref": "common.json#/$defs/GuardStage" },
+    "text": { "type": "string" },
+    "agent": { "type": "string" },
+    "runId": { "type": "string" },
+    "tool": { "type": "string" },
+    "caller": { "$ref": "common.json#/$defs/PublicCaller" },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "stage": "input",
+      "text": "My card is 4111 1111 1111 1111",
+      "agent": "support",
+      "runId": "run_01",
+      "caller": {
+        "id": "u-1042",
+        "kind": "user",
+        "roles": ["support"],
+        "scopes": ["orders:read"],
+        "name": "Mara Rossi"
+      }
+    }
+  ]
+}

@@ -2,16 +2,41 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/aantenore/agent-layers/spec/schemas/tool-spec.json",
   "title": "ToolSpec",
-  "description": "A tool as listed by ToolPort.listTools (layer tool).",
+  "description": "A tool an agent may call (layer tool, ToolPort.listTools).",
   "type": "object",
-  "required": ["name", "description", "inputSchema"],
+  "required": ["name", "description", "params"],
   "properties": {
-    "name": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.-]+$",
+      "description": "Prefixed <source>__<tool> by the core."
+    },
     "description": { "type": "string" },
-    "inputSchema": { "type": "object", "description": "JSON Schema of the arguments object." },
-    "layer": { "enum": ["infra", "llm", "cache", "harness", "knowledge", "tool", "identity", "guardrail", "interface", "telemetry", "eval"] },
-    "risk": { "enum": ["read", "write", "exec"], "description": "Missing risk is treated as exec." },
-    "audience": { "type": "string", "description": "Audience a credential is needed for." },
-    "meta": { "type": "object" }
-  }
+    "params": { "type": "object", "description": "JSON Schema of the arguments object." },
+    "risk": { "$ref": "common.json#/$defs/Risk" },
+    "layer": { "$ref": "common.json#/$defs/Layer" },
+    "audience": {
+      "type": "string",
+      "description": "Credential audience of the protected service the tool calls."
+    },
+    "attrs": { "$ref": "common.json#/$defs/Attrs" },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "name": "crm__lookup",
+      "description": "Look up a customer by id.",
+      "params": {
+        "type": "object",
+        "required": ["customer"],
+        "properties": { "customer": { "type": "string" } }
+      },
+      "risk": "read",
+      "audience": "crm-api",
+      "attrs": { "owner": "sales" },
+      "ext": { "mcp.annotations": { "readOnlyHint": true } }
+    }
+  ]
 }

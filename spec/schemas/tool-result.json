@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/tool-result.json",
+  "title": "ToolResult",
+  "description": "Outcome of ToolPort.callTool (layer tool). Errors are results, not exceptions, so the model can react.",
+  "type": "object",
+  "required": ["ok", "text"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "text": { "type": "string", "description": "What the model reads." },
+    "data": { "description": "Structured result." },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "ok": true,
+      "text": "Customer C-77: Mara Rossi, 3 open orders.",
+      "data": { "customer": "C-77", "openOrders": 3 }
+    }
+  ]
+}

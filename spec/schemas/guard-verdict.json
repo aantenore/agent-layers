@@ -2,15 +2,30 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/aantenore/agent-layers/spec/schemas/guard-verdict.json",
   "title": "GuardVerdict",
-  "description": "Result of GuardPort.check (layer guardrail).",
+  "description": "Answer of GuardPort.check (layer guardrail). text is required for redact.",
   "type": "object",
   "required": ["action"],
   "properties": {
-    "action": { "enum": ["allow", "block", "redact"] },
-    "text": { "type": "string", "description": "Redacted text; required when action is redact." },
-    "reason": { "type": "string" }
+    "action": { "$ref": "common.json#/$defs/GuardAction" },
+    "text": { "type": "string" },
+    "labels": {
+      "type": "array",
+      "items": { "$ref": "common.json#/$defs/GuardLabel" },
+      "description": "What was found. Native names go in ext."
+    },
+    "reason": { "type": "string", "description": "Human text, internal only; never parsed." },
+    "ext": { "$ref": "common.json#/$defs/Ext" }
   },
-  "if": { "properties": { "action": { "const": "redact" } } },
-  "then": { "required": ["action", "text"] },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "if": { "required": ["action"], "properties": { "action": { "const": "redact" } } },
+  "then": { "required": ["text"] },
+  "examples": [
+    {
+      "action": "redact",
+      "text": "My card is [CARD]",
+      "labels": ["pii"],
+      "reason": "one card number masked",
+      "ext": { "presidio.entities": ["CREDIT_CARD"] }
+    }
+  ]
 }
