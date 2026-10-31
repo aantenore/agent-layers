@@ -1,0 +1,199 @@
+{
+  "$schema": "../../packages/core/schema/agent-layers.schema.json",
+  "name": "agent-layers-slice",
+  "profile": "prototype",
+  "agents": {
+    "assistant": { "file": "agents/assistant.md" }
+  },
+  "policy": [
+    { "effect": "allow", "risk": ["read", "write"] },
+    { "effect": "deny", "risk": ["exec"] }
+  ],
+  "pipeline": {
+    "knowledge": { "k": 3, "maxChars": 3000, "mode": "system" }
+  },
+  "gateway": { "port": 8799 },
+  "profiles": {
+    "prototype": {
+      "description": "Zero infrastructure: a scripted model, Markdown knowledge, static identity and rule authorization, telemetry to a file.",
+      "tier": "prototype",
+      "layers": {
+        "model": {
+          "adapter": "mock-model",
+          "options": {
+            "rules": [
+              { "match": "(-?\\d+(?:\\.\\d+)?)\\s*(?:°\\s*)?c\\b", "tool": "convert_temperature", "args": { "celsius": "{{1}}" } },
+              { "match": "save (?:a )?note:?\\s*(.+)", "tool": "save_note", "args": { "text": "{{1}}" } },
+              { "match": "larkspur ferry", "tool": "docs", "args": { "query": "first Larkspur ferry from Quillmere" } },
+              { "match": "capital of france", "reply": "Paris." }
+            ]
+          }
+        },
+        "router": { "adapter": "static-router", "options": { "model": "mock" } },
+        "cache": { "adapter": "memory-cache", "options": { "maxEntries": 500 } },
+        "runtime": { "adapter": "basic-runtime", "options": { "pricing": { "mock": { "inputPerMTok": 0.1, "outputPerMTok": 0.4 }, "default": { "inputPerMTok": 0.1, "outputPerMTok": 0.4 } } } },
+        "state": { "adapter": "memory-state" },
+        "knowledge": {
+          "docs": { "adapter": "markdown-knowledge", "options": { "dir": "knowledge" } }
+        },
+        "tools": {
+          "util": { "adapter": "functions", "options": { "module": "./tools/tools.ts" } }
+        },
+        "identity": {
+          "adapter": "static-identity",
+          "options": { "tokens": { "dev-alice": { "subject": "alice", "roles": ["analyst"] }, "dev-bob": { "subject": "bob", "roles": ["viewer"] } } }
+        },
+        "credentials": { "adapter": "static-identity", "options": { "tokens": { "tools-api": "dev-alice" } } },
+        "authorization": {
+          "adapter": "rules-authorization",
+          "options": {
+            "rules": [
+              { "effect": "allow", "risk": ["read"], "when": { "authenticated": true } },
+              { "effect": "allow", "risk": ["write"], "when": { "roles": ["analyst"] } }
+            ],
+            "default": "deny"
+          }
+        },
+        "guardrails": [{ "adapter": "regex-guard", "options": { "piiAction": "redact" } }],
+        "channels": [
+          { "adapter": "openai-compatible", "options": { "models": { "default": "mock", "mock": "mock" } } },
+          { "adapter": "mcp" },
+          { "adapter": "a2a" }
+        ],
+        "telemetry": [{ "adapter": "jsonl-telemetry", "options": { "path": "${env:SLICE_TELEMETRY:-.agent-layers/telemetry.jsonl}" } }],
+        "eval": [{ "adapter": "layer-signals" }, { "adapter": "expected-eval" }]
+      }
+    },
+    "prototype-reinloop": {
+      "description": "Prototype on the reinloop runtime.",
+      "extends": "prototype",
+      "layers": {
+        "runtime": { "adapter": "reinloop", "options": { "budget": { "maxTurns": 12, "maxCostUsd": 0.05 }, "pricing": { "mock": { "inputPerMTok": 0.1, "outputPerMTok": 0.4 }, "default": { "inputPerMTok": 0.1, "outputPerMTok": 0.4 } } } }
+      }
+    },
+    "prototype-pydantic": {
+      "description": "Prototype whose runtime is the Pydantic AI agent in Python, over A2A; it calls the gateway back for model and tools.",
+      "extends": "prototype",
+      "layers": {
+        "runtime": {
+          "adapter": "a2a",
+          "options": {
+            "url": "${env:A2A_AGENT_URL:-http://localhost:9100}",
+            "auth": { "audience": "tools-api" },
+            "headers": { "X-Agent-Layers-Gateway": "${env:A2A_GATEWAY_SECRET}" },
+            "timeoutMs": 180000
+          }
+        }
+      }
+    },
+    "pilot": {
+      "description": "Shared environment: the real model through the LiteLLM model gateway, knowledge from Qdrant over MCP, telemetry to OTLP as well.",
+      "extends": "prototype",
+      "layers": {
+        "model": {
+          "adapter": "openai-compatible",
+          "options": { "baseUrl": "${env:GATEWAY_URL:-http://localhost:4000/v1}", "apiKey": "${env:GATEWAY_KEY:-sk-local-change-me}", "model": "${env:SLICE_MODEL:-fast}", "timeoutMs": 180000 }
+        },
+        "router": null,
+        "cache": null,
+        "knowledge": {
+          "docs": {
+            "adapter": "mcp",
+            "options": {
+              "command": "uvx",
+              "args": ["--python", "3.12", "mcp-server-qdrant==0.8.1"],
+              "env": { "QDRANT_URL": "${env:QDRANT_URL:-http://localhost:6333}", "COLLECTION_NAME": "${env:QDRANT_COLLECTION:-slice}", "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2" },
+              "tool": "qdrant-find",
+              "timeoutMs": 300000
+            }
+          }
+        },
+        "channels": [
+          { "adapter": "openai-compatible", "options": { "models": { "default": "default" } } },
+          { "adapter": "mcp" },
+          { "adapter": "a2a" }
+        ],
+        "telemetry": [
+          { "adapter": "jsonl-telemetry", "options": { "path": "${env:SLICE_TELEMETRY:-.agent-layers/telemetry.jsonl}" } },
+          { "adapter": "otlp", "options": { "endpoint": "${env:OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4318}", "serviceName": "agent-layers-slice" } }
+        ]
+      }
+    },
+    "pilot-reinloop": {
+      "description": "Pilot on the reinloop runtime.",
+      "extends": "pilot",
+      "layers": {
+        "runtime": { "adapter": "reinloop", "options": { "budget": { "maxTurns": 12, "maxCostUsd": 0.05 }, "pricing": { "mock": { "inputPerMTok": 0.1, "outputPerMTok": 0.4 }, "default": { "inputPerMTok": 0.1, "outputPerMTok": 0.4 } } } }
+      }
+    },
+    "pilot-pydantic": {
+      "description": "Pilot whose runtime is the Pydantic AI agent over A2A.",
+      "extends": "pilot",
+      "layers": {
+        "runtime": {
+          "adapter": "a2a",
+          "options": {
+            "url": "${env:A2A_AGENT_URL:-http://localhost:9100}",
+            "auth": { "audience": "tools-api" },
+            "headers": { "X-Agent-Layers-Gateway": "${env:A2A_GATEWAY_SECRET}" },
+            "timeoutMs": 180000
+          }
+        }
+      }
+    },
+    "production": {
+      "description": "Enterprise systems: OIDC identity with on-behalf-of tokens, OPA, Presidio, SQLite state, reinloop; loopback gateway with Host checks.",
+      "extends": "pilot",
+      "tier": "production",
+      "gateway": { "host": "127.0.0.1", "allowedHosts": ["localhost", "127.0.0.1"] },
+      "layers": {
+        "runtime": { "adapter": "reinloop", "options": { "budget": { "maxTurns": 12, "maxCostUsd": 0.05 }, "pricing": { "mock": { "inputPerMTok": 0.1, "outputPerMTok": 0.4 }, "default": { "inputPerMTok": 0.1, "outputPerMTok": 0.4 } } } },
+        "state": { "adapter": "sqlite-state", "options": { "path": ".agent-layers/state.db" } },
+        "identity": {
+          "adapter": "oidc",
+          "options": {
+            "issuer": "${env:OIDC_ISSUER:-http://localhost:18080/realms/agents}",
+            "audience": ["agent-runtime", "tools-api"],
+            "agentClients": ["agent-runtime"]
+          }
+        },
+        "credentials": {
+          "adapter": "oidc",
+          "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:18080/realms/agents}", "clientId": "${env:OIDC_CLIENT_ID:-agent-runtime}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
+        },
+        "authorization": { "adapter": "opa", "options": { "url": "${env:OPA_URL:-http://localhost:8181}" } },
+        "approval": null,
+        "guardrails": [
+          {
+            "adapter": "presidio",
+            "options": {
+              "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}",
+              "anonymizerUrl": "${env:PRESIDIO_ANONYMIZER_URL:-http://localhost:5001}",
+              "entities": ["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "IP_ADDRESS"]
+            }
+          }
+        ]
+      }
+    },
+    "production-pydantic": {
+      "description": "Production whose runtime is the Pydantic AI agent over A2A, with an on-behalf-of token for the caller.",
+      "extends": "production",
+      "layers": {
+        "runtime": {
+          "adapter": "a2a",
+          "options": {
+            "url": "${env:A2A_AGENT_URL:-http://localhost:9100}",
+            "auth": { "audience": "tools-api" },
+            "headers": { "X-Agent-Layers-Gateway": "${env:A2A_GATEWAY_SECRET}" },
+            "timeoutMs": 180000
+          }
+        }
+      }
+    },
+    "production-basic": {
+      "description": "Production on basic-runtime: kept to show the readiness gate refusing a prototype-only runtime.",
+      "extends": "production",
+      "layers": { "runtime": { "adapter": "basic-runtime" } }
+    }
+  }
+}

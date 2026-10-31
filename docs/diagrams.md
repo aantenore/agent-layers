@@ -74,6 +74,8 @@ The command renders every Mermaid block of a Markdown file and fails on a syntax
 | Two modes | [gateway.md](gateway.md#two-modes) | In process versus hosted by the gateway |
 | Gateway topology | [gateway.md](gateway.md#what-the-gateway-exposes) | Callers, Origin and Host check, identity, mounted routes, the governed ports behind them |
 | A runtime in another language | [gateway.md](gateway.md#a-runtime-in-another-language) | Model calls at `/v1`, tool calls at `/mcp` with the caller's identity; a remote agent as runtime over A2A |
+| What runs where | [slice.md](slice.md#what-runs-where) | The vertical slice: driver, gateway, three runtimes, the layers per tier, telemetry to eval |
+| Failure injection and attribution | [slice.md](slice.md#failure-injection-and-attribution) | One faulted run across processes, scored from its trace |
 
 ### Layers
 
