@@ -102,10 +102,13 @@ not stored, returned or logged.
   caller's own tasks.
 - A `contextId` is the caller's own name for a conversation: another caller using the same `contextId` gets a separate
   conversation, and cannot read or extend yours. A run reads and writes the history in the namespace of its owner.
-- At most `MAX_TASKS` tasks and `MAX_TASKS` conversations are kept, and `MAX_TASKS // 4` of each per owner. At a cap
-  the new task makes room by dropping only its own owner's oldest finished task or least recently used conversation
-  with no task in flight. With nothing of its own to drop it is refused with the JSON-RPC error -32000 "Too many
-  tasks". Nothing of another owner and nothing submitted or working is ever dropped.
+- At most `MAX_TASKS` tasks and `MAX_TASKS` conversations are kept, and `MAX_TASKS // 4` of each per owner. To make
+  room for a new task, an owner at its own cap drops its own oldest finished task or least recently used idle
+  conversation; below it, a full store drops the oldest finished task or idle conversation of any owner, so idle owners
+  cannot hold capacity. Never dropped: a task that is submitted or working, and a conversation with such a task. When
+  there is nothing to drop, the new task is refused with the JSON-RPC error -32000 "Too many tasks".
+- A finished task is kept `FINISHED_TASK_TTL_S` seconds, and a conversation with no task in flight `IDLE_CONTEXT_TTL_S`
+  seconds after its last use. Expiry is applied when the store is used, not by a timer.
 
 Limits, because the agent does not verify the token (the gateway does, and has no introspection endpoint):
 
@@ -113,8 +116,9 @@ Limits, because the agent does not verify the token (the gateway does, and has n
   so a long conversation (the gateway sends the session id as `contextId`) can outlive its token and lose its history.
 - Callers that share one credential share one namespace. The static dev credentials of the `polyglot` profile hand
   every caller the same token.
-- Anyone who can reach the endpoint can use any token string, including made-up ones, and fill the global cap with
-  tasks of its own that only it can drop. That is why the agent must be reachable only by the gateway, as below.
+- Anyone who can reach the endpoint can use any token string, including made-up ones, and fill the store with work in
+  flight (up to `MAX_TASKS // 4` per token), which is refused to everyone else until it ends. That is why the agent must
+  be reachable only by the gateway, as below.
 
 ## Reaching the agent
 
@@ -146,6 +150,8 @@ Also refused: requests with an `Origin` header (the agent is called server to se
 | `AGENT_NAME` | from the file | Agent name |
 | `GATEWAY_URL` | `http://127.0.0.1:8787` | Root of the agent-layers gateway |
 | `GATEWAY_MODEL` | the file's `model` | Model alias of the gateway |
+| `FINISHED_TASK_TTL_S` | `3600` | How long a finished task is kept |
+| `IDLE_CONTEXT_TTL_S` | `3600` | How long a conversation with no task in flight is kept after its last use |
 | `A2A_HOST` | `127.0.0.1` | Interface to listen on; anything but loopback needs `A2A_ALLOW_REMOTE=1` |
 | `A2A_ALLOW_REMOTE` | unset | `1` allows a non-loopback `A2A_HOST` |
 | `A2A_GATEWAY_SECRET` | unset | When set, requests must carry it in `X-Agent-Layers-Gateway` (see Reaching the agent) |

@@ -16,6 +16,7 @@ conversation of a run in the namespace of the run's owner.
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
@@ -51,34 +52,60 @@ class TooManyTasks(Exception):
 
 
 @dataclass
+class _Context:
+    """One conversation: its history, when it was last used, and a global rank of that use."""
+
+    history: list[Any]
+    used_at: float
+    rank: int
+
+
+@dataclass
 class _Space:
     """What one owner has: tasks in creation order, conversations from least to most recently used."""
 
     tasks: dict[str, Task] = field(default_factory=dict)
-    contexts: dict[str, list[Any]] = field(default_factory=dict)
+    contexts: dict[str, _Context] = field(default_factory=dict)
 
-    def idle_context(self) -> str | None:
+    def idle_contexts(self) -> list[str]:
         busy = {t['context_id'] for t in self.tasks.values() if t['status']['state'] not in FINAL_STATES}
-        return next((c for c in self.contexts if c not in busy), None)
+        return [c for c in self.contexts if c not in busy]
 
     def finished_task(self) -> str | None:
         return next((i for i, t in self.tasks.items() if t['status']['state'] in FINAL_STATES), None)
+
+    def empty(self) -> bool:
+        return not self.tasks and not self.contexts
 
 
 class TaskStore(Storage[list[Any]]):
     """The worker's storage: tasks and conversations in a namespace per owner, in memory.
 
-    At most `max_tasks` tasks and `max_tasks` conversations are kept, and `max_tasks // 4` of each per owner. At a cap,
-    only the requesting owner's own oldest finished task, or least recently used conversation without a task in flight,
-    is dropped to make room; when it has none the new task is refused. Nothing of another owner is ever dropped, and
-    nothing submitted or working is.
+    At most `max_tasks` tasks and `max_tasks` conversations are kept, and `max_tasks // 4` of each per owner. To make
+    room for a new task, an owner at its own cap drops its own oldest finished task or least recently used idle
+    conversation; below it, a full store drops the oldest ones of any owner. Never dropped: a task submitted or working,
+    and a conversation with such a task. When there is nothing to drop the new task is refused.
+
+    Finished tasks expire after `finished_ttl_s`, and idle conversations after `idle_ttl_s` since their last use.
+    Expiry is applied when the store is used (`sweep`), not by a timer.
     """
 
-    def __init__(self, max_tasks: int) -> None:
+    def __init__(
+        self,
+        max_tasks: int,
+        finished_ttl_s: float = 3600.0,
+        idle_ttl_s: float = 3600.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.max_tasks = max_tasks
         self.per_owner = max(1, max_tasks // 4)
+        self.finished_ttl_s = finished_ttl_s
+        self.idle_ttl_s = idle_ttl_s
+        self.clock = clock
         self._spaces: dict[str, _Space] = {}
-        self._task_owner: dict[str, str] = {}
+        self._task_owner: dict[str, str] = {}  # in creation order, across owners
+        self._finished_at: dict[str, float] = {}
+        self._rank = 0
 
     # Worker side: by task id, and by the owner of the run.
 
@@ -95,6 +122,8 @@ class TaskStore(Storage[list[Any]]):
     ) -> Task:
         task = self._spaces[self._task_owner[task_id]].tasks[task_id]
         task['status'] = TaskStatus(state=state, timestamp=datetime.now().isoformat())
+        if state in FINAL_STATES:
+            self._finished_at[task_id] = self.clock()
         if new_artifacts:
             task.setdefault('artifacts', []).extend(new_artifacts)
         if new_messages:
@@ -107,13 +136,14 @@ class TaskStore(Storage[list[Any]]):
 
     async def load_context(self, context_id: str) -> list[Any] | None:
         space = self._spaces.get(RUN_OWNER.get() or '')
-        history = space.contexts.get(context_id) if space else None
-        return list(history) if history is not None else None
+        context = space.contexts.get(context_id) if space else None
+        return list(context.history) if context is not None else None
 
     async def update_context(self, context_id: str, context: list[Any]) -> None:
         space = self._spaces.get(RUN_OWNER.get() or '')
         if space is not None and context_id in space.contexts:
-            space.contexts[context_id] = context
+            space.contexts.pop(context_id)
+            space.contexts[context_id] = self._context(context)
 
     async def submit_task(self, context_id: str, message: Message) -> Task:
         raise NotImplementedError('tasks are submitted for an owner: see `submit`')
@@ -127,24 +157,32 @@ class TaskStore(Storage[list[Any]]):
             task = Task(**{**task, 'history': task['history'][-history_length:]})
         return task
 
+    def sweep(self) -> None:
+        """Drop the finished tasks and idle conversations that have outlived their time to live."""
+        now = self.clock()
+        for owner, space in list(self._spaces.items()):
+            for task_id in [i for i in space.tasks if now - self._finished_at.get(i, now) >= self.finished_ttl_s]:
+                self._drop_task(owner, task_id)
+            for context_id in space.idle_contexts():
+                if now - space.contexts[context_id].used_at >= self.idle_ttl_s:
+                    del space.contexts[context_id]
+            self._prune(owner)
+
     def submit(self, owner: str, context_id: str, message: Message) -> Task:
+        self.sweep()
         space = self._spaces.get(owner) or _Space()
-        context_victim = task_victim = None
-        if context_id not in space.contexts and (
-            len(space.contexts) >= self.per_owner or sum(len(s.contexts) for s in self._spaces.values()) >= self.max_tasks
-        ):
-            context_victim = space.idle_context()
-            if context_victim is None:
-                raise TooManyTasks()
-        if len(space.tasks) >= self.per_owner or len(self._task_owner) >= self.max_tasks:
-            task_victim = space.finished_task()
-            if task_victim is None:
-                raise TooManyTasks()
+        context_victim = None
+        if context_id not in space.contexts:
+            context_victim = self._room(
+                len(space.contexts), self._context_count(), self._own_idle_context(owner, space), self._oldest_idle_context
+            )
+        task_victim = self._room(
+            len(space.tasks), len(self._task_owner), self._own_finished_task(owner, space), self._oldest_finished_task
+        )
         if context_victim is not None:
-            del space.contexts[context_victim]
+            self._drop_context(*context_victim)
         if task_victim is not None:
-            del space.tasks[task_victim]
-            del self._task_owner[task_victim]
+            self._drop_task(*task_victim)
 
         task_id = str(uuid.uuid4())
         message['task_id'] = task_id
@@ -156,11 +194,76 @@ class TaskStore(Storage[list[Any]]):
             history=[message],
         )
         # Re-inserting keeps the most recently used conversation last.
-        space.contexts[context_id] = space.contexts.pop(context_id, [])
+        previous = space.contexts.pop(context_id, None)
+        space.contexts[context_id] = self._context(previous.history if previous else [])
         space.tasks[task_id] = task
         self._spaces[owner] = space
         self._task_owner[task_id] = owner
         return task
+
+    def _room(
+        self,
+        own: int,
+        total: int,
+        own_victim: tuple[str, str] | None,
+        any_victim: Callable[[], tuple[str, str] | None],
+    ) -> tuple[str, str] | None:
+        """What to drop for one more: nothing below the caps, the owner's own at its cap, else the oldest of anyone."""
+        if own >= self.per_owner:
+            victim = own_victim
+        elif total >= self.max_tasks:
+            victim = any_victim()
+        else:
+            return None
+        if victim is None:
+            raise TooManyTasks()
+        return victim
+
+    def _context(self, history: list[Any]) -> _Context:
+        self._rank += 1
+        return _Context(history=history, used_at=self.clock(), rank=self._rank)
+
+    def _context_count(self) -> int:
+        return sum(len(s.contexts) for s in self._spaces.values())
+
+    @staticmethod
+    def _own_idle_context(owner: str, space: _Space) -> tuple[str, str] | None:
+        idle = space.idle_contexts()
+        return (owner, idle[0]) if idle else None
+
+    @staticmethod
+    def _own_finished_task(owner: str, space: _Space) -> tuple[str, str] | None:
+        task_id = space.finished_task()
+        return (owner, task_id) if task_id else None
+
+    def _oldest_idle_context(self) -> tuple[str, str] | None:
+        best: tuple[int, str, str] | None = None
+        for owner, space in self._spaces.items():
+            for context_id in space.idle_contexts():
+                rank = space.contexts[context_id].rank
+                if best is None or rank < best[0]:
+                    best = (rank, owner, context_id)
+        return (best[1], best[2]) if best else None
+
+    def _oldest_finished_task(self) -> tuple[str, str] | None:
+        for task_id, owner in self._task_owner.items():
+            if self._spaces[owner].tasks[task_id]['status']['state'] in FINAL_STATES:
+                return owner, task_id
+        return None
+
+    def _drop_context(self, owner: str, context_id: str) -> None:
+        del self._spaces[owner].contexts[context_id]
+        self._prune(owner)
+
+    def _drop_task(self, owner: str, task_id: str) -> None:
+        del self._spaces[owner].tasks[task_id]
+        del self._task_owner[task_id]
+        self._finished_at.pop(task_id, None)
+        self._prune(owner)
+
+    def _prune(self, owner: str) -> None:
+        if owner in self._spaces and self._spaces[owner].empty():
+            del self._spaces[owner]
 
 
 class CallerStorage(Storage[list[Any]]):
@@ -177,6 +280,7 @@ class CallerStorage(Storage[list[Any]]):
         return owner
 
     async def load_task(self, task_id: str, history_length: int | None = None) -> Task | None:
+        self.store.sweep()
         return self.store.task_of(self._owner(), task_id, history_length)
 
     async def submit_task(self, context_id: str, message: Message) -> Task:
