@@ -38,7 +38,8 @@ test('timeoutMs ends a run whose remote agent does not answer', async () => {
     const started = Date.now();
     const r = await (await client.agent('assistant')).run('hi');
     assert.equal(r.status, 'failed');
-    assert.equal(r.reason, 'remote agent timed out');
+    assert.equal(r.reason?.code, 'timeout');
+    assert.equal(r.reason?.detail, 'remote agent timed out');
     assert.ok(Date.now() - started < 5000);
   } finally {
     await client.close();

@@ -12,8 +12,10 @@ export type TaskState = 'submitted' | 'working' | 'completed' | 'failed' | 'canc
 export type Role = 'user' | 'agent';
 
 export interface MessageValue { messageId: string; role: Role; text: string; contextId?: string; taskId?: string }
-/** Run figures a task may carry in its `metadata`: token usage (ModelPort shape) and cost in US dollars. */
-export interface TaskRunMetadata { usage?: { prompt_tokens: number; completion_tokens: number; total_tokens?: number }; costUsd?: number }
+/** Key of the task `metadata` entry that carries the run figures, in the SDK language's names. */
+export const METADATA_KEY = 'agent-layers';
+/** Run figures a task carries in `metadata["agent-layers"]`: token usage and cost in US dollars. */
+export interface TaskRunMetadata { usage?: { inputTokens: number; outputTokens: number }; costUsd?: number }
 export interface TaskValue { id: string; contextId: string; state: TaskState; timestamp: string; answer?: string; status?: MessageValue; metadata?: TaskRunMetadata }
 
 /** JSON-RPC method names per version → the operation. */
@@ -87,19 +89,21 @@ export function taskWire(t: TaskValue, v: WireVersion): Record<string, unknown> 
     contextId: t.contextId,
     status: statusWire(t, v),
     ...(t.answer !== undefined ? { artifacts: [artifactWire(t, v)] } : {}),
-    ...(t.metadata && Object.keys(t.metadata).length ? { metadata: t.metadata } : {}),
+    ...(t.metadata && Object.keys(t.metadata).length ? { metadata: { [METADATA_KEY]: t.metadata } } : {}),
   };
 }
 
 const count = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 
-/** Usage and cost from a task's `metadata`, when the remote agent reports them; malformed values are ignored. */
+/**
+ * Usage and cost from `metadata["agent-layers"]` of a task (`metadata` is the task's whole bag), when the remote agent
+ * reports them; malformed values are ignored.
+ */
 export function runMetadata(raw: unknown): TaskRunMetadata {
-  const m = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const bag = raw && typeof raw === 'object' ? (raw as Record<string, unknown>)[METADATA_KEY] : undefined;
+  const m = bag && typeof bag === 'object' ? bag as Record<string, unknown> : {};
   const u = m.usage && typeof m.usage === 'object' ? m.usage as Record<string, unknown> : undefined;
-  const usage = u && count(u.prompt_tokens) && count(u.completion_tokens)
-    ? { prompt_tokens: u.prompt_tokens, completion_tokens: u.completion_tokens, total_tokens: count(u.total_tokens) ? u.total_tokens : u.prompt_tokens + u.completion_tokens }
-    : undefined;
+  const usage = u && count(u.inputTokens) && count(u.outputTokens) ? { inputTokens: u.inputTokens, outputTokens: u.outputTokens } : undefined;
   return { ...(usage ? { usage } : {}), ...(count(m.costUsd) ? { costUsd: m.costUsd } : {}) };
 }
 
@@ -118,17 +122,29 @@ export function streamEvent(kind: 'task' | 'artifact' | 'status', t: TaskValue, 
   return v === A2A_VERSION ? { statusUpdate: body } : { kind: 'status-update', ...body, final: TERMINAL.includes(t.state) || INTERRUPTED.includes(t.state) };
 }
 
-/** Reads a send or get result of either version into a task, or a direct message reply. */
-export function readResult(result: unknown): { task?: TaskValue & { text: string }; message?: string } {
+/** Longest native state kept in `ext["a2a.state"]`. */
+const MAX_NATIVE_STATE = 64;
+
+/**
+ * Reads a send or get result of either version into a task, or a direct message reply. `raw` is the wire document
+ * (for mappings). A state this adapter does not know reads as `failed`, with the native value in `native`.
+ */
+export function readResult(result: unknown): { task?: TaskValue & { text: string; native?: string }; message?: string; raw?: unknown } {
   const r = result as Record<string, any> | undefined;
   if (!r || typeof r !== 'object') return {};
   const msg = r.message ?? (r.kind === 'message' ? r : undefined);
-  if (msg && !r.task && !r.status) return { message: partsText(msg.parts) };
+  if (msg && !r.task && !r.status) return { message: partsText(msg.parts), raw: msg };
   const t = r.task ?? r;
-  const state = stateOf(t?.status?.state);
-  if (typeof t?.id !== 'string' || !state) return {};
+  const rawState = t?.status?.state;
+  const known = stateOf(rawState);
+  if (typeof t?.id !== 'string' || (!known && typeof rawState !== 'string')) return {};
+  const state: TaskState = known ?? 'failed';
+  const native = known ? undefined : rawState.slice(0, MAX_NATIVE_STATE);
   const answer = (Array.isArray(t.artifacts) ? t.artifacts : []).map((a: Record<string, unknown>) => partsText(a?.parts)).filter(Boolean).join('\n');
   const statusText = partsText(t.status?.message?.parts);
   const metadata = runMetadata(t.metadata);
-  return { task: { id: t.id, contextId: String(t.contextId ?? ''), state, timestamp: String(t.status?.timestamp ?? ''), text: answer || statusText, ...(Object.keys(metadata).length ? { metadata } : {}) } };
+  return {
+    raw: t,
+    task: { id: t.id, contextId: String(t.contextId ?? ''), state, timestamp: String(t.status?.timestamp ?? ''), text: answer || statusText, ...(native !== undefined ? { native } : {}), ...(Object.keys(metadata).length ? { metadata } : {}) },
+  };
 }

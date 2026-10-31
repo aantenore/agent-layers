@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { defineLimits, limitValue, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type RunResult } from '@agent-layers/core';
+import { defineLimits, limitValue, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type RunResult, type TraceContext } from '@agent-layers/core';
 import {
   A2A_VERSION, ERRORS, getResult, LEGACY_VERSION, METHODS, partsText, sendResult, streamEvent, TERMINAL,
-  runMetadata, type TaskState, type TaskValue, type WireVersion,
+  type TaskRunMetadata, type TaskState, type TaskValue, type WireVersion,
 } from './wire.ts';
 
 /** Options of the inbound descriptor. */
@@ -44,18 +44,56 @@ class RpcError extends Error {
 
 const ACCEPTED_VERSIONS = ['1.0', '1', '0.3', '0.3.0'];
 /**
- * The owner of a task: an authenticated caller's kind and subject. Anonymous callers cannot be told apart, so an
+ * The owner of a task: an authenticated caller's kind and id. Anonymous callers cannot be told apart, so an
  * anonymous task is its own owner (keyed by its id): reachable only with its id, never by an authenticated caller.
  */
-const ownerOf = (ctx: InboundContext, taskId: string) => (ctx.identity ? `id:${ctx.identity.kind}:${ctx.identity.subject}` : `anon:${taskId}`);
+const ownerOf = (ctx: InboundContext, taskId: string) => (ctx.caller ? `id:${ctx.caller.kind}:${ctx.caller.id}` : `anon:${taskId}`);
 const isJson = (req: Request) => /^application\/json\s*(;|$)/i.test(req.headers.get('content-type') ?? '');
 const rpcResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-/** Run status → task state. A guard stop is a rejection; reasons stay inside the stack. */
+/**
+ * Run status and stop code → task state; nothing else of the reason is read, and it never leaves the stack. A run that
+ * was aborted is `canceled`; any other stop (a guard block, a denial, a limit) is a `rejected` task, since the stack
+ * refused to carry on and the caller did not cancel. A waiting run asks for authorization (`auth-required`) or, for any
+ * other code, for input (`input-required`).
+ */
 function stateOfRun(r: RunResult): TaskState {
-  if (r.status === 'completed') return 'completed';
-  if (r.status === 'stopped') return r.reason === 'aborted' ? 'canceled' : r.reason?.startsWith('guardrail:') ? 'rejected' : 'failed';
-  return 'failed';
+  switch (r.status) {
+    case 'completed': return 'completed';
+    case 'stopped': return r.reason?.code === 'aborted' ? 'canceled' : 'rejected';
+    case 'waiting': return r.reason?.code === 'needs_auth' ? 'auth-required' : 'input-required';
+    default: return 'failed';
+  }
+}
+
+/** Usage and cost of a run, in the language's names, for the task's `metadata["agent-layers"]`; absent parts are omitted. */
+function runFigures(r: RunResult): TaskRunMetadata {
+  const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+  return {
+    ...(r.usage && num(r.usage.inputTokens) && num(r.usage.outputTokens) ? { usage: { inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens } } : {}),
+    ...(num(r.costUsd) ? { costUsd: r.costUsd } : {}),
+  };
+}
+
+/** Status message per task state, fixed text apart from what the agent itself answered. */
+const SAID: Partial<Record<TaskState, (r: RunResult) => string>> = {
+  completed: (r) => r.output,
+  rejected: () => 'The request was refused.',
+  canceled: () => 'The task was canceled.',
+  'input-required': (r) => r.output || 'The agent needs more input.',
+  'auth-required': (r) => r.output || 'The agent needs authorization.',
+};
+
+/** Longest `traceparent` and `tracestate` copied from the request headers. */
+const MAX_TRACE = { parent: 128, state: 512 };
+
+/** The trace the request carried: the host's, else the W3C headers copied unchanged (nothing is parsed). */
+function traceOf(req: Request, ctx: InboundContext): TraceContext | undefined {
+  if (ctx.trace) return ctx.trace;
+  const parent = req.headers.get('traceparent');
+  if (!parent || parent.length > MAX_TRACE.parent) return undefined;
+  const state = req.headers.get('tracestate');
+  return { parent, ...(state && state.length <= MAX_TRACE.state ? { state } : {}) };
 }
 
 /**
@@ -129,29 +167,29 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
       }
 
       /** Starts the run of a task; resolves when it has finished. */
-      function start(agent: string, text: string, contextId: string, ctx: InboundContext): StoredTask {
+      function start(agent: string, text: string, contextId: string, ctx: InboundContext, trace: TraceContext | undefined): StoredTask {
         const id = randomUUID();
         const owner = ownerOf(ctx, id);
-        admit(!ctx.identity, owner);
+        admit(!ctx.caller, owner);
         const controller = new AbortController();
         const value: TaskValue = { id, contextId, state: 'working', timestamp: new Date().toISOString() };
         // The session log of a context belongs to one caller: the same contextId from another caller is another session.
         const sessionId = `a2a-${createHash('sha256').update(owner).digest('hex').slice(0, 16)}-${contextId}`;
         const done = host.run(agent, text, {
-          runId: id, sessionId, signal: controller.signal, ...(ctx.identity ? { identity: ctx.identity } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
+          runId: id, sessionId, signal: controller.signal, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(trace ? { trace } : {}),
         }).then((r) => {
           value.state = value.state === 'canceled' ? 'canceled' : stateOfRun(r);
           if (value.state === 'completed') value.answer = r.output;
           // Usage and cost travel in the task's metadata, so a calling stack can account for this run.
-          const metadata = runMetadata({ usage: r.usage, costUsd: r.costUsd });
+          const metadata = runFigures(r);
           if (Object.keys(metadata).length) value.metadata = metadata;
-          const said = value.state === 'completed' ? r.output : value.state === 'rejected' ? 'The request was refused by a guardrail.' : value.state === 'canceled' ? 'The task was canceled.' : 'The agent run failed.';
+          const said = SAID[value.state]?.(r) ?? 'The agent run failed.';
           value.status = { messageId: randomUUID(), role: 'agent', text: said, contextId, taskId: id };
         }, () => {
           value.state = value.state === 'canceled' ? 'canceled' : 'failed';
           value.status = { messageId: randomUUID(), role: 'agent', text: 'The agent run failed.', contextId, taskId: id };
         }).finally(() => { value.timestamp = new Date().toISOString(); stored.finishedAt = Date.now(); });
-        const stored: StoredTask = { value, owner, anonymous: !ctx.identity, controller, done };
+        const stored: StoredTask = { value, owner, anonymous: !ctx.caller, controller, done };
         tasks.set(id, stored);
         return stored;
       }
@@ -173,9 +211,9 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         return t;
       }
 
-      function stream(rpcId: Rpc['id'], agent: string, params: Rpc['params'], ctx: InboundContext, v: WireVersion): Response {
+      function stream(rpcId: Rpc['id'], agent: string, params: Rpc['params'], ctx: InboundContext, v: WireVersion, trace: TraceContext | undefined): Response {
         const { text, contextId } = readMessage(params);
-        const task = start(agent, text, contextId, ctx);
+        const task = start(agent, text, contextId, ctx, trace);
         const enc = new TextEncoder();
         const frame = (result: unknown) => enc.encode(`data: ${JSON.stringify({ jsonrpc: '2.0', id: rpcId, result })}\n\n`);
         const body = new ReadableStream<Uint8Array>({
@@ -208,14 +246,14 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
           switch (method.op) {
             case 'send': {
               const { text, contextId } = readMessage(msg.params);
-              const task = start(agent, text, contextId, ctx);
+              const task = start(agent, text, contextId, ctx, traceOf(req, ctx));
               const cfg = msg.params?.configuration ?? {};
               const immediate = v === A2A_VERSION ? cfg.returnImmediately === true : cfg.blocking === false;
               if (!immediate) await task.done;
               return rpcResponse({ jsonrpc: '2.0', id, result: sendResult(task.value, v) });
             }
             case 'stream':
-              return stream(id, agent, msg.params, ctx, v);
+              return stream(id, agent, msg.params, ctx, v, traceOf(req, ctx));
             case 'get':
               return rpcResponse({ jsonrpc: '2.0', id, result: getResult(owned(msg.params, ctx).value, v) });
             case 'cancel': {

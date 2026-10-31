@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { anySignal, contentText, defineLimits, isAbort, limitValue, timeoutSignal, traceHeaders, type CallContext, type LimitValue, type RunInput, type RunResult, type RuntimePort, type Stack } from '@agent-layers/core';
+import {
+  activeTrace, anySignal, ATTR, defineLimits, isAbort, limitValue, messageText, noMappings, timeoutSignal,
+  type CallContext, type LimitValue, type Mappings, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason,
+} from '@agent-layers/core';
 import { A2A_VERSION, INTERRUPTED, LEGACY_VERSION, messageWire, METHOD_OF, readResult, TERMINAL, type TaskState, type WireVersion } from './wire.ts';
 
 /** Options of the outbound descriptor: a remote A2A agent as the stack's runtime. */
@@ -52,23 +55,27 @@ const isLoopback = (hostname: string) => {
 /** Last user text of a run input: the message the remote agent receives. */
 function inputText(input: RunInput): string {
   if (typeof input === 'string') return input;
-  for (let i = input.messages.length - 1; i >= 0; i--) if (input.messages[i]!.role === 'user') return contentText(input.messages[i]!.content);
+  for (let i = input.messages.length - 1; i >= 0; i--) if (input.messages[i]!.role === 'user') return messageText(input.messages[i]);
   return '';
 }
 
-function runStatus(state: TaskState): Pick<RunResult, 'status' | 'reason'> {
-  if (state === 'completed') return { status: 'completed' };
-  if (state === 'canceled') return { status: 'stopped', reason: 'aborted' };
-  if (state === 'rejected') return { status: 'stopped', reason: 'remote agent rejected the task' };
-  if (INTERRUPTED.includes(state)) return { status: 'stopped', reason: `remote agent needs ${state === 'auth-required' ? 'authorization' : 'input'}` };
-  return { status: 'failed', reason: 'remote agent task failed' };
+/** Remote task state → run status and stop code (the reason is completed with `layer` and `by` by the caller). */
+function runStatus(state: TaskState): { status: RunResult['status']; code?: string } {
+  switch (state) {
+    case 'completed': return { status: 'completed' };
+    case 'canceled': return { status: 'stopped', code: 'aborted' };
+    case 'rejected': return { status: 'stopped', code: 'rejected' };
+    case 'input-required': return { status: 'waiting', code: 'needs_input' };
+    case 'auth-required': return { status: 'waiting', code: 'needs_auth' };
+    default: return { status: 'failed', code: 'error' };
+  }
 }
 
 /**
  * A remote agent, in any language, as the stack's runtime: each run is one A2A message to it. The caller's identity
  * travels as a token for `auth.audience` from the stack's credentials; a token is never logged or returned.
  */
-export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a'): RuntimePort {
+export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappings: Mappings = noMappings(name)): RuntimePort {
   const version: WireVersion = options.version ?? A2A_VERSION;
   const timeoutMs = limitValue(RUNTIME_LIMITS.timeoutMs, options.timeoutMs);
   const pollMs = limitValue(RUNTIME_LIMITS.pollMs, options.pollMs);
@@ -111,13 +118,17 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a'): Runt
     name,
     bind(stack: Stack, agent) {
       async function headers(ctx: CallContext): Promise<Record<string, string>> {
-        // The remote agent joins the run's trace (W3C Trace Context of the active span).
-        const out: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': version, ...options.headers, ...traceHeaders(stack.telemetry, ctx.trace) };
+        // The remote agent joins the run's trace: the active span's context, else the one the run started with.
+        const trace = activeTrace(stack.telemetry, ctx.trace);
+        const out: Record<string, string> = {
+          'content-type': 'application/json', accept: 'application/json', 'a2a-version': version, ...options.headers,
+          ...(trace ? { traceparent: trace.parent, ...(trace.state ? { tracestate: trace.state } : {}) } : {}),
+        };
         if (options.auth) {
           const provider = stack.ports.credentials;
           if (!provider) throw new Error('auth needs a credentials adapter');
           const token = await provider.token(options.auth.audience, {
-            ...(ctx.identity ? { identity: ctx.identity } : {}), ...(options.auth.scopes ? { scopes: options.auth.scopes } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}),
+            ...(ctx.caller ? { caller: ctx.caller } : {}), ...(options.auth.scopes ? { scopes: options.auth.scopes } : {}), ...(ctx.signal ? { signal: ctx.signal } : {}),
           });
           out.authorization = `Bearer ${token}`;
         }
@@ -141,24 +152,39 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a'): Runt
         async run(input, init = {}) {
           const ctx = stack.context({ ...init, agent: agent.name });
           const signal = anySignal(timeoutSignal(timeoutMs), ctx.signal) ?? new AbortController().signal;
-          return stack.telemetry.span('a2a.send', { 'agent.layer': 'harness', 'gen_ai.agent.name': agent.name, 'run.id': ctx.runId, 'a2a.version': version }, async (span) => {
+          const by = agent.name;
+          const ended = (reason: Omit<StopReason, 'layer' | 'by'>, status: RunResult['status'] = 'failed'): RunResult =>
+            ({ runId: ctx.runId, status, output: '', reason: { ...reason, layer: 'harness', by } });
+          return stack.telemetry.span('a2a.send', { [ATTR.layer]: 'harness', [ATTR.name]: agent.name, [ATTR.runId]: ctx.runId, 'a2a.version': version }, async (span) => {
             const message = messageWire({ messageId: randomUUID(), role: 'user', text: inputText(input), ...(ctx.sessionId ? { contextId: ctx.sessionId } : {}) }, version);
             try {
               let read = readResult(await call(METHOD_OF[version].send, { message }, ctx, signal));
-              if (read.message !== undefined) return { runId: ctx.runId, status: 'completed', output: read.message };
+              if (read.message !== undefined) return mappings.in(read.raw, { runId: ctx.runId, status: 'completed', output: read.message } satisfies RunResult);
               while (read.task && !TERMINAL.includes(read.task.state) && !INTERRUPTED.includes(read.task.state)) {
                 await new Promise((r) => setTimeout(r, pollMs));
                 signal.throwIfAborted();
                 read = readResult(await call(METHOD_OF[version].get, { id: read.task.id }, ctx, signal));
               }
-              if (!read.task) return { runId: ctx.runId, status: 'failed', output: '', reason: 'remote agent sent no task' };
-              span.setAttributes({ 'a2a.task.state': read.task.state });
-              const s = runStatus(read.task.state);
-              return { runId: ctx.runId, ...s, output: s.status === 'completed' ? read.task.text : '', ...read.task.metadata };
+              if (!read.task) return ended({ code: 'error', detail: 'remote agent sent no task' });
+              const task = read.task;
+              span.setAttributes({ 'a2a.task.state': task.native ?? task.state });
+              const s = runStatus(task.state);
+              const result: RunResult = {
+                runId: ctx.runId,
+                status: s.status,
+                // A failed or stopped task's text is the remote side's own wording: it stays out of the output.
+                output: s.status === 'completed' || s.status === 'waiting' ? task.text : '',
+                ...(s.code ? { reason: { code: s.code, layer: 'harness', by } } : {}),
+                ...(task.metadata?.usage ? { usage: task.metadata.usage } : {}),
+                ...(task.metadata?.costUsd !== undefined ? { costUsd: task.metadata.costUsd } : {}),
+                // A state this adapter does not know is a failure; the native value is kept for the operator.
+                ...(task.native !== undefined ? { ext: { 'a2a.state': task.native } } : {}),
+              };
+              return mappings.in(read.raw, result);
             } catch (err) {
-              if (ctx.signal?.aborted) return { runId: ctx.runId, status: 'stopped', output: '', reason: 'aborted' };
-              // A fixed reason: error text can carry URLs or credentials.
-              return { runId: ctx.runId, status: 'failed', output: '', reason: isAbort(err) ? 'remote agent timed out' : RUN_FAILED };
+              if (ctx.signal?.aborted) return ended({ code: 'aborted' }, 'stopped');
+              // A fixed detail: error text can carry URLs or credentials.
+              return isAbort(err) ? ended({ code: 'timeout', detail: 'remote agent timed out' }) : ended({ code: 'error', detail: RUN_FAILED });
             }
           });
         },

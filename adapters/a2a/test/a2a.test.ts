@@ -136,7 +136,7 @@ test('a remote A2A agent is the runtime of another stack, with the caller creden
       assert.equal(r.status, 'completed', version);
       assert.equal(r.output, 'pong');
       // Usage and cost reported by the remote stack in the task metadata.
-      assert.ok(r.usage && r.usage.prompt_tokens > 0, version);
+      assert.ok(r.usage && r.usage.inputTokens > 0, version);
       assert.ok(typeof r.costUsd === 'number' && r.costUsd > 0, version);
     } finally {
       await client.close();
@@ -155,7 +155,7 @@ test('a refused or unreachable remote agent is a failed run with a fixed reason'
   try {
     const r = await (await client.agent('assistant')).run('ping');
     assert.equal(r.status, 'failed');
-    assert.equal(r.reason, 'remote agent call failed');
+    assert.deepEqual(r.reason, { code: 'error', layer: 'harness', by: 'assistant', detail: 'remote agent call failed' });
     assert.ok(!JSON.stringify(r).includes('wrong-secret-token'));
   } finally {
     await client.close();
@@ -239,13 +239,13 @@ test('a card cannot redirect the caller credential: other origins are refused un
 });
 
 test('the remote agent receives the trace context of the run, and the task usage comes back', async () => {
-  const seen: (string | undefined)[] = [];
+  const seen: { traceparent?: string; tracestate?: string }[] = [];
   const remote = createServer(async (req, res) => {
     for await (const _ of req) { /* drain */ }
-    seen.push(req.headers.traceparent as string | undefined);
+    seen.push({ traceparent: req.headers.traceparent as string | undefined, tracestate: req.headers.tracestate as string | undefined });
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
       jsonrpc: '2.0', id: 1,
-      result: { task: { id: 't1', contextId: 'c1', status: { state: 'TASK_STATE_COMPLETED' }, artifacts: [{ artifactId: 'a', parts: [{ text: 'done' }] }], metadata: { usage: { prompt_tokens: 5, completion_tokens: 2 }, costUsd: 'not a number' } } },
+      result: { task: { id: 't1', contextId: 'c1', status: { state: 'TASK_STATE_COMPLETED' }, artifacts: [{ artifactId: 'a', parts: [{ text: 'done' }] }], metadata: { 'agent-layers': { usage: { inputTokens: 5, outputTokens: 2 }, costUsd: 'not a number' } } } },
     }));
   });
   await new Promise<void>((r) => remote.listen(0, '127.0.0.1', r));
@@ -255,10 +255,10 @@ test('the remote agent receives the trace context of the run, and the task usage
   }), { adapters: [runtimeAdapter] });
   try {
     const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
-    const r = await (await client.agent('assistant')).run('hi', { trace: { traceparent } });
+    const r = await (await client.agent('assistant')).run('hi', { trace: { parent: traceparent, state: 'vendor=1' } });
     assert.equal(r.output, 'done');
-    assert.deepEqual(seen, [traceparent]);
-    assert.deepEqual(r.usage, { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 });
+    assert.deepEqual(seen, [{ traceparent, tracestate: 'vendor=1' }]);
+    assert.deepEqual(r.usage, { inputTokens: 5, outputTokens: 2 });
     assert.equal(r.costUsd, undefined, 'a malformed cost is ignored');
   } finally {
     await client.close();

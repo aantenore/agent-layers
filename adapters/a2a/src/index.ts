@@ -78,7 +78,10 @@ export const runtimeAdapter = defineAdapter<'RuntimePort', A2ARuntimeOptions>({
     additionalProperties: false,
   },
   limits: RUNTIME_LIMITS,
-  create: (options, ctx) => createA2ARuntime(options, ctx.name),
+  // `a2a.state`: the remote task state the adapter does not know (the run is then failed).
+  ext: { produces: ['a2a.state'] },
+  mappingDefaults: { in: { shape: 'RunResult' } },
+  create: (options, ctx) => createA2ARuntime(options, ctx.name, ctx.mappings),
 });
 
 export const adapters = [channelAdapter, runtimeAdapter];
