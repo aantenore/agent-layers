@@ -149,7 +149,7 @@ endpoints.
 | `profile` | Default profile; `--profile` or `AGENT_LAYERS_PROFILE` override it |
 | `layers` | Base slots shared by all profiles |
 | `profiles.<name>` | `extends`, `tier`, `requires`, `layers` (only what differs), `policy`, `pipeline`, `description` |
-| `policy` | Local authorization rules `{ effect: allow\|ask\|deny, tools?, risk?, when?: { roles, scopes, kind } }`, first match wins |
+| `policy` | Local authorization rules `{ effect: allow\|ask\|deny, tools?, risk?, when?: { roles, scopes, kind, authenticated } }`, first match wins; `authenticated: true` matches any verified caller, `false` only an anonymous one |
 | `pipeline.knowledge` | `k`, `maxChars`, `mode`: `system` (default), `user`, `tools` (expose sources as tools), `off` |
 | `pipeline.cacheTtlMs`, `pipeline.approvalTimeoutMs` | Cache lifetime; how long a tool call waits for an approval |
 | `agents.<name>` | `file` (Markdown with front matter `model`, `tools`, `knowledge`; body = instructions) or inline `instructions`, `model`, `tools`, `knowledge`, `params` |

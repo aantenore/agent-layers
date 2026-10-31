@@ -1,7 +1,7 @@
 import { defineAdapter, evaluatePolicy, PORT_VERSIONS, subjectOf, type AuthorizationPort, type PolicyRule } from '@agent-layers/core';
 
-/** Policy rule plus `when.authenticated`: true matches only a verified subject, false only an anonymous one. */
-export type RulesAuthorizationRule = Omit<PolicyRule, 'when'> & { when?: NonNullable<PolicyRule['when']> & { authenticated?: boolean } };
+/** A policy rule of the core; `when.authenticated: true` matches only a verified subject, `false` only an anonymous one. */
+export type RulesAuthorizationRule = PolicyRule;
 
 export interface RulesAuthorizationOptions {
   /** Rules in order; the first one that matches decides. */
@@ -19,9 +19,7 @@ export function createRulesAuthorization(options: RulesAuthorizationOptions, nam
   return {
     name,
     async evaluate(req) {
-      const subject = subjectOf(req);
-      const applicable = options.rules.filter((r) => r.when?.authenticated === undefined || r.when.authenticated === (subject.identity !== undefined));
-      switch (evaluatePolicy(applicable, subject)) {
+      switch (evaluatePolicy(options.rules, subjectOf(req))) {
         case 'allow': return { decision: true, context: { reason: 'allowed by rule' } };
         case 'deny': return { decision: false, context: { reason: 'denied by rule' } };
         case 'ask': return { decision: false, context: { reason: 'approval required' } };

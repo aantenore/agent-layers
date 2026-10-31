@@ -52,7 +52,12 @@ const policyRule: JsonSchema = {
     risk: { type: 'array', items: { enum: ['read', 'write', 'exec'] } },
     when: {
       type: 'object',
-      properties: { roles: { type: 'array', items: { type: 'string' } }, scopes: { type: 'array', items: { type: 'string' } }, kind: { enum: ['user', 'agent'] } },
+      properties: {
+        roles: { type: 'array', items: { type: 'string' } },
+        scopes: { type: 'array', items: { type: 'string' } },
+        kind: { enum: ['user', 'agent'] },
+        authenticated: { type: 'boolean', description: 'true: any verified caller; false: only an anonymous caller.' },
+      },
       additionalProperties: false,
     },
   },

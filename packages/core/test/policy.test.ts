@@ -44,3 +44,11 @@ test('anonymous calls never match agent, role or scope rules: locally and throug
     assert.equal((await tools(opts).callTool('db__write', {}, ctx({ identity: agent }))).isError, undefined, 'agent allowed');
   }
 });
+
+test('when.authenticated matches verified callers or anonymous ones only', () => {
+  const rules: PolicyRule[] = [{ effect: 'deny', when: { authenticated: false } }, { effect: 'allow', when: { authenticated: true } }];
+  assert.equal(evaluatePolicy(rules, { tool: 't', risk: 'read' }), 'deny');
+  assert.equal(evaluatePolicy(rules, { tool: 't', risk: 'read', identity: { subject: 'u', kind: 'user' } }), 'allow');
+  assert.equal(evaluatePolicy(rules, { tool: 't', risk: 'read', identity: { subject: 'svc', kind: 'agent' } }), 'allow');
+  assert.equal(evaluatePolicy([{ effect: 'allow', when: { authenticated: true, roles: ['admin'] } }], { tool: 't', risk: 'read', identity: { subject: 'u', kind: 'user' } }), undefined);
+});

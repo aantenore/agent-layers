@@ -69,3 +69,10 @@ test('published JSON Schemas are in sync with the TypeScript definition', () => 
     assert.equal(readFileSync(new URL(f, import.meta.url), 'utf8'), expected, `${f} is stale: run npm run gen:schema`);
   }
 });
+
+test('policy rules accept when.authenticated in the base config and in profiles', () => {
+  const rules = [{ effect: 'allow', risk: ['read'], when: { authenticated: true } }, { effect: 'deny' }];
+  const c = parseConfig(JSON.stringify({ policy: rules, profiles: { p: { policy: rules } } }), { profile: 'p' });
+  assert.deepEqual(c.policy, rules);
+  assert.throws(() => parseConfig(JSON.stringify({ policy: [{ effect: 'allow', when: { authenticated: 'yes' } }] })), ConfigError);
+});

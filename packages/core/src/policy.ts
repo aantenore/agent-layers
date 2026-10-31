@@ -11,7 +11,8 @@ export interface PolicyRule {
   /** Tool name globs (prefixed names); any tool when omitted. */
   tools?: string[];
   risk?: ToolRisk[];
-  when?: { roles?: string[]; scopes?: string[]; kind?: 'user' | 'agent' };
+  /** Conditions on the caller. `authenticated: true` matches any verified identity, `false` only an anonymous caller. */
+  when?: { roles?: string[]; scopes?: string[]; kind?: 'user' | 'agent'; authenticated?: boolean };
 }
 
 export interface PolicySubject { tool: string; risk: ToolRisk; identity?: Identity }
@@ -27,6 +28,7 @@ function ruleMatches(r: PolicyRule, s: PolicySubject): boolean {
   const w = r.when;
   if (!w) return true;
   const id = s.identity;
+  if (w.authenticated !== undefined && w.authenticated !== (id !== undefined)) return false;
   if (w.kind && id?.kind !== w.kind) return false;
   if (w.roles && !w.roles.some((x) => id?.roles?.includes(x))) return false;
   if (w.scopes && !w.scopes.some((x) => id?.scopes?.includes(x))) return false;

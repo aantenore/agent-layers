@@ -769,6 +769,10 @@
                 "user",
                 "agent"
               ]
+            },
+            "authenticated": {
+              "type": "boolean",
+              "description": "true: any verified caller; false: only an anonymous caller."
             }
           },
           "additionalProperties": false
