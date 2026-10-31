@@ -258,18 +258,21 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | Setting | Default | Accepted | Safe range | On production | Why |
 |---|---|---|---|---|---|
 | `options.timeoutMs` | `10000` ms | 1–∞ or unbounded | 1–120000 | fail if unbounded; warn outside safe range | Bounds one check, so a slow guard service cannot hold a run. |
+| `options.maxResponseBytes` | `1048576` bytes | 1–∞ or unbounded | 1–16777216 | fail if unbounded; warn outside safe range | Bounds the verdict read from the guard service, so a broken or hostile one cannot exhaust memory. |
 
 ### `llm-guard` · GuardPort
 
 | Setting | Default | Accepted | Safe range | On production | Why |
 |---|---|---|---|---|---|
 | `options.timeoutMs` | `30000` ms | 1–∞ or unbounded | 1–120000 | fail if unbounded; warn outside safe range | Bounds one check, so a slow scanner cannot hold a run. |
+| `options.maxResponseBytes` | `1048576` bytes | 1–∞ or unbounded | 1–16777216 | fail if unbounded; warn outside safe range | Bounds the scan result read, so a broken or hostile service cannot exhaust memory. |
 
 ### `presidio` · GuardPort
 
 | Setting | Default | Accepted | Safe range | On production | Why |
 |---|---|---|---|---|---|
 | `options.timeoutMs` | `10000` ms | 1–∞ or unbounded | 1–120000 | fail if unbounded; warn outside safe range | Bounds one check, so a slow analyzer cannot hold a run. |
+| `options.maxResponseBytes` | `1048576` bytes | 1–∞ or unbounded | 1–16777216 | fail if unbounded; warn outside safe range | Bounds the analyzer and anonymizer answers read, so a broken or hostile service cannot exhaust memory. |
 
 ### `a2a` · ChannelPort
 

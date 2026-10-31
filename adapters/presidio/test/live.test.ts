@@ -29,5 +29,5 @@ test('live: operators shape the replacement, block mode refuses', live, async ()
     .check({ stage: 'input', text, agent: 'a', runId: 'r' });
   assert.deepEqual([redacted.action, redacted.text], ['redact', 'Write to [PII]']);
   const blocked = await createPresidioGuard({ analyzerUrl, entities, action: 'block' }).check({ stage: 'output', text, agent: 'a', runId: 'r' });
-  assert.deepEqual(blocked, { action: 'block', reason: 'PII detected: EMAIL_ADDRESS' });
+  assert.deepEqual(blocked, { action: 'block', reason: 'PII detected: EMAIL_ADDRESS', labels: ['pii'], ext: { 'presidio.entities': ['EMAIL_ADDRESS'] } });
 });

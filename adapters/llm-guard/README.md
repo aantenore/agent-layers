@@ -10,8 +10,16 @@ planted in tool results.
 
 Fails closed: an unreachable service, a timeout, an unexpected body or a rejected token gives a `block` with the reason
 `llm-guard unavailable: <cause>`. A missing token answers HTTP 403 and a wrong one HTTP 401; both read
-`authentication failed`. The cause is one of `HTTP <status>`, `timeout`, `invalid response`, `network error`;
+`authentication failed`. The cause is one of `HTTP <status>`, `timeout`, `response too large`, `invalid response`,
+`network error` (a failing label mapping: `llm-guard: label mapping failed`);
 error text and the token never appear in reasons, and URLs with credentials are rejected at creation.
+
+Verdicts that name scanners carry `labels` from the guard label vocabulary and the scanner names under
+`ext["llm-guard.scanners"]`. Scanner names become labels through `in` mapping rules on `GuardVerdict` (source
+`{ "scanners": [...] }`): by default `PromptInjection` and `InvisibleText` → `injection`, `Secrets` → `secret`,
+`Anonymize` and `Sensitive` → `pii`, `Toxicity` → `toxicity`, the `Ban*`, `Code`, `Regex` and `MaliciousURLs` scanners
+→ `policy`, anything else → `other`. Replace them per guard with `mappings.guardrails.<name>.in`; labels the stack's
+vocabulary does not know become `other`.
 
 Some scanners (`Secrets`, `Anonymize`) report the result as invalid but return the text with the finding replaced. List
 them in `sanitizeScanners` to apply that text instead of blocking; if any other scanner fails too, the text is blocked.
@@ -31,8 +39,11 @@ downloads a model and takes a few minutes).
 | `onError` | `"block"` \| `"allow"` | `"block"` | Fail closed or open when the service fails |
 | `headers` | object | none | Extra request headers |
 | `timeoutMs` | integer | 30000 | Per-request timeout (scanners run models) |
+| `maxResponseBytes` | integer | 1048576 | Largest answer read; a larger one is a failure (`onError`) |
 
-Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production tier.
+Limits accept `${env:NAME}`; `timeoutMs` and `maxResponseBytes` also accept `"unbounded"`, which `agent-layers check`
+fails on the production tier. The answer carries the sanitized text: raise `maxResponseBytes` for texts larger than
+about 1 MiB.
 Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 ```json

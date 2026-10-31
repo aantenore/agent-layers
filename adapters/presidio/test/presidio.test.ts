@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { createMappings, Vocabularies, type MappingFn } from '@agent-layers/core';
 import { createPresidioGuard, type PresidioOptions } from '../src/index.ts';
 import { mockPresidio, type MockPresidio } from './mock-presidio.ts';
 
@@ -17,15 +18,34 @@ test('allows text without findings and skips the anonymizer', async () => {
   assert.deepEqual(presidio.calls.map((c) => c.path), ['/analyze']);
 });
 
-test('redacts through the anonymizer and names entity types only', async () => {
+test('redacts through the anonymizer; labels from entity types, native types under ext', async () => {
   const v = await guard().check(input('write to jane@example.com now'));
-  assert.deepEqual(v, { action: 'redact', text: 'write to <EMAIL_ADDRESS> now', reason: 'PII redacted: EMAIL_ADDRESS' });
+  assert.deepEqual(v, { action: 'redact', text: 'write to <EMAIL_ADDRESS> now', reason: 'PII redacted: EMAIL_ADDRESS', labels: ['pii'], ext: { 'presidio.entities': ['EMAIL_ADDRESS'] } });
+});
+
+test('label mappings are replaceable; unknown labels become other; a failing mapping blocks', async () => {
+  const mappings = createMappings('guardrails.pii', { in: [{ from: '/entities', to: '/labels', map: { EMAIL_ADDRESS: 'pii.contact' } }] });
+  const custom = guard({ action: 'block' });
+  assert.deepEqual((await custom.check(input('a@b.co'))).labels, ['pii']);
+  const added = createPresidioGuard({ analyzerUrl: presidio.analyzerUrl, action: 'block' }, { mappings, vocabularies: () => new Vocabularies([{ guardLabel: { add: { 'pii.contact': { like: 'pii' } } } }]) });
+  assert.deepEqual((await added.check(input('a@b.co'))).labels, ['pii.contact']);
+  const unknown = createPresidioGuard({ analyzerUrl: presidio.analyzerUrl, action: 'block' }, { mappings });
+  assert.deepEqual((await unknown.check(input('a@b.co'))).labels, ['other'], 'not in the vocabulary: other');
+  const boom: MappingFn = () => { throw new Error('a@b.co'); };
+  const failing = createPresidioGuard({ analyzerUrl: presidio.analyzerUrl, action: 'block' }, { mappings: createMappings('guardrails.pii', { in: [{ fn: './m.ts#boom' }] }, { fns: new Map([['./m.ts#boom', boom]]) }) });
+  assert.deepEqual(await failing.check(input('a@b.co')), { action: 'block', reason: 'presidio: label mapping failed' });
+});
+
+test('entity types that are not identifier-like stay out of reasons and ext', async () => {
+  const fetch = async () => Response.json([{ entity_type: 'jane@example.com leaked', start: 0, end: 4, score: 1 }, { entity_type: 'CUSTOM_ID', start: 0, end: 4, score: 1 }]);
+  const v = await createPresidioGuard({ analyzerUrl: 'http://x', action: 'block' }, { fetch }).check(input('hello'));
+  assert.deepEqual(v, { action: 'block', reason: 'PII detected: CUSTOM_ID', labels: ['other'], ext: { 'presidio.entities': ['CUSTOM_ID'] } });
 });
 
 test('block action refuses text with findings and never calls the anonymizer', async () => {
   presidio.calls.length = 0;
   const v = await guard({ action: 'block' }).check(input('jane@example.com'));
-  assert.deepEqual(v, { action: 'block', reason: 'PII detected: EMAIL_ADDRESS' });
+  assert.deepEqual(v, { action: 'block', reason: 'PII detected: EMAIL_ADDRESS', labels: ['pii'], ext: { 'presidio.entities': ['EMAIL_ADDRESS'] } });
   assert.ok(!presidio.calls.some((c) => c.path === '/anonymize'));
 });
 

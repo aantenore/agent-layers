@@ -1,4 +1,4 @@
-import { defineAdapter, GUARD_STAGES, limitProperties, limitValue, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict, type LimitValue } from '@agent-layers/core';
+import { CORE_VOCABULARIES, createMappings, defineAdapter, GUARD_STAGES, limitProperties, limitValue, MappingError, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict, type LimitValue, type MappingRule, type Mappings, type Vocabularies } from '@agent-layers/core';
 import { assertPlainUrl, failure, InvalidResponseError, postJson, trimSlash, type FetchLike, type HttpOptions } from './http.ts';
 import { LIMITS } from './limits.ts';
 
@@ -25,13 +25,51 @@ export interface PresidioOptions {
   headers?: Record<string, string>;
   /** Per-request timeout in milliseconds (default 10000). */
   timeoutMs?: LimitValue;
+  /** Largest response body read, in bytes (default 1048576); a larger one counts as a failure (`onError`). */
+  maxResponseBytes?: LimitValue;
 }
 
-export interface PresidioDeps { fetch?: FetchLike; name?: string }
+export interface PresidioDeps {
+  fetch?: FetchLike;
+  name?: string;
+  /** Entity types → labels (`in` rules on the GuardVerdict, source `{ entities }`). Default: `LABEL_RULES`. */
+  mappings?: Mappings;
+  /** The stack's vocabularies, read at each check: labels it does not know become `other`. Default: core values. */
+  vocabularies?: () => Vocabularies | undefined;
+}
 
 interface Finding { entity_type: string; start: number; end: number; score: number }
 
-const entityTypes = (found: readonly Finding[]) => [...new Set(found.map((f) => f.entity_type))].join(', ');
+/** Entity types found, as `ext["presidio.entities"]`. */
+export const ENTITIES_KEY = 'presidio.entities';
+
+/** Presidio's predefined entity types, all personal data. */
+const PII_ENTITIES = [
+  'PERSON', 'EMAIL_ADDRESS', 'PHONE_NUMBER', 'CREDIT_CARD', 'IBAN_CODE', 'IP_ADDRESS', 'LOCATION', 'NRP', 'DATE_TIME',
+  'MEDICAL_LICENSE', 'URL', 'CRYPTO', 'US_SSN', 'US_PASSPORT', 'US_DRIVER_LICENSE', 'US_ITIN', 'US_BANK_NUMBER', 'UK_NHS',
+  'UK_NINO', 'ES_NIF', 'ES_NIE', 'IT_FISCAL_CODE', 'IT_DRIVER_LICENSE', 'IT_VAT_CODE', 'IT_PASSPORT', 'IT_IDENTITY_CARD',
+  'PL_PESEL', 'SG_NRIC_FIN', 'SG_UEN', 'AU_ABN', 'AU_ACN', 'AU_TFN', 'AU_MEDICARE', 'IN_PAN', 'IN_AADHAAR',
+  'IN_VEHICLE_REGISTRATION', 'IN_VOTER', 'IN_PASSPORT', 'FI_PERSONAL_IDENTITY_CODE',
+];
+
+/**
+ * Default entity type → label rules, replaceable through the stack's `mappings.guardrails.<name>.in`. Unlisted types
+ * (custom recognizers) are `other`.
+ */
+export const LABEL_RULES: readonly MappingRule[] = Object.freeze([
+  { from: '/entities', to: '/labels', map: { ...Object.fromEntries(PII_ENTITIES.map((e) => [e, 'pii'])), '*': 'other' } },
+]);
+
+/** Entity types fit for a reason and `ext`: identifier-like names only, deduplicated, at most 64. */
+const entityTypes = (found: readonly Finding[]) =>
+  [...new Set(found.map((f) => f.entity_type))].filter((t) => typeof t === 'string' && /^[\w.-]{1,64}$/.test(t)).slice(0, 64);
+
+/** Labels of a mapped verdict: known values of the vocabulary (unknown ones become `other`), deduplicated. */
+function labelsOf(value: unknown, vocab: Vocabularies): GuardVerdict['labels'] {
+  if (!Array.isArray(value)) return undefined;
+  const out = [...new Set(value.map((l) => vocab.accept('guardLabel', l)).filter((l): l is string => !!l))];
+  return out.length ? out : undefined;
+}
 
 /** Factory: PII detection with the Presidio analyzer, rewriting with the anonymizer. */
 export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps = {}): GuardPort {
@@ -40,10 +78,15 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
   assertPlainUrl(options.analyzerUrl, 'presidio analyzerUrl');
   if (options.anonymizerUrl) assertPlainUrl(options.anonymizerUrl, 'presidio anonymizerUrl');
   const name = deps.name ?? 'presidio';
+  const mappings = deps.mappings ?? createMappings(`guardrails.${name}`, { in: LABEL_RULES });
+  const vocab = (): Vocabularies => {
+    try { return deps.vocabularies?.() ?? CORE_VOCABULARIES; } catch { return CORE_VOCABULARIES; }
+  };
   const analyzer = `${trimSlash(options.analyzerUrl)}/analyze`;
   const anonymizer = options.anonymizerUrl ? `${trimSlash(options.anonymizerUrl)}/anonymize` : undefined;
   const http: HttpOptions = {
     timeoutMs: limitValue(LIMITS.timeoutMs, options.timeoutMs),
+    maxResponseBytes: limitValue(LIMITS.maxResponseBytes, options.maxResponseBytes),
     ...(options.headers ? { headers: options.headers } : {}),
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
   };
@@ -58,14 +101,21 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
     if (!Array.isArray(found)) throw new InvalidResponseError('presidio analyzer');
     const findings = found as Finding[];
     if (!findings.length) return { action: 'allow' };
-    if (action === 'block') return { action: 'block', reason: `PII detected: ${entityTypes(findings)}` };
+    const types = entityTypes(findings);
+    /** The verdict with labels from the entity types (through the mappings) and the types under `ext`. */
+    const described = (verdict: GuardVerdict): GuardVerdict => {
+      const mapped = mappings.in({ entities: types }, verdict) as GuardVerdict;
+      const labels = labelsOf(mapped?.labels, vocab());
+      return { ...verdict, ...(labels ? { labels } : {}), ...(types.length ? { ext: { [ENTITIES_KEY]: types } } : {}) };
+    };
+    if (action === 'block') return described({ action: 'block', reason: `PII detected: ${types.join(', ')}` });
     const res = await postJson(anonymizer!, {
       text,
       analyzer_results: findings.map(({ entity_type, start, end, score }) => ({ entity_type, start, end, score })),
       ...(options.operators ? { anonymizers: options.operators } : {}),
     }, 'presidio anonymizer', http, signal) as { text?: unknown } | null;
     if (typeof res?.text !== 'string') throw new InvalidResponseError('presidio anonymizer');
-    return { action: 'redact', text: res.text, reason: `PII redacted: ${entityTypes(findings)}` };
+    return described({ action: 'redact', text: res.text, reason: `PII redacted: ${types.join(', ')}` });
   }
 
   return {
@@ -78,7 +128,8 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
         return await inspect(text, opts?.signal);
       } catch (err) {
         if (opts?.signal?.aborted) throw err;
-        return (options.onError ?? 'block') === 'allow' ? { action: 'allow' } : { action: 'block', reason: `presidio unavailable: ${failure(err)}` };
+        if ((options.onError ?? 'block') === 'allow') return { action: 'allow' };
+        return { action: 'block', reason: err instanceof MappingError ? 'presidio: label mapping failed' : `presidio unavailable: ${failure(err)}` };
       }
     },
   };
@@ -106,13 +157,15 @@ export const adapter = defineAdapter<'GuardPort', PresidioOptions>({
       stages: { type: 'array', minItems: 1, items: { enum: [...GUARD_STAGES] } },
       onError: { enum: ['block', 'allow'] },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
-      ...limitProperties(LIMITS, { timeoutMs: 'Time limit per request' }),
+      ...limitProperties(LIMITS, { timeoutMs: 'Time limit per request', maxResponseBytes: 'Largest response body read; a larger one counts as a failure' }),
     },
     required: ['analyzerUrl'],
     additionalProperties: false,
   },
   limits: LIMITS,
-  create: (options, ctx) => createPresidioGuard(options, { name: ctx.name }),
+  ext: { produces: [ENTITIES_KEY] },
+  mappingDefaults: { in: { shape: 'GuardVerdict', rules: LABEL_RULES } },
+  create: (options, ctx) => createPresidioGuard(options, { name: ctx.name, mappings: ctx.mappings, ...(ctx.stack ? { vocabularies: () => ctx.stack?.().vocabularies } : {}) }),
 });
 
 export const adapters = [adapter];

@@ -6,7 +6,9 @@ Scans text at any guard stage for emails, phone numbers, IBANs, card numbers, AP
 IBANs are redacted only when the mod-97 checksum holds and cards only when they pass the Luhn check, so ordinary numbers
 are left alone. PII and secrets are replaced by `[EMAIL]`, `[PHONE]`, `[IBAN]`, `[CARD]` or `[SECRET]`, or block the
 text with `piiAction: "block"`; injection phrases always block. The verdict `reason` names the detectors that fired,
-never the matched values.
+never the matched values. Verdicts also carry `labels` (`pii` for email, phone, IBAN and card, `secret` for API keys,
+`injection`; a custom rule's `label`, `other` by default or when the stack's vocabulary does not know it) and the
+names of the rules that decided under `ext["regex-guard.rules"]`.
 
 Pattern matching is a cheap first line of defence, not a classifier: phrases such as "you are now a ..." can also
 appear in harmless text, and obfuscated PII is not detected.
@@ -18,7 +20,7 @@ appear in harmless text, and obfuscated PII is not detected.
 | `detect` | string[] | all | Subset of `email`, `phone`, `iban`, `card`, `apiKey`, `injection` |
 | `piiAction` | `"redact"` \| `"block"` | `"redact"` | Action for email, phone, IBAN, card and apiKey hits |
 | `stages` | string[] | all | Stages the guard runs at: `input`, `output`, `tool_args`, `tool_result` |
-| `custom` | object[] | `[]` | Extra rules `{ name, pattern, flags?, action }`; a redacted match becomes `[NAME]` |
+| `custom` | object[] | `[]` | Extra rules `{ name, pattern, flags?, action, label? }`; a redacted match becomes `[NAME]` |
 
 ```json
 {

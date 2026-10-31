@@ -25,7 +25,7 @@ test('live: llm-guard passes GuardPort conformance', live, async () => {
 test('live: secrets block by default, the output endpoint works without a prompt of its own', live, async () => {
   const guard = createLlmGuard({ url, token });
   const v = await guard.check(at('input', 'The deploy uses AWS key AKIAIOSFODNN7EXAMPLE for the bucket.'));
-  assert.deepEqual(v, { action: 'block', reason: 'llm-guard: Secrets' });
+  assert.deepEqual(v, { action: 'block', reason: 'llm-guard: Secrets', labels: ['secret'], ext: { 'llm-guard.scanners': ['Secrets'] } });
   assert.deepEqual(await guard.check(at('output', 'Paris is the capital of France.')), { action: 'allow' });
 });
 

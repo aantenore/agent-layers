@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AdapterRegistry, noopTelemetry } from '@agent-layers/core';
+import { AdapterRegistry, limitFindings, limitList, noopTelemetry } from '@agent-layers/core';
 import { adapter, createLlmGuard } from '../src/index.ts';
+import { LIMITS } from '../src/limits.ts';
 
 const ctx = { name: 'llm-guard', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
 const base = { url: 'http://x' };
@@ -23,7 +24,15 @@ test('limits from ${env:...} are coerced to numbers; out-of-range values are rej
   const registry = new AdapterRegistry().register(adapter);
   await registry.create('GuardPort', 'llm-guard', { ...base, timeoutMs: '2500' }, ctx);
   await registry.create('GuardPort', 'llm-guard', { ...base, timeoutMs: 'unbounded' }, ctx);
+  await registry.create('GuardPort', 'llm-guard', { ...base, maxResponseBytes: '2048' }, ctx);
   for (const bad of [0, -5, 'soon']) {
     await assert.rejects(registry.create('GuardPort', 'llm-guard', { ...base, timeoutMs: bad }, ctx), /timeoutMs/, String(bad));
+    await assert.rejects(registry.create('GuardPort', 'llm-guard', { ...base, maxResponseBytes: bad }, ctx), /maxResponseBytes/, String(bad));
   }
+});
+
+test('the production tier fails an unbounded response size; the default is 1 MiB', () => {
+  const findings = limitFindings(limitList(LIMITS), { options: { ...base, maxResponseBytes: 'unbounded' } }, 'production');
+  assert.ok(findings.some((f) => f.path === 'options.maxResponseBytes' && f.severity === 'fail'));
+  assert.equal(LIMITS.maxResponseBytes.default, 1_048_576);
 });

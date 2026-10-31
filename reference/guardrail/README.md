@@ -27,13 +27,13 @@ make down LAYER=guardrail
 Any object with `name` and `check(input) -> verdict` is a guard:
 
 ```ts
-interface GuardInput { stage: 'input' | 'output' | 'tool_args' | 'tool_result'; text: string; agent: string; runId: string; tool?: string; subject?: Omit<Identity, 'token'> }
-interface GuardVerdict { action: 'allow' | 'block' | 'redact'; text?: string; reason?: string }
+interface GuardCheck { stage: 'input' | 'output' | 'tool_args' | 'tool_result'; text: string; agent: string; runId: string; tool?: string; caller?: PublicCaller; ext?: Ext }
+interface GuardVerdict { action: 'allow' | 'block' | 'redact'; text?: string; labels?: GuardLabel[]; reason?: string; ext?: Ext }
 ```
 
-Over HTTP, `POST {url}` with a `GuardInput` body answers a `GuardVerdict`, so any technology can sit behind a small shim (`type: http`).
+Over HTTP, `POST {url}` with a `GuardCheck` body answers a `GuardVerdict`, so any technology can sit behind a small shim (`type: http`).
 
-Effects: `block` on `input` or `output` ends the run `stopped` with reason `guardrail:<guard>:<stage>`; on `tool_args` it denies the call; on `tool_result` the model gets an error instead of the result. `redact` rewrites the text. A guard that fails counts as `block` unless `onError: allow`.
+Effects: `block` on `input` or `output` ends the run `stopped` with reason `{ code: "guard_block", layer: "guardrail", by: <guard>, stage }`; on `tool_args` it denies the call; on `tool_result` the model gets an error instead of the result. `redact` rewrites the text. A guard that fails counts as `block` unless `onError: allow`. `labels` say what was found (`pii`, `secret`, `injection`, `toxicity`, `policy`, `other`, plus values the stack config adds); native names (Presidio entity types, LLM Guard scanners) go under `ext`. `reason` is free text, never parsed.
 
 ## Use it
 
@@ -53,7 +53,7 @@ Effects: `block` on `input` or `output` ends the run `stopped` with reason `guar
 
 Replace a reference by changing the `type` (or by registering a new one with `registry.guards.set(...)` in a plugin). Options:
 
-- [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) (Apache-2.0): run it as a service and put a shim in front that maps `GuardInput` to its check API; use `type: http`.
+- [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) (Apache-2.0): run it as a service and put a shim in front that maps `GuardCheck` to its check API; use `type: http`.
 - [Guardrails AI](https://github.com/guardrails-ai/guardrails) (Apache-2.0): same, through its server (`guardrails start`) behind a shim.
 - [IBM Granite Guardian](https://github.com/ibm-granite/granite-guardian) (Apache-2.0) served by Ollama: a small guard that sends the text to the model and maps its yes/no risk answer to `allow`/`block`.
 - Llama Guard is not OSI-licensed (Llama community license): not used as a reference.
@@ -68,9 +68,9 @@ const failures = await checkGuard(myGuard, { benign: 'What is the capital of Fra
 
 ## Contract
 
-Provided: `Guard.check(GuardInput) -> GuardVerdict`; JSON Schemas [`guard-request.json`](../../spec/schemas/guard-request.json) and [`guard-verdict.json`](../../spec/schemas/guard-verdict.json). Env: `PRESIDIO_ANALYZER_URL` (5002), `PRESIDIO_ANONYMIZER_URL` (5001), `LLM_GUARD_URL` (8000), `LLM_GUARD_TOKEN`.
+Provided: `GuardPort.check(GuardCheck) -> GuardVerdict`; JSON Schemas [`guard-check.json`](../../spec/schemas/guard-check.json) and [`guard-verdict.json`](../../spec/schemas/guard-verdict.json). Env: `PRESIDIO_ANALYZER_URL` (5002), `PRESIDIO_ANONYMIZER_URL` (5001), `LLM_GUARD_URL` (8000), `LLM_GUARD_TOKEN`.
 
-`GuardInput.subject` is the caller's identity without its token: an object `{ subject, kind, roles?, scopes?, claims? }`, as in the schema and in `@agent-layers/core`. A shim should read `subject.subject` for the caller's name.
+`GuardCheck.caller` is the public caller, never its credential: an object `{ id, kind, roles, scopes, name?, ext? }`, as in the schema and in `@agent-layers/core`. A shim should read `caller.id` for who the run acts for.
 
 ## Test
 
