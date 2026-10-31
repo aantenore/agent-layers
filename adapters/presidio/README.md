@@ -8,7 +8,9 @@ the text. Verdict reasons name entity types (`PII redacted: EMAIL_ADDRESS`), nev
 names only). If Presidio cannot be reached or answers badly the guard fails closed: the verdict is `block` with the
 reason `presidio unavailable: <cause>`, where the cause is one of `HTTP <status>`, `redirects are not followed (HTTP
 <status>)`, `timeout`, `response too large`, `invalid response`, `network error`. `onError` applies only to these
-failures: a label mapping that fails on a detection keeps the `block` or `redact` verdict, labelled `other`, with
+failures of the analyzer, before anything was detected. A detection is never downgraded to `allow`: if the anonymizer
+then fails, the verdict is `block` (`PII detected: <types>; presidio anonymizer unavailable: <cause>`), and a label
+mapping that fails on a detection keeps the `block` or `redact` verdict, labelled `other`, with
 `ext["presidio.mappingError"]` set. Redirects are never followed, so the text and headers stay with the configured
 host. Error text and response bodies are never copied into reasons: they can echo URLs, headers or the text that was
 sent. URLs with credentials are rejected at creation.
@@ -27,7 +29,7 @@ Tested live against Presidio 2.2.362 (`reference/guardrail`).
 | `scoreThreshold` | number | analyzer default | Ignore findings scored below this, 0 to 1 |
 | `operators` | object | anonymizer default (`<ENTITY>`) | Anonymizer operators per entity, `DEFAULT` for the rest |
 | `stages` | string[] | all | `input`, `output`, `tool_args`, `tool_result` |
-| `onError` | `"block"` \| `"allow"` | `"block"` | Fail closed or open when Presidio fails |
+| `onError` | `"block"` \| `"allow"` | `"block"` | Fail closed or open when the analyzer fails (an anonymizer failure after a detection always blocks) |
 | `headers` | object | none | Extra request headers |
 | `timeoutMs` | integer | 10000 | Per-request timeout |
 | `maxResponseBytes` | integer | 1048576 | Largest analyzer or anonymizer answer read; a larger one is a failure (`onError`) |

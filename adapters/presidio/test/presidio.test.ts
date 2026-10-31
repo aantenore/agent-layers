@@ -103,6 +103,17 @@ test('onError allow fails open', async () => {
   } finally { presidio.failWith(undefined); }
 });
 
+test('a detection is never downgraded: an anonymizer failure after a finding blocks, even with onError allow', async () => {
+  for (const anonymizerUrl of ['http://127.0.0.1:1', `${presidio.anonymizerUrl}/missing`]) {
+    const v = await createPresidioGuard({ analyzerUrl: presidio.analyzerUrl, anonymizerUrl, onError: 'allow', timeoutMs: 500 }).check(input('mail jane@example.com'));
+    assert.equal(v.action, 'block');
+    assert.match(v.reason!, /^PII detected: EMAIL_ADDRESS; presidio anonymizer unavailable: /);
+    assert.deepEqual(v.labels, ['pii']);
+    assert.doesNotMatch(JSON.stringify(v), /jane@example\.com/);
+  }
+  assert.deepEqual(await guard({ onError: 'allow', anonymizerUrl: 'http://127.0.0.1:1' }).check(input('nothing here')), { action: 'allow' }, 'no finding: the anonymizer is not called');
+});
+
 test('an unreachable service blocks', async () => {
   const v = await createPresidioGuard({ analyzerUrl: 'http://127.0.0.1:1', anonymizerUrl: 'http://127.0.0.1:1', timeoutMs: 500 }).check(input('a@b.co'));
   assert.equal(v.action, 'block');

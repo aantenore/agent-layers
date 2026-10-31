@@ -120,13 +120,21 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
       return { ...verdict, ...(labels ? { labels } : {}), ...(types.length ? { ext: entities } : {}) };
     };
     if (action === 'block') return described({ action: 'block', reason: `PII detected: ${types.join(', ')}` });
-    const res = await postJson(anonymizer!, {
-      text,
-      analyzer_results: findings.map(({ entity_type, start, end, score }) => ({ entity_type, start, end, score })),
-      ...(options.operators ? { anonymizers: options.operators } : {}),
-    }, 'presidio anonymizer', http, signal) as { text?: unknown } | null;
-    if (typeof res?.text !== 'string') throw new InvalidResponseError('presidio anonymizer');
-    return described({ action: 'redact', text: res.text, reason: `PII redacted: ${types.join(', ')}` });
+    let redacted: string;
+    try {
+      const res = await postJson(anonymizer!, {
+        text,
+        analyzer_results: findings.map(({ entity_type, start, end, score }) => ({ entity_type, start, end, score })),
+        ...(options.operators ? { anonymizers: options.operators } : {}),
+      }, 'presidio anonymizer', http, signal) as { text?: unknown } | null;
+      if (typeof res?.text !== 'string') throw new InvalidResponseError('presidio anonymizer');
+      redacted = res.text;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      // A detection is never downgraded to allow: when the anonymizer fails, the text is blocked whatever `onError` says.
+      return described({ action: 'block', reason: `PII detected: ${types.join(', ')}; presidio anonymizer unavailable: ${failure(err)}` });
+    }
+    return described({ action: 'redact', text: redacted, reason: `PII redacted: ${types.join(', ')}` });
   }
 
   return {
@@ -139,7 +147,8 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
         return await inspect(text, opts?.signal);
       } catch (err) {
         if (opts?.signal?.aborted) throw err;
-        // Only an unavailable or misbehaving service reaches here: label mapping failures are handled in `described`.
+        // Only an analyzer that is unavailable or misbehaving reaches here, before anything was detected: label mapping
+        // and anonymizer failures after a detection are handled in `inspect`.
         if ((options.onError ?? 'block') === 'allow') return { action: 'allow' };
         return { action: 'block', reason: `presidio unavailable: ${failure(err)}` };
       }
