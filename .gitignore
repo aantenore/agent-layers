@@ -20,3 +20,9 @@ dist/
 .venv/
 __pycache__/
 .pytest_cache/
+
+# package build output (LICENSE is copied in by prepack, schemas by the conformance build)
+packages/*/LICENSE
+adapters/*/LICENSE
+packages/conformance/schemas/
+*.tgz

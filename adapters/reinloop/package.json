@@ -2,7 +2,18 @@
   "name": "@agent-layers/adapter-reinloop",
   "version": "0.1.0",
   "description": "reinloop agent runtime as an agent-layers RuntimePort",
+  "keywords": ["agent-layers", "agent-layers-adapter", "reinloop"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/reinloop#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "adapters/reinloop"
+  },
   "license": "MIT",
+  "author": "Antonio Antenore",
   "type": "module",
   "engines": {
     "node": ">=22.18"
@@ -14,19 +25,16 @@
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "sideEffects": false,
-  "keywords": [
-    "agent-layers",
-    "agent-layers-adapter",
-    "reinloop"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "dependencies": {
     "reinloop": "github:aantenore/reinloop#85d04d99f89804056d51ace7fd27903670e11554"

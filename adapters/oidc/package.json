@@ -2,7 +2,18 @@
   "name": "@agent-layers/adapter-oidc",
   "version": "0.1.0",
   "description": "OpenID Connect identity (JWT verification via discovery and JWKS) and OAuth 2.0 credentials (token exchange, client credentials) for agent-layers",
+  "keywords": ["agent-layers", "agent-layers-adapter", "oidc", "oauth2", "jwt", "token-exchange"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/oidc#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "adapters/oidc"
+  },
   "license": "MIT",
+  "author": "Antonio Antenore",
   "type": "module",
   "engines": {
     "node": ">=22.18"
@@ -14,25 +25,19 @@
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "sideEffects": false,
-  "keywords": [
-    "agent-layers",
-    "agent-layers-adapter",
-    "oidc",
-    "oauth2",
-    "jwt",
-    "token-exchange"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "agentLayers": {
     "maturity": "experimental"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
     "@agent-layers/core": "^0.1.0"

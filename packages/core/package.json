@@ -2,10 +2,19 @@
   "name": "@agent-layers/core",
   "version": "0.1.0",
   "description": "Ports, adapter registry, composition pipelines and stack config for agent-layers",
+  "keywords": ["agent-layers", "agents", "llm", "ports-and-adapters", "composition", "sdk"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "packages/core"
+  },
   "license": "MIT",
   "author": "Antonio Antenore",
   "type": "module",
-  "private": false,
   "engines": {
     "node": ">=22.18"
   },
@@ -19,11 +28,15 @@
   },
   "files": ["dist", "schema"],
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "gen:schema": "node --conditions=source scripts/gen-schema.ts",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

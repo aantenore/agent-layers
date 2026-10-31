@@ -2,10 +2,19 @@
   "name": "@agent-layers/conformance",
   "version": "0.1.0",
   "description": "Conformance suites for agent-layers ports: prove an adapter behaves",
+  "keywords": ["agent-layers", "conformance", "testing", "adapters"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/conformance#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "packages/conformance"
+  },
   "license": "MIT",
   "author": "Antonio Antenore",
   "type": "module",
-  "private": false,
   "engines": {
     "node": ">=22.18"
   },
@@ -18,13 +27,17 @@
   },
   "files": ["dist", "schemas"],
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-schemas.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "dependencies": {
-    "@agent-layers/core": "0.1.0"
+    "@agent-layers/core": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

@@ -2,10 +2,19 @@
   "name": "@agent-layers/gateway",
   "version": "0.1.0",
   "description": "Network host for a composed agent-layers stack: inbound standards, identity, limits and access logs in one place",
+  "keywords": ["agent-layers", "gateway", "agents", "http"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/gateway#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "packages/gateway"
+  },
   "license": "MIT",
   "author": "Antonio Antenore",
   "type": "module",
-  "private": false,
   "engines": {
     "node": ">=22.18"
   },
@@ -18,13 +27,17 @@
   },
   "files": ["dist"],
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "dependencies": {
-    "@agent-layers/core": "0.1.0"
+    "@agent-layers/core": "^0.1.0"
   },
   "devDependencies": {
     "@agent-layers/adapter-basic-runtime": "0.1.0",

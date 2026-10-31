@@ -2,7 +2,18 @@
   "name": "@agent-layers/adapter-opa",
   "version": "0.1.0",
   "description": "Open Policy Agent authorization adapter for agent-layers",
+  "keywords": ["agent-layers", "agent-layers-adapter", "opa", "open-policy-agent", "authorization"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/opa#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "adapters/opa"
+  },
   "license": "MIT",
+  "author": "Antonio Antenore",
   "type": "module",
   "engines": {
     "node": ">=22.18"
@@ -14,24 +25,19 @@
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "sideEffects": false,
-  "keywords": [
-    "agent-layers",
-    "agent-layers-adapter",
-    "opa",
-    "open-policy-agent",
-    "authorization"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "agentLayers": {
     "maturity": "experimental"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
     "@agent-layers/core": "^0.1.0"

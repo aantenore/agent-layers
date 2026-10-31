@@ -2,7 +2,18 @@
   "name": "@agent-layers/adapter-compose-deploy",
   "version": "0.1.0",
   "description": "Deploy adapter that runs services through Docker Compose using the layers' reference compose files",
+  "keywords": ["agent-layers", "agent-layers-adapter"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/compose-deploy#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "adapters/compose-deploy"
+  },
   "license": "MIT",
+  "author": "Antonio Antenore",
   "type": "module",
   "engines": {
     "node": ">=22.18"
@@ -16,11 +27,14 @@
   },
   "files": ["dist"],
   "sideEffects": false,
-  "keywords": ["agent-layers", "agent-layers-adapter"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
     "@agent-layers/core": "^0.1.0"

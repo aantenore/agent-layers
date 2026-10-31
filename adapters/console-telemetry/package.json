@@ -2,7 +2,18 @@
   "name": "@agent-layers/adapter-console-telemetry",
   "version": "0.1.0",
   "description": "Terminal telemetry adapter for agent-layers",
+  "keywords": ["agent-layers", "agent-layers-adapter"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/console-telemetry#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "adapters/console-telemetry"
+  },
   "license": "MIT",
+  "author": "Antonio Antenore",
   "type": "module",
   "engines": {
     "node": ">=22.18"
@@ -16,11 +27,14 @@
   },
   "files": ["dist"],
   "sideEffects": false,
-  "keywords": ["agent-layers", "agent-layers-adapter"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
     "@agent-layers/core": "^0.1.0"

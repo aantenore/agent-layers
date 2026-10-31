@@ -2,15 +2,24 @@
   "name": "@agent-layers/cli",
   "version": "0.1.0",
   "description": "agent-layers command line: init, dev, check, test, eval, deploy, gateway",
+  "keywords": ["agent-layers", "cli", "agents", "scaffold"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/cli#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "packages/cli"
+  },
   "license": "MIT",
   "author": "Antonio Antenore",
   "type": "module",
-  "private": false,
   "engines": {
     "node": ">=22.18"
   },
   "bin": {
-    "agent-layers": "./dist/cli.js"
+    "agent-layers": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -20,15 +29,20 @@
     }
   },
   "files": ["dist", "templates"],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "dependencies": {
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
-    "@agent-layers/gateway": "0.1.0"
+    "@agent-layers/conformance": "^0.1.0",
+    "@agent-layers/core": "^0.1.0",
+    "@agent-layers/gateway": "^0.1.0"
   },
   "devDependencies": {
     "@agent-layers/adapter-basic-runtime": "0.1.0",

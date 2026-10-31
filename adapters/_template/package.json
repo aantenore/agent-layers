@@ -2,7 +2,18 @@
   "name": "@agent-layers/adapter-template",
   "version": "0.1.0",
   "description": "Copyable skeleton of an agent-layers adapter package",
+  "keywords": ["agent-layers", "agent-layers-adapter"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/_template#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "adapters/_template"
+  },
   "license": "MIT",
+  "author": "Antonio Antenore",
   "type": "module",
   "private": true,
   "engines": {
@@ -17,11 +28,11 @@
   },
   "files": ["dist"],
   "sideEffects": false,
-  "keywords": ["agent-layers", "agent-layers-adapter"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
     "@agent-layers/core": "^0.1.0"
