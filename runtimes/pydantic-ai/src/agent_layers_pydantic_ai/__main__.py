@@ -9,7 +9,7 @@ import uvicorn
 
 from .agent import model_alias
 from .app import create_app
-from .settings import SettingsError, load_settings
+from .settings import SettingsError, load_settings, warn_unsafe_limits
 from .spec import load_agent_spec
 
 log = logging.getLogger('agent_layers_pydantic_ai')
@@ -28,12 +28,13 @@ def main() -> int:
         'agent %s on %s · model %s at %s/v1 · tools at %s/mcp',
         spec.name, settings.public_url, alias, settings.gateway_url, settings.gateway_url,
     )
+    warn_unsafe_limits(settings)
     uvicorn.run(
         create_app(spec, settings),
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level,
-        timeout_graceful_shutdown=int(settings.shutdown_grace_s),
+        timeout_graceful_shutdown=None if settings.shutdown_grace_s is None else int(settings.shutdown_grace_s),
         server_header=False,
     )
     return 0

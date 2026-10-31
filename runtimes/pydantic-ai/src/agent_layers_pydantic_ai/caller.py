@@ -196,8 +196,10 @@ class CallerBroker(InMemoryBroker):
 class CallerWorker(AgentWorker[Any, Any]):
     """Runs each task with its caller's credential, several at a time, and lets runs finish on shutdown."""
 
-    max_concurrent_runs: int = 8
-    shutdown_grace_s: float = 10.0
+    max_concurrent_runs: int | None = field(kw_only=True)
+    """None: no cap on parallel runs."""
+    shutdown_grace_s: float | None = field(kw_only=True)
+    """None: on shutdown, wait for the runs in flight without a time limit."""
     _active: int = field(default=0, init=False, repr=False)
     _idle: anyio.Event | None = field(default=None, init=False, repr=False)
     _scopes: dict[str, anyio.CancelScope] = field(default_factory=dict, init=False, repr=False)
@@ -237,21 +239,23 @@ class CallerWorker(AgentWorker[Any, Any]):
 
     @asynccontextmanager
     async def run(self) -> AsyncIterator[None]:
-        slots = anyio.Semaphore(self.max_concurrent_runs)
+        slots = anyio.Semaphore(self.max_concurrent_runs) if self.max_concurrent_runs is not None else None
         async with anyio.create_task_group() as tg:
 
             async def handle(operation: Any) -> None:
                 try:
                     await self._handle_task_operation(operation)
                 finally:
-                    slots.release()
+                    if slots is not None:
+                        slots.release()
                     self._active -= 1
                     if self._active == 0 and self._idle is not None:
                         self._idle.set()
 
             async def dispatch() -> None:
                 async for operation in self.broker.receive_task_operations():
-                    await slots.acquire()
+                    if slots is not None:
+                        await slots.acquire()
                     self._active += 1
                     tg.start_soon(handle, operation)
 

@@ -102,7 +102,7 @@ not stored, returned or logged.
   caller's own tasks.
 - A `contextId` is the caller's own name for a conversation: another caller using the same `contextId` gets a separate
   conversation, and cannot read or extend yours. A run reads and writes the history in the namespace of its owner.
-- At most `MAX_TASKS` tasks and `MAX_TASKS` conversations are kept, and `MAX_TASKS // 4` of each per owner. To make
+- At most `MAX_TASKS` tasks and `MAX_TASKS` conversations are kept, and `MAX_TASKS_PER_OWNER` (`MAX_TASKS // 4` unless set) of each per owner. To make
   room for a new task, an owner at its own cap, or any owner when the store is full, drops its own oldest finished task
   or least recently used idle conversation, whatever its age. If the store is full and the owner has nothing of its
   own to drop, it may reclaim the oldest finished task or idle conversation of another owner, but only one older than
@@ -119,7 +119,7 @@ Limits, because the agent does not verify the token (the gateway does, and has n
 - Callers that share one credential share one namespace. The static dev credentials of the `polyglot` profile hand
   every caller the same token.
 - Anyone who can reach the endpoint can use any token string, including made-up ones, and fill the store with work in
-  flight (up to `MAX_TASKS // 4` per token), which is refused to everyone else until it ends. That is why the agent must
+  flight (up to `MAX_TASKS_PER_OWNER` per token), which is refused to everyone else until it ends. That is why the agent must
   be reachable only by the gateway, as below.
 
 Tradeoff of the full-store rule. Without cross-owner reclaim, owners that are done could hold capacity until their
@@ -159,20 +159,26 @@ Also refused: requests with an `Origin` header (the agent is called server to se
 | `AGENT_NAME` | from the file | Agent name |
 | `GATEWAY_URL` | `http://127.0.0.1:8787` | Root of the agent-layers gateway |
 | `GATEWAY_MODEL` | the file's `model` | Model alias of the gateway |
-| `FINISHED_TASK_TTL_S` | `3600` | How long a finished task is kept |
-| `IDLE_CONTEXT_TTL_S` | `3600` | How long a conversation with no task in flight is kept after its last use |
-| `CROSS_OWNER_MIN_AGE_S` | `600` | How old another caller's finished task or idle conversation must be to be reclaimed when the store is full |
 | `A2A_HOST` | `127.0.0.1` | Interface to listen on; anything but loopback needs `A2A_ALLOW_REMOTE=1` |
 | `A2A_ALLOW_REMOTE` | unset | `1` allows a non-loopback `A2A_HOST` |
 | `A2A_GATEWAY_SECRET` | unset | When set, requests must carry it in `X-Agent-Layers-Gateway` (see Reaching the agent) |
 | `A2A_PORT` | `9100` | Port of the A2A server |
 | `A2A_PUBLIC_URL` | `http://localhost:<port>/` | JSON-RPC URL written in the agent card |
-| `MAX_CONCURRENT_RUNS` | `8` | Runs in parallel |
-| `MAX_TASKS` | `1000` | Tasks, and conversations, kept in memory; `MAX_TASKS // 4` per caller key (see Task ownership) |
-| `SHUTDOWN_GRACE_S` | `10` | On SIGTERM or SIGINT, how long runs in flight may finish before they are cancelled |
-| `MODEL_TIMEOUT_S` | `120` | Time limit of one model request |
-| `MAX_MODEL_REQUESTS` | `8` | Model requests per run; beyond it the run fails (FastA2A's worker sets no limit, so a model that keeps calling tools would loop until the caller gives up) |
+| `MAX_CONCURRENT_RUNS` | `8` | Runs in parallel; `unbounded` removes the cap |
+| `MAX_TASKS` | `1000` | Tasks, and conversations, kept in memory (min 4); `unbounded` removes the cap |
+| `MAX_TASKS_PER_OWNER` | `MAX_TASKS // 4` | Tasks, and conversations, kept per caller key (see Task ownership) |
+| `FINISHED_TASK_TTL_S` | `3600.0` | Seconds a finished task is kept; `unbounded` keeps it until it is dropped for room |
+| `IDLE_CONTEXT_TTL_S` | `3600.0` | Seconds a conversation with no task in flight is kept after its last use; `unbounded` as above |
+| `CROSS_OWNER_MIN_AGE_S` | `600.0` | Seconds another caller's finished task or idle conversation must be old to be reclaimed when the store is full |
+| `SHUTDOWN_GRACE_S` | `10.0` | On SIGTERM or SIGINT, seconds runs in flight may finish before they are cancelled; `unbounded` waits for them |
+| `MODEL_TIMEOUT_S` | `120.0` | Time limit of one model request, in seconds; `unbounded` sets none |
+| `MAX_MODEL_REQUESTS` | `8` | Model requests per run; beyond it the run fails (FastA2A's worker sets no limit, so a model that keeps calling tools would loop until the caller gives up); `unbounded` removes the cap |
 | `LOG_LEVEL` | `info` | Log level |
+
+Limits are the numeric rows above (`MAX_*`, `*_TTL_S`, `*_AGE_S`, `*_GRACE_S`, `MODEL_TIMEOUT_S`); each is declared in
+`LIMITS` in `settings.py` with its minimum and safe range. A value below the minimum is refused at startup, and
+`unbounded` is accepted only where the row says so. A limit set to `unbounded` or outside its safe range is logged as
+a warning at startup; the full table is in [limits](../../docs/limits.md#pydantic-ai).
 
 `GET /healthz` answers `{"status": "ok"}` while the server runs.
 

@@ -16,6 +16,7 @@ conversation of a run in the namespace of the run's owner.
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -81,7 +82,8 @@ class _Space:
 class TaskStore(Storage[list[Any]]):
     """The worker's storage: tasks and conversations in a namespace per owner, in memory.
 
-    At most `max_tasks` tasks and `max_tasks` conversations are kept, and `max_tasks // 4` of each per owner. To make
+    At most `max_tasks` tasks and `max_tasks` conversations are kept, and `max_tasks_per_owner` of each per owner (None
+    for either: no cap). To make
     room for a new task, the owner drops its own oldest finished task or least recently used idle conversation, whatever
     its age, when it is at its own cap or when the store is full. Only when the store is full and the owner has nothing
     to drop does it reclaim from other owners, and then only the oldest finished tasks and idle conversations that are
@@ -89,22 +91,24 @@ class TaskStore(Storage[list[Any]]):
     task submitted or working, and a conversation with such a task. When there is nothing to drop the new task is
     refused.
 
-    Finished tasks expire after `finished_ttl_s`, and idle conversations after `idle_ttl_s` since their last use.
+    Finished tasks expire after `finished_ttl_s`, and idle conversations after `idle_ttl_s` since their last use (None:
+    they are kept until dropped for room).
     Expiry is applied when the store is used (`sweep`), not by a timer.
     """
 
     def __init__(
         self,
-        max_tasks: int,
-        finished_ttl_s: float = 3600.0,
-        idle_ttl_s: float = 3600.0,
-        cross_owner_min_age_s: float = 600.0,
+        max_tasks: int | None,
+        max_tasks_per_owner: int | None,
+        finished_ttl_s: float | None,
+        idle_ttl_s: float | None,
+        cross_owner_min_age_s: float,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self.max_tasks = max_tasks
-        self.per_owner = max(1, max_tasks // 4)
-        self.finished_ttl_s = finished_ttl_s
-        self.idle_ttl_s = idle_ttl_s
+        self.max_tasks = math.inf if max_tasks is None else max_tasks
+        self.per_owner = math.inf if max_tasks_per_owner is None else max_tasks_per_owner
+        self.finished_ttl_s = math.inf if finished_ttl_s is None else finished_ttl_s
+        self.idle_ttl_s = math.inf if idle_ttl_s is None else idle_ttl_s
         self.cross_owner_min_age_s = cross_owner_min_age_s
         self.clock = clock
         self._spaces: dict[str, _Space] = {}

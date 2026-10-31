@@ -71,13 +71,13 @@ def build_agent(spec: AgentSpec, settings: Settings, http_client: httpx2.AsyncCl
 
 
 class LimitedAgent:
-    """The agent as the worker sees it: every run is capped at `max_model_requests` model requests.
+    """The agent as the worker sees it: every run is capped at `max_model_requests` model requests (None: no cap).
 
     FastA2A's worker calls `run` and `iter` without usage limits, so a model that keeps calling tools would loop until
     the caller's time limit. Everything else is the wrapped agent's.
     """
 
-    def __init__(self, agent: Agent[None, str], max_model_requests: int) -> None:
+    def __init__(self, agent: Agent[None, str], max_model_requests: int | None) -> None:
         self._agent = agent
         self._limits = UsageLimits(request_limit=max_model_requests)
 

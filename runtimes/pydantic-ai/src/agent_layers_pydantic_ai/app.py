@@ -40,7 +40,11 @@ def create_app(
     client = http_client or model_http_client(settings)
     the_agent = agent or build_agent(spec, settings, client)
     store = TaskStore(
-        settings.max_tasks, settings.finished_task_ttl_s, settings.idle_context_ttl_s, settings.cross_owner_min_age_s
+        settings.max_tasks,
+        settings.max_tasks_per_owner,
+        settings.finished_task_ttl_s,
+        settings.idle_context_ttl_s,
+        settings.cross_owner_min_age_s,
     )
     storage = CallerStorage(store)
     broker = CallerBroker()
