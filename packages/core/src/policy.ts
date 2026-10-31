@@ -36,28 +36,40 @@ function ruleMatches(r: PolicyRule, s: PolicySubject): boolean {
 /** Tools without a declared risk are treated as the most dangerous kind. */
 export const riskOf = (spec: Pick<ToolSpec, 'risk'>): ToolRisk => spec.risk ?? 'exec';
 
-/** Authorization request for calling a tool, built from the caller's identity and the tool spec. */
+/** Subject of a call made without a verified identity. Never matches user or agent rules. */
+const ANONYMOUS_SUBJECT = 'anonymous';
+
+/**
+ * Authorization request for calling a tool, built from the caller's identity and the tool spec. A call without a
+ * verified identity is an explicit anonymous subject (`authenticated: false`), never the agent's own identity.
+ */
 export function toolAccessRequest(tool: string, spec: ToolSpec, args: unknown, ctx: CallContext): AccessRequest {
   const id = ctx.identity;
   return {
-    subject: { type: id?.kind ?? 'agent', id: id?.subject ?? ctx.agent, properties: { roles: id?.roles ?? [], scopes: id?.scopes ?? [] } },
+    subject: id
+      ? { type: id.kind, id: id.subject, properties: { roles: id.roles ?? [], scopes: id.scopes ?? [], authenticated: true } }
+      : { type: ANONYMOUS_SUBJECT, id: ANONYMOUS_SUBJECT, properties: { roles: [], scopes: [], authenticated: false } },
     action: { name: 'call' },
     resource: { type: 'tool', id: tool, properties: { risk: riskOf(spec), agent: ctx.agent, layer: spec.layer ?? 'tool' } },
     context: { args },
   };
 }
 
-/** Reads the identity back from an access request (for policy engines that work on AccessRequest only). */
+/**
+ * Reads the identity back from an access request (for policy engines that work on AccessRequest only). Only the exact
+ * subject types `user` and `agent` of an authenticated subject yield an identity; anything else (anonymous, unknown
+ * types, `authenticated: false`) has none, so rules on kind, roles or scopes do not match, as in `evaluatePolicy`.
+ */
 export function subjectOf(req: AccessRequest): PolicySubject {
-  const props = req.subject.properties ?? {};
-  return {
-    tool: req.resource.id,
-    risk: (req.resource.properties?.risk as ToolRisk | undefined) ?? 'exec',
-    identity: {
-      subject: req.subject.id,
-      kind: req.subject.type === 'user' ? 'user' : 'agent',
-      roles: Array.isArray(props.roles) ? props.roles : [],
-      scopes: Array.isArray(props.scopes) ? props.scopes : [],
-    },
-  };
+  const subject = req.subject ?? ({} as Partial<AccessRequest['subject']>);
+  const props = subject.properties ?? {};
+  const kind = subject.type === 'user' || subject.type === 'agent' ? subject.type : undefined;
+  const authenticated = props.authenticated !== false;
+  const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  const risk = req.resource.properties?.risk;
+  const out: PolicySubject = { tool: req.resource.id, risk: risk === 'read' || risk === 'write' ? risk : 'exec' };
+  if (kind && authenticated && typeof subject.id === 'string' && subject.id) {
+    out.identity = { subject: subject.id, kind, roles: strings(props.roles), scopes: strings(props.scopes) };
+  }
+  return out;
 }

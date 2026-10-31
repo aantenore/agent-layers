@@ -45,7 +45,7 @@ test('authorization gets an access request built from identity and spec; errors 
   });
   assert.equal((await tools.callTool('db__query', { q: 1 }, ctx({ identity: user }))).isError, undefined);
   assert.deepEqual(seen[0], {
-    subject: { type: 'user', id: 'alice', properties: { roles: ['analyst'], scopes: ['read'] } },
+    subject: { type: 'user', id: 'alice', properties: { roles: ['analyst'], scopes: ['read'], authenticated: true } },
     action: { name: 'call' },
     resource: { type: 'tool', id: 'db__query', properties: { risk: 'read', agent: 'tester', layer: 'tool' } },
     context: { args: { q: 1 } },

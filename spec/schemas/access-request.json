@@ -10,13 +10,14 @@
       "type": "object",
       "required": ["type", "id"],
       "properties": {
-        "type": { "type": "string", "examples": ["user", "agent"] },
-        "id": { "type": "string" },
+        "type": { "enum": ["user", "agent", "anonymous"], "description": "user or agent for a verified identity; anonymous when the call carries none." },
+        "id": { "type": "string", "description": "Identity subject, or anonymous." },
         "properties": {
           "type": "object",
           "properties": {
             "roles": { "type": "array", "items": { "type": "string" } },
-            "scopes": { "type": "array", "items": { "type": "string" } }
+            "scopes": { "type": "array", "items": { "type": "string" } },
+            "authenticated": { "type": "boolean", "description": "true for a verified identity, false for an anonymous subject." }
           }
         }
       }

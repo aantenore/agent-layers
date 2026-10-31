@@ -1,6 +1,6 @@
 # AuthorizationPort
 
-Layer: `identity` (L6 Identity & access) · Version: 0.1.0 · Conformance: `checkAuthorization`
+Layer: `identity` (L6 Identity & access) · Version: 0.2.0 · Conformance: `checkAuthorization`
 
 ## Purpose
 
@@ -19,7 +19,7 @@ Boundary: this port answers "may they". "Who are they" is [IdentityPort](Identit
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `subject` | {`type`: String, `id`: String, `properties?`: {`roles?`, `scopes?`, ...}} | Who acts. `type` is `user` or `agent`; `id` is the identity subject (or the agent name when there is no identity). |
+| `subject` | {`type`: String, `id`: String, `properties?`: {`roles?`, `scopes?`, `authenticated?`, ...}} | Who acts. With a verified identity, `type` is its kind (`user` or `agent`), `id` its subject and `authenticated: true`. Without one, the subject is `{type: anonymous, id: anonymous}` with `authenticated: false`. |
 | `action` | {`name`: String, `properties?`: object} | What they do. Tool calls use `call`. |
 | `resource` | {`type`: String, `id`: String, `properties?`: {`risk?`: `read`/`write`/`exec`, `agent?`: String, ...}} | What it is done to. Tool calls use `type: tool` and the prefixed tool name as `id`; `properties` carry the tool's risk (missing risk is `exec`), the agent name and the tool's layer. |
 | `context?` | {`args?`: Any, ...} | The arguments of the call, and other facts. |
@@ -33,6 +33,7 @@ Boundary: this port answers "may they". "Who are they" is [IdentityPort](Identit
 - Order in the stack: local policy rules come first; only when they do not deny does this port get asked. When neither policy rules nor this port is configured, tool calls are allowed. A deployment that needs deny by default configures a catch-all deny rule or an authorization adapter.
 - A deny carries a human-readable `context.reason` when available; the model sees it as part of an error result.
 - The request is built from the run: roles and scopes come from the verified identity. Callers cannot add their own claims to it.
+- An unauthenticated call is never presented as the agent's own identity. Engines must not match `user` or `agent` rules for an `anonymous` subject, nor for one with `authenticated: false`; only the exact types `user` and `agent` carry roles, scopes and kind.
 - Decisions are side-effect free and repeatable for the same request, except where the policy depends on time or external state.
 - Approval is separate: an `ask` effect from the local policy is resolved by [ApprovalPort](ApprovalPort.md) before this port is asked.
 
@@ -55,6 +56,7 @@ Boundary: this port answers "may they". "Who are they" is [IdentityPort](Identit
 
 ## Version history
 
+- 0.2.0 — unauthenticated calls use an explicit `anonymous` subject; `subject.properties.authenticated` added
 - 0.1.0 — initial
 
 Example adapters: `rules-authorization` (local rule list).
