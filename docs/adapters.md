@@ -47,6 +47,7 @@ Generated from each package's descriptor by `npm run docs:adapters`; `npm run do
 
 | Layer | Adapter | Direction | Port | Maps | Tiers | Maturity |
 |---|---|---|---|---|---|---|
+| `harness` | [`a2a`](../adapters/a2a) | outbound | RuntimePort | standard: Agent2Agent (A2A) protocol | prototype, production | experimental |
 | `harness` | [`basic-runtime`](../adapters/basic-runtime) | outbound | RuntimePort | technology: in-process tool-calling loop | prototype | experimental |
 | `harness` | [`memory-state`](../adapters/memory-state) | outbound | StatePort | technology: in-process Map | prototype | experimental |
 | `knowledge` | [`http-knowledge`](../adapters/http-knowledge) | outbound | KnowledgePort | standard: agent-layers knowledge HTTP contract | prototype, production | experimental |
@@ -78,6 +79,10 @@ Generated from each package's descriptor by `npm run docs:adapters`; `npm run do
 
 | Layer | Adapter | Direction | Port | Maps | Tiers | Maturity |
 |---|---|---|---|---|---|---|
+| `interface` | [`a2a`](../adapters/a2a) | inbound | ChannelPort | standard: Agent2Agent (A2A) protocol | prototype, production | experimental |
+| `interface` | [`cloudevents`](../adapters/cloudevents) | inbound | TriggerPort | standard: CloudEvents 1.0 HTTP binding | prototype, production | experimental |
+| `interface` | [`mcp`](../adapters/mcp) | inbound | ChannelPort | standard: Model Context Protocol | prototype, production | experimental |
+| `interface` | [`openai-compatible`](../adapters/openai-compatible) | inbound | ChannelPort | standard: OpenAI Chat Completions | prototype, production | experimental |
 | `interface` | [`terminal-channel`](../adapters/terminal-channel) | inbound | ChannelPort | technology: terminal (stdin/stdout) | prototype | experimental |
 
 #### Insight plane
@@ -91,7 +96,7 @@ Generated from each package's descriptor by `npm run docs:adapters`; `npm run do
 | `eval` | [`judge-eval`](../adapters/judge-eval) | outbound | EvaluatorPort | technology: LLM as judge | prototype, production | experimental |
 | `eval` | [`layer-signals`](../adapters/layer-signals) | outbound | EvaluatorPort | technology: per-layer signals from run events and telemetry | prototype, production | experimental |
 
-34 adapters in 31 packages.
+39 adapters in 33 packages.
 <!-- adapters:end -->
 
 ### Planned
@@ -100,14 +105,11 @@ Generated from each package's descriptor by `npm run docs:adapters`; `npm run do
 |---|---|---|---|---|---|
 | `openbao` | outbound | SecretPort | infra | standard: Vault-compatible secrets API | |
 | `kubernetes` | outbound | DeployPort | infra | standard: Kubernetes API / Helm | |
-| `openai-compatible` (server) | inbound | ChannelPort | interface | standard: OpenAI Chat Completions | hosted by the gateway |
 | `valkey` | outbound | CachePort | cache | technology: Valkey | |
 | `reinloop` | outbound | RuntimePort | harness | technology: reinloop | first full runtime |
-| `a2a` | outbound / inbound | RuntimePort, ChannelPort | harness, interface | standard: A2A | remote agents in any language; agent endpoints |
 | `postgres-state` | outbound | StatePort | harness | technology: PostgreSQL | |
 | `qdrant` | outbound | KnowledgePort, IngestionPort | knowledge | technology: Qdrant | |
 | `sql`, `sparql` | outbound | KnowledgePort | knowledge | standard: SQL, SPARQL 1.1 | |
-| `cloudevents` | inbound | TriggerPort | interface | standard: CloudEvents | |
 | `promptfoo` | outbound | EvaluatorPort | eval | technology: promptfoo | |
 
 Technologies that speak a standard need no adapter of their own: Keycloak through `oidc`; Ollama, vLLM, LiteLLM and

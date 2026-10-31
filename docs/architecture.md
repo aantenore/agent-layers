@@ -36,27 +36,27 @@ Boundary rules:
 ```mermaid
 flowchart LR
   subgraph inbound[Inbound adapters]
-    ch[ChannelPort adapters<br/>terminal, chat API, agent-to-agent]
-    tr[TriggerPort adapters<br/>events, schedules]
+    ch[L8 interface<br/>ChannelPort: terminal, OpenAI-compatible, MCP, A2A]:::experience
+    tr[L8 interface<br/>TriggerPort: CloudEvents, schedules]:::experience
   end
   subgraph core[Core: ports + pipelines + config]
-    host[Stack host]
-    gm[guardedModel]
-    ki[knowledgeInjector]
-    gt[governedTools]
-    rt[RuntimePort]
+    host[Stack host]:::external
+    gm[guardedModel]:::external
+    ki[knowledgeInjector]:::external
+    gt[governedTools]:::external
+    rt[L3 harness<br/>RuntimePort]:::agent
   end
   subgraph outbound[Outbound adapters]
-    m[ModelPort]
-    r[RouterPort / CachePort]
-    k[KnowledgePort]
-    t[ToolPort]
-    id[Identity / Credential / Authorization / Approval]
-    g[GuardPort]
-    te[TelemetryPort]
-    ev[EvaluatorPort]
-    st[StatePort]
-    d[DeployPort / SecretPort]
+    m[L1 llm<br/>ModelPort]:::model
+    r[L2 cache<br/>RouterPort / CachePort]:::model
+    k[L4 knowledge<br/>KnowledgePort]:::agent
+    t[L5 tool<br/>ToolPort]:::agent
+    id[L6 identity<br/>Identity / Credential / Authorization / Approval]:::control
+    g[L7 guardrail<br/>GuardPort]:::control
+    te[L9 telemetry<br/>TelemetryPort]:::insight
+    ev[L10 eval<br/>EvaluatorPort]:::insight
+    st[L3 harness<br/>StatePort]:::agent
+    d[L0 infra<br/>DeployPort / SecretPort]:::foundation
   end
   ch --> host
   tr --> host
@@ -72,6 +72,13 @@ flowchart LR
   core -.-> te
   host -.-> ev
   core -.-> d
+  classDef foundation fill:#d9dde3,stroke:#57606a,color:#1f2328
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
 ```
 
 - **Ports** are owner-defined, thin and versioned (`PORT_VERSIONS`, semver per port, see
@@ -82,8 +89,10 @@ flowchart LR
 - **Outbound adapters** consume something as a port: an OpenAI-compatible endpoint as ModelPort, Markdown files as
   KnowledgePort, a rule list as AuthorizationPort.
 - **Inbound adapters** expose the stack through something: a terminal, an OpenAI-compatible HTTP API, an MCP
-  server, an agent-to-agent endpoint. They implement ChannelPort or TriggerPort and talk to the stack through its
-  `ChannelHost` (agents, run, verify).
+  server, an A2A endpoint, a CloudEvents receiver. They implement ChannelPort or TriggerPort: `serve` when they run
+  by themselves (a terminal), `mount` when a host server (the gateway) serves their routes on the web-standard
+  `Request`/`Response` types. They reach the stack through its `ChannelHost` (agents, run, stream, verify, and the
+  governed model and tools) or, for triggers, a `TriggerSink`.
 - An adapter package is named after what it maps (`adapter-openai-compatible`, `adapter-markdown-knowledge`) and may
   ship both directions as separate descriptors.
 
@@ -111,8 +120,8 @@ RuntimePort binds an `AgentSpec` (`name`, `instructions`, `model`, tool globs, k
 runnable agent that uses the stack's composed model and tools. A runtime adapter can be:
 
 - **in process**: a JavaScript runtime package, or the small `basic-runtime` loop used for prototypes and tests;
-- **remote over a standard**: for example an agent-to-agent client adapter that turns an agent written in any
-  language into a RuntimePort.
+- **remote over a standard**: the `a2a` runtime adapter turns an agent written in any language, served over A2A,
+  into a RuntimePort.
 
 Swapping the runtime changes one line of config. The agent file, tools, knowledge and policies stay.
 
@@ -121,20 +130,26 @@ Swapping the runtime changes one line of config. The agent file, tools, knowledg
 ```mermaid
 flowchart TB
   subgraph inproc[In process]
-    app[Your app or the CLI] --> stack1[compose: Stack]
+    app[Your app or the CLI]:::external --> stack1[compose: Stack]:::external
   end
-  subgraph gw[Gateway mode]
-    any[Runtime in any language] -->|OpenAI-compatible HTTP| gwy[gateway: Stack]
-    any -->|MCP| gwy
-    users[People, apps, agents] -->|channels| gwy
+  subgraph gwm[Gateway mode]
+    any[Runtime in any language]:::external -->|OpenAI-compatible /v1| gwy[L8 interface<br/>gateway: mounted channels and triggers]:::experience
+    any -->|MCP /mcp| gwy
+    peers[Other agents]:::external -->|A2A| gwy
+    events[Event sources]:::external -->|CloudEvents| gwy
+    gwy --> stack2[compose: Stack]:::external
   end
+  classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
 ```
 
 - **In process.** `compose(config)` returns a `Stack` inside your process. Fastest; TypeScript only.
-- **Gateway.** `@agent-layers/gateway` (planned) hosts a composed stack on the network: ModelPort as an
-  OpenAI-compatible API, ToolPort as an MCP server, plus the configured inbound channels. Any runtime in any language
-  then gets the guarded, cached, governed and traced layers by pointing at two URLs, and enforcement sits outside the
-  agent process.
+- **Gateway.** `@agent-layers/gateway` hosts a composed stack on the network. Inbound adapters that implement
+  `mount` share one server: the governed ModelPort as an OpenAI-compatible API, the governed ToolPort and knowledge
+  sources as an MCP server, the agents over A2A, and CloudEvents as a trigger. The gateway checks `Origin` and `Host`,
+  authenticates every request through the IdentityPort and logs it on the `interface` layer, so identity,
+  authorization, guardrails and telemetry run outside the agent process, for runtimes in any language. See
+  [gateway.md](gateway.md).
 
 ## Profiles: same stack from prototype to production
 
@@ -147,15 +162,15 @@ authorization, guardrails, telemetry, state). Agent specs and code never change 
 
 ```mermaid
 sequenceDiagram
-  participant C as Channel (interface)
+  participant C as interface (L8)
   participant H as Stack host
-  participant R as RuntimePort (harness)
-  participant G as GuardPort (guardrail)
-  participant X as Cache / Router (cache)
-  participant K as KnowledgePort (knowledge)
-  participant M as ModelPort (llm)
-  participant A as Authorization (identity)
-  participant T as ToolPort (tool)
+  participant R as harness (L3)
+  participant G as guardrail (L7)
+  participant X as cache (L2)
+  participant K as knowledge (L4)
+  participant M as llm (L1)
+  participant A as identity (L6)
+  participant T as tool (L5)
   C->>H: message + credential
   H->>H: IdentityPort.verify
   H->>R: run(input, ctx{identity})
@@ -171,7 +186,7 @@ sequenceDiagram
   R->>M: chat
   R->>G: output guards
   R-->>C: answer
-  Note over H,T: every step: a span with agent.layer (telemetry); runs feed evaluators (eval)
+  Note over H,T: every step is a span with agent.layer (L9 telemetry), and runs feed evaluators (L10 eval)
 ```
 
 ## Extension rules

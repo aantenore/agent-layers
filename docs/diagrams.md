@@ -71,6 +71,9 @@ The command renders every Mermaid block of a Markdown file and fails on a syntax
 | Profile ladder | [product.md](product.md#profile-ladder) | The layers that change from prototype to pilot to production |
 | Lifecycle | [lifecycle.md](lifecycle.md) | Design, build, test, release, operate, improve |
 | Hexagonal model, run modes, data flow of one run | [architecture.md](architecture.md) | Core, inbound and outbound adapters; in-process and gateway; one run end to end |
+| Two modes | [gateway.md](gateway.md#two-modes) | In process versus hosted by the gateway |
+| Gateway topology | [gateway.md](gateway.md#what-the-gateway-exposes) | Callers, Origin and Host check, identity, mounted routes, the governed ports behind them |
+| A runtime in another language | [gateway.md](gateway.md#a-runtime-in-another-language) | Model calls at `/v1`, tool calls at `/mcp` with the caller's identity; a remote agent as runtime over A2A |
 
 ### Layers
 

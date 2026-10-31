@@ -66,8 +66,12 @@ that errors surface as channel-native errors.
 | Adapter | Maps |
 |---|---|
 | `terminal-channel` | A terminal (stdin and stdout) |
+| `openai-compatible` | OpenAI Chat Completions: model aliases and `agent:<name>`, mounted by the gateway |
+| `mcp` | Model Context Protocol server: the governed tools and knowledge, mounted by the gateway |
+| `a2a` | Agent2Agent (A2A) 1.0: agent cards and JSON-RPC, mounted by the gateway |
+| `cloudevents` | CloudEvents 1.0 HTTP binding as a trigger, mounted by the gateway |
 
-Planned: OpenAI-compatible chat API, MCP server, A2A and CloudEvents. Full list: [adapters.md](../adapters.md).
+How the gateway hosts them: [gateway.md](../gateway.md). Full list: [adapters.md](../adapters.md).
 
 ## Reference setup
 

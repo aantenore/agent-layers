@@ -14,6 +14,7 @@ npm test                                # the smoke dataset, offline, with a scr
 npx agent-layers eval evals/smoke.jsonl --agent assistant
 npx agent-layers dev --profile local    # same stack with a real model on this machine
 npx agent-layers layers                 # every layer, its ports, the adapter in use and those installed
+npx agent-layers gateway                # the same stack on http://127.0.0.1:8787 for any language (Bearer dev-token)
 ```
 
 `init` writes a project with all eleven layers wired: `agent-layers.json` (profiles `prototype`, `test`, `local`,
@@ -134,8 +135,8 @@ export const adapter = defineAdapter({
 
 The stack wraps every run in an `invoke_agent` span, turns a guardrail block into status `stopped`, and appends the
 returned events to the state slot when the call carries a `sessionId`. A runtime written in another language plugs
-in as a remote adapter (for example over an agent-to-agent protocol) or uses the gateway's OpenAI-compatible and MCP
-endpoints.
+in as a remote runtime (the `a2a` adapter) or uses the gateway's OpenAI-compatible and MCP endpoints; see
+[gateway.md](gateway.md#a-runtime-in-another-language).
 
 ## Stack config reference
 
@@ -148,10 +149,11 @@ endpoints.
 | `plugins` | Modules that export adapter descriptors, for adapters outside `@agent-layers/adapter-*` |
 | `profile` | Default profile; `--profile` or `AGENT_LAYERS_PROFILE` override it |
 | `layers` | Base slots shared by all profiles |
-| `profiles.<name>` | `extends`, `tier`, `requires`, `layers` (only what differs), `policy`, `pipeline`, `description` |
+| `profiles.<name>` | `extends`, `tier`, `requires`, `layers` (only what differs), `policy`, `pipeline`, `gateway`, `description` |
 | `policy` | Local authorization rules `{ effect: allow\|ask\|deny, tools?, risk?, when?: { roles, scopes, kind, authenticated } }`, first match wins; `authenticated: true` matches any verified caller, `false` only an anonymous one |
 | `pipeline.knowledge` | `k`, `maxChars`, `mode`: `system` (default), `user`, `tools` (expose sources as tools), `off` |
 | `pipeline.cacheTtlMs`, `pipeline.approvalTimeoutMs` | Cache lifetime; how long a tool call waits for an approval |
+| `gateway` | Network host: `port`, `host`, `inbound` (channel and trigger names to mount), `anonymous`, `maxBodyBytes`, `requestTimeoutMs`, `publicOrigin`, `cors`, `allowedOrigins`, `allowedHosts`; see [gateway.md](gateway.md) |
 | `agents.<name>` | `file` (Markdown with front matter `model`, `tools`, `knowledge`; body = instructions) or inline `instructions`, `model`, `tools`, `knowledge`, `params` |
 
 Slots under `layers`:
@@ -219,7 +221,7 @@ corporate model gateway through an OpenAI-compatible URL. Then `agent-layers dep
 | `deploy` / `up` / `down` | Plan, start and stop services through the deploy slot (`--dry-run`) |
 | `diff <a> <b>` | Per slot: same, changed, added, removed |
 | `layers` | The eleven layers by plane: ports and versions, adapter in use, installed adapters (standard and native) |
-| `gateway` | Runs `@agent-layers/gateway` when installed |
+| `gateway` | Host the profile on the network ([gateway.md](gateway.md)): mounted channels and triggers on one address, every request authenticated through the identity slot; `--port`, `--host`; a production-tier profile must pass the readiness gate |
 
 `dev`, `eval` and `test` run as an authenticated caller. The credential comes from `--token <t>`, then the
 `AGENT_LAYERS_TOKEN` environment variable, then (prototype-tier profiles only) the first token of the `static-identity`
