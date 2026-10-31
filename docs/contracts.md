@@ -43,6 +43,8 @@ All values are defaults for local development and live in [`.env.example`](../.e
 | cache | `GATEWAY_URL` | `http://localhost:4000/v1` |
 | cache | `GATEWAY_KEY` | `sk-local-change-me` |
 | cache | `VALKEY_URL` | `redis://localhost:6379` |
+| cache | `HOSTED_MODEL` | |
+| cache | `HOSTED_API_KEY` | |
 | telemetry | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` |
 | telemetry | `LANGFUSE_URL` | `http://localhost:3000` |
 | telemetry | `LANGFUSE_PUBLIC_KEY` | `pk-lf-local` |

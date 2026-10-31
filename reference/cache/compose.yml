@@ -20,6 +20,9 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       LITELLM_MASTER_KEY: ${GATEWAY_KEY:-sk-local-change-me}
+      # Optional hosted model of the `hosted` group: any provider/model LiteLLM supports, set in .env, never here.
+      HOSTED_MODEL: ${HOSTED_MODEL:-}
+      HOSTED_API_KEY: ${HOSTED_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -47,6 +50,18 @@ configs:
           litellm_params:
             model: ollama_chat/qwen3:4b
             api_base: http://host.docker.internal:11434
+        # A faster local model with tool calling, for runs where latency matters more than depth.
+        - model_name: fast
+          litellm_params:
+            model: ollama_chat/lfm2.5:8b
+            api_base: http://host.docker.internal:11434
+        # A hosted model read from the environment (HOSTED_MODEL, HOSTED_API_KEY), with a spend cap of 1 USD per 30 days.
+        - model_name: hosted
+          litellm_params:
+            model: os.environ/HOSTED_MODEL
+            api_key: os.environ/HOSTED_API_KEY
+            max_budget: 1.0
+            budget_duration: 30d
         # Primary points to a model that does not exist, so every request falls back to `default`.
         - model_name: fallback-test
           litellm_params:
