@@ -1,6 +1,6 @@
-# L2 Harness
+# L2 Agent runtime
 
-## Purpose
+## Responsibility
 
 Run the agent loop: prompts, tool calls, policy and approvals, budgets, durability, compaction and multi-agent
 patterns. Everything above the model and below the interface.
@@ -10,11 +10,13 @@ patterns. Everything above the model and below the interface.
 - Markdown agent files with the common subagent frontmatter (`name`, `description`, `tools`, `model`).
 - Agent Skills (`SKILL.md` folders).
 - MCP server exposure: every agent and team can be served as an MCP tool (`reinloop mcp`).
+- CloudEvents (HTTP binding) for event triggers.
 
 ## Extension point
 
-Middleware (`beforeModel`, `afterModel`, `beforeTool`, `afterTool`), multi-agent patterns, and plugins that register
-providers, tools, stores, sinks and caches by name. Layers L3, L5, L6 and L7 attach to the harness through these hooks.
+Middleware (`beforeModel`, `afterModel`, `beforeTool`, `afterTool`), multi-agent patterns, `RunStore`, and plugins
+that register providers, tools, stores, sinks and caches by name. Layers L3, L5, L6 and L7 attach to the runtime
+through these hooks.
 
 ## Reference implementation
 
@@ -25,19 +27,35 @@ reinloop serve --port 8700     # HTTP + SSE API (REINLOOP_SERVE_PORT)
 reinloop mcp                   # agents as MCP tools
 ```
 
+## Adapter SDK + conformance
+
+Not needed for the agent format: it is a standard. A different runtime is conformant if it reads the same agent
+files, calls the same tools and emits the same events and spans. `RunStore` is the one interface to implement when
+you want runs and sessions in another database.
+
+## Around the layer
+
+- **Session state.** A Postgres-backed `RunStore` keeps runs and sessions across restarts and replicas.
+- **Workers, queues and scheduled triggers.** Runs can start from an event or a schedule, not only from a user
+  message. Triggers arrive as CloudEvents over HTTP (see the contract below).
+- **Know-how as Skills.** Procedures an agent should follow live in Agent Skills: files in git, loaded on demand,
+  versioned with the agent.
+- **Budgets.** Per-run limits on tokens, tool calls and spend; see [cost](../cross-cutting/cost.md).
+
 ## How to swap it
 
-The other layers talk to the harness through standard formats: agent files, MCP, HTTP/SSE and OTLP. A different
-runtime that reads the same agent files, calls the same tools and emits the same spans can replace reinloop. What a
-runtime must provide for each layer is described in the layer docs.
+The other layers talk to the runtime through standard formats: agent files, MCP, HTTP/SSE, CloudEvents and OTLP. A
+different runtime that reads the same agent files, calls the same tools and emits the same spans can replace
+reinloop. What a runtime must provide for each layer is described in the layer docs.
 
 ## Contract
 
-- In: agent file + input (+ identity).
+- In: agent file + input (+ identity), or a CloudEvent.
 - Out: a `RunEvent` stream ending in `run_end { status, output, usage, costUsd }`.
 - HTTP: `reinloop serve`, port 8700.
+- Triggers: CloudEvents HTTP binding to `POST /v1/events`; answered `202` with a `runId`.
 
-Details in [contracts.md](../contracts.md#l2-harness).
+Details in [contracts.md](../contracts.md#l2-agent-runtime).
 
 ## How to test
 

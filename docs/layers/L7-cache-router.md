@@ -1,13 +1,13 @@
-# L7 Cache & router
+# L7 Model gateway (cache & router)
 
-## Purpose
+## Responsibility
 
-Reduce cost and latency, and choose the model per request: exact-match caching, fallbacks, routing between model
-groups.
+Reduce cost and latency and choose the model per request: exact-match caching, routing between model groups,
+fallbacks and quotas.
 
 ## Standard
 
-An OpenAI-compatible gateway. The agent sees an ordinary L1 endpoint.
+An OpenAI-compatible gateway. The agent sees an ordinary [L1](L1-llm.md) endpoint.
 
 ## Extension point
 
@@ -24,6 +24,22 @@ An OpenAI-compatible gateway. The agent sees an ordinary L1 endpoint.
 
 Only the MIT-licensed parts of LiteLLM are used.
 
+## Adapter SDK + conformance
+
+`ModelRouter`. A conformance check feeds fixed requests and verifies that `select` returns a model from the
+configured set and is deterministic for the same input. Gateways need no SDK: the OpenAI-compatible API is the
+standard.
+
+## Around the layer
+
+- **In-process rule router.** A rule-based `ModelRouter` (for example by prompt size or agent) that works without a
+  gateway.
+- **Fallbacks.** If a model fails, the next one in the group is tried.
+- **Quotas.** Rate and spend limits per key; see [cost](../cross-cutting/cost.md).
+
+Semantic caching is deliberately not part of the agent loop; exact-match caching is safe for tests and repeated
+identical requests.
+
 ## How to swap it
 
 - Any OpenAI-compatible gateway (Portkey, Helicone, Envoy AI Gateway, a plain reverse proxy) replaces LiteLLM:
@@ -36,15 +52,7 @@ Only the MIT-licensed parts of LiteLLM are used.
 - Gateway: transparent OpenAI-compatible endpoint at `GATEWAY_URL`.
 - In process: `responseCache` over a `CacheStore`; `ModelRouter.select(req)` returns the model to use.
 
-Details in [contracts.md](../contracts.md#l7-cache-and-router).
-
-Semantic caching is deliberately not part of the agent loop; exact-match caching is safe for tests and repeated
-identical requests.
-
-## Adapter SDK
-
-`ModelRouter`. A conformance check feeds fixed requests and verifies that `select` returns a model from the
-configured set and is deterministic for the same input.
+Details in [contracts.md](../contracts.md#l7-model-gateway-cache--router).
 
 ## How to test
 

@@ -4,7 +4,7 @@ Single source of truth for the interfaces between layers. Layer docs link here; 
 file, this file wins. JSON Schemas (draft 2020-12) for the data shapes live in [`../contracts/`](../contracts).
 
 Interfaces are written in TypeScript because the reference runtime is. The wire formats (HTTP, MCP, JSONL) are
-language neutral.
+language neutral. For the overall picture see [stack.md](stack.md).
 
 ## Host ports and environment
 
@@ -13,7 +13,7 @@ All values are defaults for local development and live in [`.env.example`](../.e
 | L | Variable | Default |
 |---|---|---|
 | 1 | `LLM_BASE_URL` | `http://localhost:11434/v1` |
-| 1 | `LLM_MODEL` | `qwen2.5:3b` |
+| 1 | `LLM_MODEL` | `qwen3:4b` |
 | 1 | `LLM_API_KEY` | `ollama` |
 | 2 | `REINLOOP_SERVE_PORT` | `8700` |
 | 3 | `QDRANT_URL` | `http://localhost:6333` |
@@ -42,20 +42,51 @@ All values are defaults for local development and live in [`.env.example`](../.e
 
 Ollama runs natively on the host. Containers reach it at `host.docker.internal:11434`.
 
-## L1 LLM
+## L0 Infrastructure & delivery
+
+L0 has no data contract. A deploy target (`compose` or `k8s`) is an adapter with this shape:
+
+| Direction | Content |
+|---|---|
+| In | OCI images, environment variables (the table above), secret references (names resolved by the secret store, never values) |
+| Out | Endpoints for each layer (the URLs in the table above), plus ingress routes |
+
+Targets: `compose` for a laptop or a single VM; `k8s` with Helm and Argo CD. OpenTofu modules provision the cloud
+resources per provider. Details in [layers/L0-infra.md](layers/L0-infra.md).
+
+## L1 Models
 
 - In: OpenAI chat completions request, with `tools`.
 - Out: completion with `tool_calls` and `usage`.
 - Any provider behind an OpenAI- or Anthropic-compatible URL is a drop-in. Anything else implements reinloop
   `Provider` (`generate(request, { signal, onText })`).
 
-## L2 Harness
+## L2 Agent runtime
 
 - In: agent file + input (+ identity).
 - Out: a `RunEvent` stream that ends in `run_end { status, output, usage, costUsd }`.
 - HTTP: `reinloop serve` (port 8700).
 
-## L3 Knowledge
+### Triggers
+
+Runs can start from events, not only from a user message. Triggers use the CloudEvents HTTP binding:
+
+```
+POST /v1/events
+Content-Type: application/cloudevents+json
+
+{ "specversion": "1.0", "id": "...", "source": "...", "type": "...", "data": { ... } }
+```
+
+The runtime answers `202 Accepted` with `{ "runId": "..." }` and runs the agent bound to the event type. Scheduled
+triggers produce the same CloudEvent internally. Status: planned.
+
+## L3 Knowledge & memory
+
+L3 separates transport from result. MCP standardises the transport: how an agent reaches a source. It does not
+standardise the result: every MCP server returns its own shape. L3 fixes the result as `Passage`, and adapters
+translate each backend (documents, SQL, SPARQL, graphs, wiki, memory) into it. One result shape lets L8 trace and L9
+evaluate retrieval the same way for every backend.
 
 ```ts
 interface KnowledgeSource {
@@ -66,11 +97,15 @@ interface Passage { id: string; text: string; source?: string; score?: number; m
 
 Schema: [`passage.json`](../contracts/passage.json).
 
-Wire options:
+Transport options:
 
-1. An MCP tool that returns passages (Qdrant: `qdrant-find`).
-2. HTTP: `POST {url}` with `{query, k, filter}` returns `{passages: Passage[]}`.
+1. MCP: an MCP tool, translated to passages by `mcpKnowledge` (Qdrant: `qdrant-find`).
+2. HTTP: `POST {url}` with `{query, k, filter}` returns `{passages: Passage[]}` (`httpKnowledge`).
 3. A JS function.
+
+Adapters: `mcpKnowledge`, `httpKnowledge`, `wikiKnowledge` now; `sqlKnowledge` (MCP Toolbox for Databases),
+`sparqlKnowledge` (SPARQL 1.1 Protocol, reference Apache Jena Fuseki), a graph adapter (Cypher / GQL) and
+`memoryKnowledge` next.
 
 The reinloop `knowledge` middleware injects the top-k passages before the model call as a delimited context block
 that is marked untrusted.
@@ -155,12 +190,12 @@ Effects:
 - `block` on `tool_args` denies the call.
 - `redact` rewrites the text with `GuardVerdict.text`.
 
-## L7 Cache and router
+## L7 Model gateway (cache & router)
 
 - Gateway: a transparent OpenAI-compatible endpoint at `GATEWAY_URL` (LiteLLM: model groups, fallbacks, Valkey exact cache).
 - In process: reinloop `responseCache` (`CacheStore`) and `ModelRouter.select(req) → model`.
 
-## L8 Telemetry
+## L8 Telemetry & observability
 
 - OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT`.
 - Spans follow the GenAI semantic conventions: `invoke_agent`, `chat`, `execute_tool`. Each span also carries
@@ -170,7 +205,7 @@ Effects:
   `agent.policy.decisions`, `agent.guardrail.actions`.
 - The collector fans out to Langfuse and Jaeger.
 
-## L9 Evaluation
+## L9 Evaluation & improvement
 
 - Dataset: JSONL of `EvalCase { id, input, expected?, tags?, layer? }` ([`eval-case.json`](../contracts/eval-case.json)).
 - Results: JSONL of `{ id, runId, output, status, scores: EvalScore[] }` with
@@ -179,3 +214,37 @@ Effects:
 - The promptfoo provider calls reinloop.
 - `reinloop replay` re-runs stored inputs with another agent or model.
 - The diagnose agent outputs `{ runId, layer, evidence, fix }`.
+
+## L10 Interfaces & channels
+
+Target contract; status is planned. All surfaces call the same runtime and agents.
+
+### OpenAI-compatible chat API
+
+- `POST /v1/chat/completions` with `model` set to the agent name.
+- `stream: true` returns Server-Sent Events in the OpenAI chunk format, ending with `data: [DONE]`.
+- The caller's `Authorization: Bearer <JWT>` is verified by L5.
+
+### A2A
+
+- Agent card at `/.well-known/agent-card.json`.
+- JSON-RPC 2.0 methods `message/send` (single response) and `message/stream` (streamed events).
+
+### MCP server
+
+Agents and teams are served as MCP tools (`reinloop mcp`).
+
+### AG-UI
+
+`RunEvent`s are mapped to AG-UI events for frontends that stream agent state. The mapping follows the run lifecycle:
+
+| RunEvent | AG-UI event |
+|---|---|
+| run start | `RUN_STARTED` |
+| text delta | `TEXT_MESSAGE_CONTENT` |
+| tool call start / args / end | `TOOL_CALL_START` / `TOOL_CALL_ARGS` / `TOOL_CALL_END` |
+| tool result | `TOOL_CALL_RESULT` |
+| `run_end` (completed) | `RUN_FINISHED` |
+| `run_end` (failed) | `RUN_ERROR` |
+
+The exact RunEvent names are those of the runtime; the mapping is finalised with the implementation.

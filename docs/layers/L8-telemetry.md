@@ -1,9 +1,9 @@
 # L8 Telemetry & observability
 
-## Purpose
+## Responsibility
 
-See what agents do: traces for every run, metrics for cost, tokens, tool calls, policy and guardrail activity. It
-is also the input of L9.
+See what agents do: traces for every run, metrics for cost, tokens, tool calls, policy and guardrail activity. It is
+also the input of [L9](L9-eval.md).
 
 ## Standard
 
@@ -23,10 +23,21 @@ OpenTelemetry OTLP with the GenAI semantic conventions.
 
 Phoenix (Elastic License 2.0) is deliberately not used.
 
+## Adapter SDK + conformance
+
+Not needed: OTLP is the standard, and a backend is swapped in the collector. A custom `Sink` is only for destinations
+OTLP cannot reach.
+
+## Around the layer
+
+- **`agent.layer` on every span**, so any trace can be filtered or attributed by layer.
+- **Metrics:** tokens, cost, tool calls, policy decisions, guardrail actions.
+- **Audit.** Denials and guard actions are visible here; see [governance](../cross-cutting/governance-compliance.md).
+
 ## How to swap it
 
-The runtime exports OTLP/HTTP to one endpoint. Change the collector's exporters to send to Tempo, Grafana,
-Datadog or any OTLP backend. No agent change is needed.
+The runtime exports OTLP/HTTP to one endpoint. Change the collector's exporters to send to Tempo, Grafana, Datadog
+or any OTLP backend. No agent change is needed.
 
 ## Contract
 
@@ -38,7 +49,7 @@ Datadog or any OTLP backend. No agent change is needed.
 - The collector fans out to Langfuse and Jaeger.
 - No tokens or secrets in attributes.
 
-Details in [contracts.md](../contracts.md#l8-telemetry).
+Details in [contracts.md](../contracts.md#l8-telemetry--observability).
 
 ## How to test
 

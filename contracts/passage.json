@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/aantenore/agent-layers/contracts/passage.json",
   "title": "Passage",
-  "description": "One retrieved unit of knowledge (L3).",
+  "description": "One retrieved unit of knowledge (L3). The uniform result of KnowledgeSource.search, whatever the backend or transport.",
   "type": "object",
   "required": ["id", "text"],
   "properties": {
