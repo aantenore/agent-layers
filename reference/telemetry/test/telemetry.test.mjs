@@ -34,7 +34,7 @@ async function poll(label, fn, timeoutMs = 90_000) {
 /** Returns undefined when everything is up, otherwise the reason to skip. */
 async function skipReason() {
   for (const [name, url] of [['collector', otlp], ['Jaeger', jaeger], ['Langfuse', `${langfuse}/api/public/health`], ['collector metrics', metricsUrl]]) {
-    if (!(await reachable(url, { timeoutMs: 15_000 }))) return `${name} not reachable at ${url}; run "make up LAYER=l8-telemetry"`;
+    if (!(await reachable(url, { timeoutMs: 15_000 }))) return `${name} not reachable at ${url}; run "make up LAYER=telemetry"`;
   }
 }
 
@@ -43,18 +43,18 @@ async function emitRun(serviceName) {
   const { run, mockProvider, otlpSink } = reinloop;
   const sink = otlpSink({ endpoint: otlp, serviceName, metrics: true, intervalMs: 500 });
   const tool = { name: 'lookup', description: 'lookup', risk: 'read', layer: 'knowledge', schema: { type: 'object' }, run: () => 'found' };
-  const agent = { name: 'l8-agent', model: { provider: mockProvider([{ toolCalls: [{ name: 'lookup' }] }, { text: 'done' }]), model: 'mock-1' }, tools: [tool] };
-  const result = await run(agent, 'go', { sinks: [sink], identity: { subject: 'l8-user', kind: 'user' } });
+  const agent = { name: 'telemetry-agent', model: { provider: mockProvider([{ toolCalls: [{ name: 'lookup' }] }, { text: 'done' }]), model: 'mock-1' }, tools: [tool] };
+  const result = await run(agent, 'go', { sinks: [sink], identity: { subject: 'telemetry-user', kind: 'user' } });
   await sink.close();
   assert.equal(result.status, 'completed');
   return result;
 }
 
-test('L8: spans reach Jaeger and Langfuse, metrics reach the collector endpoint', { timeout: 240_000 }, async (t) => {
+test('telemetry: spans reach Jaeger and Langfuse, metrics reach the collector endpoint', { timeout: 240_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
 
-  const serviceName = `l8-test-${Date.now()}`;
+  const serviceName = `telemetry-test-${Date.now()}`;
   const result = await emitRun(serviceName);
 
   await t.test('Jaeger has the trace with agent.layer attributes', async () => {
@@ -77,7 +77,7 @@ test('L8: spans reach Jaeger and Langfuse, metrics reach the collector endpoint'
     assert.equal(tag(span('invoke_agent'), 'agent.layer'), 'harness');
     assert.equal(tag(span('chat'), 'agent.layer'), 'llm');
     assert.equal(tag(span('execute_tool lookup'), 'agent.layer'), 'knowledge');
-    assert.equal(tag(span('invoke_agent'), 'enduser.id'), 'l8-user');
+    assert.equal(tag(span('invoke_agent'), 'enduser.id'), 'telemetry-user');
   });
 
   await t.test('Langfuse has the trace', async () => {

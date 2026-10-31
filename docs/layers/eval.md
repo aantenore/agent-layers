@@ -1,60 +1,59 @@
-# L10 Evaluation & improvement (`eval`)
+# Evaluation & improvement
+
+Layer id `eval` (L10), Insight plane. *Was it good, and if not, which layer failed?*
 
 ## Responsibility
 
 Measure quality continuously and find which layer a failure belongs to, so fixes land in the right place.
 
-## Standard
+## Ports
 
-None. promptfoo is the de facto tool for prompt and agent evals; the data formats are defined by this repository.
+| Port | What it does |
+|---|---|
+| [EvaluatorPort](../../spec/ports/EvaluatorPort.md) | `score` a run of a dataset case into `EvalScore` values, each optionally attributed to a layer |
+| [FeedbackPort](../../spec/ports/FeedbackPort.md) | `submit` and `list` user feedback attached to runs, as evaluation data |
 
-## Extension point
+Data shapes: [eval-case.json](../../spec/schemas/eval-case.json), [eval-result.json](../../spec/schemas/eval-result.json),
+[feedback.json](../../spec/schemas/feedback.json).
 
-`Evaluator.score(case, run) → EvalScore[]`. One evaluator per concern (answer quality, retrieval quality, tool
-correctness, policy decisions, guardrail false positives, cache hit rate).
+## Standards
 
-## Reference implementation
+None. The data formats (dataset and result JSON Lines) are defined by this repository, so any runner that reads
+`EvalCase` and writes the result format works.
 
-| Role | Reference | License |
-|---|---|---|
-| Eval runner | promptfoo | MIT |
-| Replay | `reinloop replay` | MIT |
-| Attribution | diagnose agent (a reinloop agent file) | MIT |
+## Boundaries
 
-## Adapter SDK + conformance
+- One evaluator per concern: answer quality, retrieval quality, tool correctness, policy decisions, guardrail false
+  positives, cache hit rate.
+- **Replay.** Re-running stored inputs with another agent or model gives regression runs and A/B comparisons without
+  new data.
+- **Improvement loop.** Failures become dataset cases, fixes land in the owning layer, regression tests keep them fixed.
+  Red-team cases belong here too; see [governance](../cross-cutting/governance-compliance.md).
+- A diagnose agent reads a failing run and attributes the failure to one layer id.
 
-`Evaluator` plus the dataset and result JSONL formats. A conformance check validates every line of a dataset and a
-result file against the schemas. Other frameworks (RAGAS, DeepEval, Opik, custom scripts) plug in as `Evaluator`s.
+## How to swap
 
-## Around the layer
+Dataset and results are plain JSONL. Other frameworks (RAGAS, DeepEval, Opik, promptfoo, custom scripts) plug in as
+evaluators on EvaluatorPort, checked with the conformance suite.
 
-- **Replay.** `reinloop replay` re-runs stored inputs with another agent or model: regression runs and A/B
-  comparisons without new data.
-- **Per-layer signals.** Each layer is scored on its own terms; see the
-  [improvement loop](../../README.md#improvement-loop).
-- **Diagnose agent.** Reads a failing run and attributes the failure to one layer.
-- **Improvement loop.** Failures become dataset cases, fixes land in the owning layer, regression tests keep them
-  fixed. Red-team cases belong here too; see [governance](../cross-cutting/governance-compliance.md).
+## Reference adapters
 
-## How to swap it
+| Adapter | Maps |
+|---|---|
+| `expected-eval` | Expected answers |
+| `judge-eval` | Model-as-judge |
+| `layer-signals` | Per-layer health scores from run events |
 
-The dataset and results are plain JSONL. Any runner that reads `EvalCase` and writes the result format works; the
-promptfoo provider is one thin wrapper that calls reinloop.
+Planned: promptfoo. Full list: [adapters.md](../adapters.md).
 
-## Contract
+## Reference setup
 
-- Dataset line: `EvalCase { id, input, expected?, tags?, layer? }`.
-- Result line: `{ id, runId, output, status, scores: EvalScore[] }`, `EvalScore { metric, value, layer?, reason? }`.
-- Diagnose agent output: `{ runId, layer, evidence, fix }`.
-
-Schemas: [eval-case.json](../../spec/schemas/eval-case.json), [eval-result.json](../../spec/schemas/eval-result.json).
-Details in the port spec: [EvaluatorPort](../../spec/ports/EvaluatorPort.md) and [FeedbackPort](../../spec/ports/FeedbackPort.md).
-
-## How to test
+[`reference/eval/`](../../reference/eval/README.md) uses promptfoo (MIT) as the test runner with a provider that runs
+the agent in process, a smoke dataset (`EVAL_DATASET`) and a diagnose agent. Replay and layer attribution come from the
+reinloop runtime.
 
 ```bash
-make test LAYER=l9-eval
+make test LAYER=eval
 ```
 
-Runs the smoke dataset (`EVAL_DATASET`) through reinloop, validates the result file, and checks that the diagnose
-agent returns a layer from the enum.
+The test runs the smoke dataset, validates the result file, and checks that the diagnose agent returns a layer id.

@@ -1,8 +1,8 @@
-# L8 Telemetry: OpenTelemetry Collector -> Jaeger (traces) + Langfuse (traces) + Prometheus endpoint (metrics).
+# Telemetry: OpenTelemetry Collector -> Jaeger (traces) + Langfuse (traces) + Prometheus endpoint (metrics).
 # Host ports: 4318 (OTLP/HTTP), 4317 (OTLP/gRPC), 8889 (Prometheus exporter), 16686 (Jaeger UI), 3000 (Langfuse).
 # Langfuse's postgres, redis, clickhouse and minio stay on the internal network. Local-development defaults only:
 # replace every secret and the init user before exposing anything beyond localhost.
-name: agent-l8-telemetry
+name: agent-layers-telemetry
 
 x-langfuse-env: &langfuse-env
   DATABASE_URL: postgresql://postgres:${LANGFUSE_DB_PASSWORD:-postgres}@postgres:5432/postgres

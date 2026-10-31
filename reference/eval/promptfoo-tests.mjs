@@ -1,4 +1,4 @@
-// Turns the L9 dataset (JSONL of EvalCase) into promptfoo tests, so the dataset stays the single source of truth.
+// Turns the eval dataset (JSONL of EvalCase) into promptfoo tests, so the dataset stays the single source of truth.
 // `expected`: a string -> icontains; { contains } -> icontains; { equals } -> equals; { regex } -> regex.
 // Every test also asserts the run completed (the provider reports a non-completed run as an error).
 import { readFileSync } from 'node:fs';
@@ -18,7 +18,7 @@ function assertions(expected) {
 }
 
 export default function generateTests(config = {}) {
-  const dataset = resolve(root, config.dataset ?? process.env.EVAL_DATASET ?? 'layers/l9-eval/datasets/smoke.jsonl');
+  const dataset = resolve(root, config.dataset ?? process.env.EVAL_DATASET ?? 'reference/eval/datasets/smoke.jsonl');
   return readFileSync(dataset, 'utf8')
     .split('\n')
     .filter((line) => line.trim())

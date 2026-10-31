@@ -1,4 +1,4 @@
-# Run with: docker compose -f layers/l5-identity/compose.yml exec opa /opa test /policies -v
+# Run with: docker compose -f reference/identity/compose.yml exec opa /opa test /policies -v
 package agents_test
 
 import data.agents

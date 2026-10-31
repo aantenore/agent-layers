@@ -1,4 +1,4 @@
-name: l4-tools
+name: agent-layers-tool
 
 services:
   httpbin:
@@ -9,7 +9,7 @@ services:
 
   openapi-mcp:
     build: ./bridge
-    image: l4-tools-openapi-mcp:fastmcp-4.1.4
+    image: agent-layers-tool-openapi-mcp:fastmcp-4.1.4
     environment:
       UPSTREAM_URL: http://httpbin:8080
       OPENAPI_SPEC: /app/openapi.json

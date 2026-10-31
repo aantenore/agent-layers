@@ -1,67 +1,59 @@
-# L5 Tools (`tool`)
+# Tools
+
+Layer id `tool` (L5), Agent plane. *What can it do?*
 
 ## Responsibility
 
 Let agents act: call APIs, read systems, run code. Tools are the main place where agents touch the outside world, so
-they are also where identity ([identity](identity.md)) and guardrails ([guardrail](guardrail.md)) apply.
+they are also where [identity](identity.md) and [guardrail](guardrail.md) apply.
 
-## Standard
+## Ports
+
+| Port | What it does |
+|---|---|
+| [ToolPort](../../spec/ports/ToolPort.md) | `listTools` and `callTool`; results are text plus optional data |
+
+Data shapes: [tool-spec.json](../../spec/schemas/tool-spec.json), [tool-outcome.json](../../spec/schemas/tool-outcome.json).
+
+## Standards
 
 - MCP (stdio and streamable HTTP).
 - OpenAPI 3.
 
-## Extension point
+## Boundaries
 
-`defineTool`: any JS function becomes a tool, with a JSON Schema for its arguments and a risk level.
+- Every call goes through the `governedTools` pipeline: prefixed names, local policy, approval, authorization,
+  `tool_args` guards, the call with credentials bound to the caller, `tool_result` guards.
+- A tool that needs a token declares an audience; the stack obtains it for the caller. Agents and prompts never see it.
+- **Sandbox.** Tools that run code do it in an OCI container with the network off; gVisor is an optional stronger
+  boundary. See [security](../cross-cutting/security.md).
+- **Egress.** HTTP tools reach only allowed hosts.
 
-## Reference implementation
+## How to swap
 
-| Role | Reference | License |
-|---|---|---|
-| MCP servers | MCP reference servers (fetch, git, filesystem, ...) | MIT / Apache-2.0 per server |
-| Declarative HTTP tools | reinloop `httpTools` config | MIT |
-| HTTP test target | go-httpbin on `HTTPBIN_URL` | MIT |
-| OpenAPI import | OpenAPI 3 JSON to HTTP tools, MCP bridge at `OPENAPI_MCP_URL` | - |
+Point the stack at any MCP server, describe any HTTP API in config, import an OpenAPI description, or write a function.
+Each way is an adapter on ToolPort; none needs a core change.
 
-The tests call go-httpbin through declarative tools generated from its OpenAPI description.
+## Reference adapters
 
-## Adapter SDK + conformance
+| Adapter | Maps |
+|---|---|
+| `functions` | JavaScript functions with a JSON Schema for the arguments and a risk level |
+| `http-tools` | Declarative HTTP calls |
+| `mcp` | MCP servers as tools |
+| `openapi` | An OpenAPI 3 document, one tool per operation |
 
-Not needed: the standards (MCP, OpenAPI) and `defineTool` already cover every way to add a tool.
+Full list: [adapters.md](../adapters.md).
 
-## Around the layer
+## Reference setup
 
-- **OpenAPI import.** An OpenAPI 3 description becomes a set of HTTP tools, one per operation.
-- **Sandbox for code-executing tools.** Tools that run code do it in an OCI container with the network off. gVisor
-  is an optional stronger boundary. See [security](../cross-cutting/security.md).
-- **Egress rules.** `web_fetch` and HTTP tools reach only allowed hosts.
-
-## How to swap it
-
-Point an agent at any MCP server, or describe any HTTP API in config, or write a function. No adapter is needed: the
-three ways are the extension points.
-
-## Contract
-
-- MCP over stdio or streamable HTTP.
-- Declarative HTTP tool:
-
-  ```
-  httpTools.<name> = { description, method, url (with {param}), query?, headers? (${env:X}),
-                       body?: 'json' | 'none', schema, risk, timeoutMs?, auth?: { audience } }
-  ```
-
-- Results are strings, plus optional `data`.
-
-`auth.audience` asks L5 for a token for that audience (on-behalf-of or self). Details in
-the port spec: [ToolPort](../../spec/ports/ToolPort.md).
-
-## How to test
+[`reference/tool/`](../../reference/tool/README.md) runs go-httpbin (MIT) as the API under test and an OpenAPI-to-MCP
+bridge (FastMCP, Apache-2.0) generated from a small OpenAPI description. The tests call httpbin through declarative
+tools, native OpenAPI import and the MCP bridge. Variables: `HTTPBIN_URL`, `HTTPBIN_PORT`, `OPENAPI_MCP_URL`,
+`OPENAPI_MCP_PORT`.
 
 ```bash
-make up LAYER=l4-tools
-make test LAYER=l4-tools
-make down LAYER=l4-tools
+make up LAYER=tool
+make test LAYER=tool
+make down LAYER=tool
 ```
-
-Variables: `HTTPBIN_URL`, `OPENAPI_MCP_URL`.

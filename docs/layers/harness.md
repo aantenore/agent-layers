@@ -1,78 +1,65 @@
-# L3 Agent runtime (`harness`)
+# Agent runtime
+
+Layer id `harness` (L3), Agent plane. *How does the agent loop run and keep state?*
 
 ## Responsibility
 
-Run the agent loop: prompts, tool calls, policy and approvals, budgets, durability, compaction and multi-agent
-patterns. Everything above the model and below the interface.
+Run the agent loop: prompts, tool calls, policy and approvals, budgets, durability and multi-agent patterns.
+Everything above the model and below the interface.
 
-L2 is a **runtime contract**. agent-layers is the container; the runtime is one component that fills this slot, and
-it is swappable like every other reference. [reinloop](https://github.com/aantenore/reinloop) is the first binding
-(the reference runtime). LangGraph, Pydantic AI, the OpenAI Agents SDK and Google ADK are candidate runtimes.
+agent-layers is the container; the runtime is one component that fills this slot and is swappable like every other
+layer. A runtime receives the composed stack, so guards, cache, routing, knowledge, authorization, credentials and
+telemetry are already applied to its model and tool calls.
 
-## Standard
+## Ports
 
-- Markdown agent files with the common subagent frontmatter (`name`, `description`, `tools`, `model`).
-- Agent Skills (`SKILL.md` folders).
-- MCP server exposure: every agent and team can be served as an MCP tool (`reinloop mcp`).
-- CloudEvents (HTTP binding) for event triggers.
+| Port | What it does |
+|---|---|
+| [RuntimePort](../../spec/ports/RuntimePort.md) | `bind` an agent spec to a runnable agent that streams run events |
+| [StatePort](../../spec/ports/StatePort.md) | `append` / `read` / `list` / `delete` the event log of a session |
 
-## Extension point
+Data shapes: [agent-spec.json](../../spec/schemas/agent-spec.json), [run-result.json](../../spec/schemas/run-result.json).
 
-Middleware (`beforeModel`, `afterModel`, `beforeTool`, `afterTool`), multi-agent patterns, `RunStore`, and plugins
-that register providers, tools, stores, sinks and caches by name. Layers L3, L5, L6 and L7 attach to the runtime
-through these hooks.
+## Standards
 
-## Reference implementation
+- Markdown agent files with the common subagent front matter (`name`, `description`, `tools`, `model`).
+- Agent Skills (`SKILL.md` folders) for procedural know-how.
+- MCP, for serving agents as tools.
+- CloudEvents for event triggers (see [interface](interface.md)).
 
-[reinloop](https://github.com/aantenore/reinloop) (MIT), the first runtime binding.
+## Boundaries
 
-```bash
-reinloop serve --port 8700     # HTTP + SSE API (REINLOOP_SERVE_PORT)
-reinloop mcp                   # agents as MCP tools
-```
+- The runtime owns the loop; the layers around it own everything else. It adds no policy of its own: authorization is
+  [identity](identity.md), content checks are [guardrail](guardrail.md).
+- Budgets (tokens, tool calls, spend) are enforced here; see [cost](../cross-cutting/cost.md).
+- Workers, queues and scheduled triggers start runs through [interface](interface.md) triggers.
 
-## Adapter SDK + conformance
+## How to swap
 
-Not needed for the agent format: it is a standard. A different runtime is conformant if it reads the same agent
-files, calls the same tools and emits the same events and spans. `RunStore` is the one interface to implement when
-you want runs and sessions in another database.
+A runtime adapter implements RuntimePort: it takes the stack and an agent spec and returns an agent whose `run` uses
+`stack.modelFor` and `stack.toolsFor`. A runtime written in another language plugs in as a remote adapter (for example
+over an agent-to-agent protocol) or through the gateway's endpoints. Writing one: [guide.md](../guide.md#write-a-runtime-adapter).
 
-### Runtimes folder (planned)
+## Reference adapters
 
-Each runtime gets `runtimes/<name>/` holding **only configuration and the binding** to the layer contracts. The
-runtime itself comes in as a versioned dependency (npm, PyPI, container image); its source is never vendored into this
-repository. Today the reinloop wiring lives in `layers/l2-harness/`; it will move to `runtimes/reinloop/` when a
-second runtime is added.
+| Adapter | Maps |
+|---|---|
+| `basic-runtime` | An in-process tool-calling loop (prototype) |
+| `memory-state` | An in-process event log (prototype) |
 
-## Around the layer
+[reinloop](https://github.com/aantenore/reinloop) (MIT) is one runtime adapter; it is planned as a first full runtime
+and is used by the reference setup. LangGraph, Pydantic AI, the OpenAI Agents SDK and Google ADK are candidates.
+Full list: [adapters.md](../adapters.md).
 
-- **Session state.** A Postgres-backed `RunStore` keeps runs and sessions across restarts and replicas.
-- **Workers, queues and scheduled triggers.** Runs can start from an event or a schedule, not only from a user
-  message. Triggers arrive as CloudEvents over HTTP (see the contract below).
-- **Know-how as Skills.** Procedures an agent should follow live in Agent Skills: files in git, loaded on demand,
-  versioned with the agent.
-- **Budgets.** Per-run limits on tokens, tool calls and spend; see [cost](../cross-cutting/cost.md).
+## Reference setup
 
-## How to swap it
-
-The other layers talk to the runtime through standard formats: agent files, MCP, HTTP/SSE, CloudEvents and OTLP. A
-different runtime that reads the same agent files, calls the same tools and emits the same spans can replace
-reinloop. What a runtime must provide for each layer is described in the layer docs.
-
-## Contract
-
-- In: agent file + input (+ identity), or a CloudEvent.
-- Out: a `RunEvent` stream ending in `run_end { status, output, usage, costUsd }`.
-- HTTP: `reinloop serve`, port 8700.
-- Triggers: CloudEvents HTTP binding to `POST /v1/events`; answered `202` with a `runId`.
-
-Details in the port spec: [RuntimePort](../../spec/ports/RuntimePort.md) and [StatePort](../../spec/ports/StatePort.md).
-
-## How to test
+[`reference/harness/`](../../reference/harness/README.md) runs a sample agent file on the reinloop runtime against the
+local model:
 
 ```bash
-make test LAYER=l2-harness
+make test LAYER=harness
 ```
 
-Live test: loads `layers/l2-harness/agents/assistant.md`, runs it against Ollama (`LLM_BASE_URL`, `LLM_MODEL`) and
-asserts a completed run with non-empty output. Skips with a message if Ollama or the model is unavailable.
+The live test loads `reference/harness/agents/assistant.md`, runs it against Ollama (`LLM_BASE_URL`, `LLM_MODEL`) and
+asserts a completed run with non-empty output. It skips with a message if Ollama or the model is unavailable. The
+runtime exposes an HTTP and SSE API on `REINLOOP_SERVE_PORT` (default 8700).

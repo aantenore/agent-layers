@@ -30,11 +30,11 @@ async function failingRun(dir) {
   return { runId: res.runId, output: res.output, status: res.status, events };
 }
 
-test('L9: a failing tool run is attributed to the tool layer', async (t) => {
+test('eval: a failing tool run is attributed to the tool layer', async (t) => {
   const why = evalSkipReason(reinloop);
   if (why) return t.skip(`SKIPPED: ${why}`);
 
-  const dir = await mkdtemp(join(tmpdir(), 'l9-'));
+  const dir = await mkdtemp(join(tmpdir(), 'eval-'));
   try {
     const run = await failingRun(dir);
     const scores = await reinloop.layerSignals().score({ id: 'order', input: 'Where is order 42?' }, run);
@@ -48,11 +48,11 @@ test('L9: a failing tool run is attributed to the tool layer', async (t) => {
   }
 });
 
-test('L9: the diagnose agent returns a schema-valid verdict for a failed run', { timeout: 300_000 }, async (t) => {
+test('eval: the diagnose agent returns a schema-valid verdict for a failed run', { timeout: 300_000 }, async (t) => {
   const why = evalSkipReason(reinloop) ?? (await llmSkipReason());
   if (why) return t.skip(`SKIPPED: ${why}`);
 
-  const dir = await mkdtemp(join(tmpdir(), 'l9-'));
+  const dir = await mkdtemp(join(tmpdir(), 'eval-'));
   let runtime;
   try {
     const failed = await failingRun(dir);

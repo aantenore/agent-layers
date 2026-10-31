@@ -19,12 +19,12 @@ const USERS = { alice: 'alice-test-only', bob: 'bob-test-only' };
 const { oidcVerifier, oidcCredentials, opaAuthorizer, mockProvider, defineTool, collectSink, run, createRuntime, serve, checkIdentityVerifier, checkAuthorizer, accessRequest } = reinloop;
 
 async function skipReason() {
-  if (!(await reachable(`${issuer}/.well-known/openid-configuration`))) return `Keycloak not reachable at ${issuer} (make up LAYER=l5-identity)`;
-  if (!(await reachable(`${opaUrl}/health`))) return `OPA not reachable at ${opaUrl} (make up LAYER=l5-identity)`;
+  if (!(await reachable(`${issuer}/.well-known/openid-configuration`))) return `Keycloak not reachable at ${issuer} (make up LAYER=identity)`;
+  if (!(await reachable(`${opaUrl}/health`))) return `OPA not reachable at ${opaUrl} (make up LAYER=identity)`;
   return undefined;
 }
 const skip = await skipReason();
-if (skip) console.log(`# skipping l5-identity live tests: ${skip}`);
+if (skip) console.log(`# skipping identity live tests: ${skip}`);
 
 async function userToken(username) {
   const res = await fetch(`${issuer}/protocol/openid-connect/token`, {

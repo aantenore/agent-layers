@@ -17,7 +17,9 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test:packages": "npm test --workspaces --if-present",
-    "test:layer": "node --test \"layers/$LAYER/test/**/*.test.mjs\" \"layers/$LAYER/test/**/*.test.js\""
+    "test:layer": "node --test \"reference/$LAYER/test/**/*.test.mjs\" \"reference/$LAYER/test/**/*.test.js\"",
+    "docs:check": "node scripts/check-docs.mjs",
+    "docs:adapters": "node scripts/gen-adapters-catalog.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

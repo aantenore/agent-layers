@@ -24,7 +24,7 @@ async function skipReason() {
   if (!ids.includes(model)) return `model "${model}" is not available at ${baseUrl}; run "ollama pull ${model}"`;
 }
 
-test('L1: the Ollama preset passes the provider conformance check', { timeout: 240_000 }, async (t) => {
+test('llm: the Ollama preset passes the provider conformance check', { timeout: 240_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
   if (typeof reinloop.checkProvider !== 'function') return t.skip('SKIPPED: this reinloop has no checkProvider; set REINLOOP_SRC to a newer checkout');
@@ -34,7 +34,7 @@ test('L1: the Ollama preset passes the provider conformance check', { timeout: 2
   assert.deepEqual(failures, []);
 });
 
-test('L1: an agent run with one tool call completes', { timeout: 240_000 }, async (t) => {
+test('llm: an agent run with one tool call completes', { timeout: 240_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
 

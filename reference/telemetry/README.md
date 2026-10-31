@@ -1,7 +1,7 @@
-# L8 Telemetry and observability
+# Telemetry reference setup
 
 Standard: [OpenTelemetry](https://opentelemetry.io) (OTLP/HTTP, GenAI semantic conventions).
-Documentation: [docs/L8-telemetry.md](../../docs/L8-telemetry.md). Contract: [docs/contracts.md](../../docs/contracts.md#l8-telemetry).
+Layer page: [docs/layers/telemetry.md](../../docs/layers/telemetry.md). Port: [TelemetryPort](../../spec/ports/TelemetryPort.md).
 
 ## Extension point
 
@@ -26,8 +26,8 @@ The MinIO image is a frozen build (upstream stopped publishing images). Any S3-c
 ## Run
 
 ```bash
-make up LAYER=l8-telemetry      # first start pulls ~6 GB and takes a few minutes
-make down LAYER=l8-telemetry    # add -v on the compose command to drop volumes
+make up LAYER=telemetry      # first start pulls ~6 GB and takes a few minutes
+make down LAYER=telemetry    # add -v on the compose command to drop volumes
 ```
 
 | Port | Service |
@@ -61,8 +61,8 @@ Message content, tool arguments and results are exported only with `"captureCont
 ## Test
 
 ```bash
-make test LAYER=l8-telemetry
-REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=l8-telemetry
+make test LAYER=telemetry
+REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=telemetry
 ```
 
 The test runs a reinloop agent (mock model, one tool call) with the `otlp` sink and checks that the trace is found in

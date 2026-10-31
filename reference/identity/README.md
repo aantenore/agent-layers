@@ -1,7 +1,9 @@
-# L5 Identity and access
+# Identity reference setup
+
+Layer page: [docs/layers/identity.md](../../docs/layers/identity.md).
 
 Who an agent run acts as (a user, on their behalf, or the agent itself), which tools it may call, and which
-credentials it carries to downstream APIs. Contract: [docs/contracts.md](../../docs/contracts.md#l5-identity-and-access).
+credentials it carries to downstream APIs. Ports: [IdentityPort](../../spec/ports/IdentityPort.md), [CredentialPort](../../spec/ports/CredentialPort.md), [AuthorizationPort](../../spec/ports/AuthorizationPort.md).
 
 ## Standards
 
@@ -85,10 +87,10 @@ final; for `allow`/`ask` the PDP is consulted; a PDP `deny` denies (reason `pdp:
 ## Run and test
 
 ```bash
-make up LAYER=l5-identity            # waits for both healthchecks (Keycloak takes ~20-40 s)
-REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=l5-identity
-docker compose -f layers/l5-identity/compose.yml exec opa /opa test /policies -v
-make down LAYER=l5-identity
+make up LAYER=identity            # waits for both healthchecks (Keycloak takes ~20-40 s)
+REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=identity
+docker compose -f reference/identity/compose.yml exec opa /opa test /policies -v
+make down LAYER=identity
 ```
 
 If host port 8080 is taken, start with `KEYCLOAK_PORT=18080` and run the tests with

@@ -1,4 +1,4 @@
-name: l5-identity
+name: agent-layers-identity
 
 services:
   keycloak:

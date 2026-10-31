@@ -1,9 +1,9 @@
 # Optional containerized Ollama. The default is Ollama running natively on the host, so nothing here starts unless
-# the profile is enabled:  docker compose -f layers/l1-llm/compose.yml --profile container-ollama up -d --wait
+# the profile is enabled:  docker compose -f reference/llm/compose.yml --profile container-ollama up -d --wait
 #
 # The container publishes the contract port 11434 on loopback. Stop the host Ollama first, or set
 # OLLAMA_PORT to a free port and point LLM_BASE_URL at it.
-name: l1-llm
+name: agent-layers-llm
 
 services:
   ollama:

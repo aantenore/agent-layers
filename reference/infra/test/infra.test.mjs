@@ -33,7 +33,7 @@ const env = {
   BAO_TOKEN: token,
   OIDC_CLIENT_SECRET: secret,
 };
-const project = ['compose', '-p', 'l0-infra-test', '-f', compose];
+const project = ['compose', '-p', 'infra-test', '-f', compose];
 
 function dockerAvailable() {
   try {
@@ -121,7 +121,7 @@ test('seeded secret is readable through the OpenBao HTTP API', async (t) => {
 
 test('env-from-openbao renders the secret into an env file', async (t) => {
   if (skipReason) return t.skip(skipReason);
-  const dir = mkdtempSync(join(tmpdir(), 'l0-env-'));
+  const dir = mkdtempSync(join(tmpdir(), 'infra-env-'));
   try {
     const out = join(dir, '.env');
     await run('bash', [join(l0, 'scripts', 'env-from-openbao.sh'), '-o', out], { env, timeout: 30_000 });

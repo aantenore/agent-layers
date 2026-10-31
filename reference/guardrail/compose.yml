@@ -1,4 +1,4 @@
-name: l6-guardrails
+name: agent-layers-guardrail
 
 services:
   presidio-analyzer:

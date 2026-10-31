@@ -1,8 +1,8 @@
 // Loads Markdown files into Qdrant through mcp-server-qdrant's `qdrant-store`, one point per heading section.
 //
-//   node layers/l3-knowledge/scripts/ingest.mjs [dir ...] [--append]
+//   node reference/knowledge/scripts/ingest.mjs [dir ...] [--append]
 //
-// Default dir: layers/l3-knowledge/docs. The collection is recreated first so repeated runs do not pile up duplicates;
+// Default dir: reference/knowledge/docs. The collection is recreated first so repeated runs do not pile up duplicates;
 // pass --append to keep what is there. Each point carries metadata { id, path, heading }, and `id` is what
 // the retrieval side reports as the passage id.
 import { readdir, readFile } from 'node:fs/promises';

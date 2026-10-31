@@ -1,4 +1,4 @@
-# L0 infra, target "compose": Traefik (ingress) and OpenBao (secrets) for a laptop or a single VM.
+# Infra, target "compose": Traefik (ingress) and OpenBao (secrets) for a laptop or a single VM.
 #
 #   make infra-up        start both (waits for the healthchecks)
 #   make secrets-seed    write the platform secrets into OpenBao
@@ -8,7 +8,7 @@
 #
 # OpenBao runs in dev mode: in-memory storage, auto-unsealed, no TLS, a fixed root token. Development only.
 # Never expose it beyond localhost, never reuse the dev token anywhere else.
-name: l0-infra
+name: agent-layers-infra
 
 services:
   traefik:

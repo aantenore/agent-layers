@@ -42,7 +42,7 @@ variable "location" {
 
 variable "layers" {
   type    = list(string)
-  default = ["l3-knowledge"]
+  default = ["knowledge"]
 }
 
 provider "hcloud" {

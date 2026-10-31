@@ -1,4 +1,6 @@
-# L4 Tools
+# Tool reference setup
+
+Layer page: [docs/layers/tool.md](../../docs/layers/tool.md).
 
 How an agent acts on the world: call an API, run a function, use an MCP server.
 
@@ -11,7 +13,7 @@ How an agent acts on the world: call an API, run a function, use an MCP server.
 | One-off endpoint | declarative HTTP tool |
 | Anything else | `defineTool`: any JS function (the universal escape hatch) |
 
-Tool results are strings, plus optional `data`. Reference docs: reinloop `docs/layers/tools.md`.
+Tool results are strings, plus optional `data`. Reference docs: reinloop `docs/layers/tool.md`.
 
 ## Reference implementation
 
@@ -26,9 +28,9 @@ Tool results are strings, plus optional `data`. Reference docs: reinloop `docs/l
 ## Run
 
 ```
-make up LAYER=l4-tools      # httpbin on 8085, MCP bridge on 8090
-make test LAYER=l4-tools
-make down LAYER=l4-tools
+make up LAYER=tool      # httpbin on 8085, MCP bridge on 8090
+make test LAYER=tool
+make down LAYER=tool
 ```
 
 Contract: `HTTPBIN_URL=http://localhost:8085`, `OPENAPI_MCP_URL=http://localhost:8090/mcp`. The compose file binds
@@ -42,7 +44,7 @@ Native OpenAPI import (no bridge needed):
 
 ```json
 {
-  "openapi": { "httpbin": { "spec": "layers/l4-tools/openapi.json", "baseUrl": "${env:HTTPBIN_URL}" } },
+  "openapi": { "httpbin": { "spec": "reference/tool/openapi.json", "baseUrl": "${env:HTTPBIN_URL}" } },
   "agents": { "decoder": { "tools": ["httpbin__decodeBase64"] } }
 }
 ```

@@ -5,6 +5,8 @@
 /packages/cli/            @aantenore
 /adapters/_template/      @aantenore
 /docs/architecture.md     @aantenore
+/scripts/                 @aantenore
+/.github/                 @aantenore
 /package.json             @aantenore
 /tsconfig*.json           @aantenore
 

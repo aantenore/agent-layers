@@ -1,11 +1,23 @@
-# L8 Interfaces, channels & triggers (`interface`)
+# Interfaces, channels & triggers
+
+Layer id `interface` (L8), Experience plane. *Who talks to it and what starts it?*
 
 ## Responsibility
 
-How people, apps and other agents talk to an agent. L10 turns a channel (a chat UI, an IDE, another agent, a web
-frontend) into a call to the [harness](harness.md) runtime and streams the run back. It adds no agent logic.
+How people, apps and other agents talk to an agent, and what starts a run without a person. A channel turns a chat UI,
+an IDE, another agent or a web frontend into a call to the [harness](harness.md) and streams the run back. A trigger
+starts runs from events and schedules. Neither adds agent logic.
 
-## Standard
+## Ports
+
+| Port | What it does |
+|---|---|
+| [ChannelPort](../../spec/ports/ChannelPort.md) | `serve` a stack host to people, apps and agents; the host exposes `agents`, `run`, `stream` and `verify` |
+| [TriggerPort](../../spec/ports/TriggerPort.md) | `start` a handler that receives events and schedules |
+
+Data shape: [trigger.json](../../spec/schemas/trigger.json).
+
+## Standards
 
 | Audience | Standard |
 |---|---|
@@ -13,45 +25,33 @@ frontend) into a call to the [harness](harness.md) runtime and streams the run b
 | IDEs and MCP clients | MCP server |
 | Other agents | A2A (Agent2Agent, Linux Foundation, Apache-2.0) |
 | Agent to frontend event streaming | AG-UI (MIT) |
+| Events | CloudEvents |
 
-## Extension point
+## Boundaries
 
-Channel adapters: a small component that maps a channel's messages and identity onto a run request, and the
-`RunEvent` stream onto the channel's response format.
-
-## Reference implementation
-
-LibreChat (MIT), pointed at the OpenAI-compatible endpoint.
-
-## Adapter SDK + conformance
-
-Where a channel has no standard, write a channel adapter. A conformance check sends a fixed conversation through the
-adapter and verifies that the run request carries the caller's identity, that streamed output reassembles to the
-final output, and that errors surface as channel-native errors.
-
-## Around the layer
-
-- **Identity.** The channel passes the caller's token through; [identity](identity.md) verifies it. L10 never invents an
-  identity.
-- **Ingress.** Traffic enters through the L0 ingress.
+- **Identity.** The channel passes the caller's credential through; [identity](identity.md) verifies it. The interface
+  never invents an identity.
+- **Ingress.** Traffic enters through the ingress of [infra](infra.md).
 - **Transparency.** The channel tells users they are talking to an agent; see
   [governance](../cross-cutting/governance-compliance.md).
 
-## How to swap it
+## How to swap
 
-Any chat UI that speaks the OpenAI API replaces LibreChat with a base URL change. MCP clients and A2A agents connect
-to the same agents through their own endpoints.
+Any chat UI that speaks the OpenAI API replaces another with a base URL change. MCP clients and A2A agents connect to
+the same agents through their own endpoints. Where a channel has no standard, write a channel adapter; the conformance
+suite checks that the run carries the caller's identity, that streamed output reassembles to the final output, and
+that errors surface as channel-native errors.
 
-## Contract
+## Reference adapters
 
-Target contract; status is planned. Details in the port spec: [ChannelPort](../../spec/ports/ChannelPort.md) and [TriggerPort](../../spec/ports/TriggerPort.md).
+| Adapter | Maps |
+|---|---|
+| `terminal-channel` | A terminal (stdin and stdout) |
 
-- **OpenAI-compatible:** `POST /v1/chat/completions`, `model` = agent name, SSE streaming.
-- **A2A:** agent card at `/.well-known/agent-card.json`, JSON-RPC `message/send` and `message/stream`.
-- **MCP server:** agents served as tools.
-- **AG-UI:** `RunEvent`s mapped to AG-UI events.
+Planned: OpenAI-compatible chat API, MCP server, A2A and CloudEvents. Full list: [adapters.md](../adapters.md).
 
-## How to test
+## Reference setup
 
-Not implemented yet. The planned test starts the runtime, sends a chat completion with an agent name as `model`, and
-checks the streamed answer against the same run's `run_end` output.
+None yet. LibreChat (MIT) pointed at the OpenAI-compatible endpoint is the planned reference. The planned test starts the
+stack, sends a chat completion with an agent name as `model`, and checks the streamed answer against the same run's
+final output.

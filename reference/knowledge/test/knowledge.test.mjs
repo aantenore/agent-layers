@@ -11,7 +11,7 @@ const layerDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(layerDir, '../..');
 try { process.loadEnvFile(resolve(repoRoot, '.env')); } catch { /* .env is optional */ }
 
-const wikiDir = resolve(repoRoot, process.env.WIKI_DIR ?? 'layers/l3-knowledge/wiki');
+const wikiDir = resolve(repoRoot, process.env.WIKI_DIR ?? 'reference/knowledge/wiki');
 const llmBase = (process.env.LLM_BASE_URL ?? 'http://localhost:11434/v1').replace(/\/$/, '');
 const llmModel = process.env.LLM_MODEL ?? 'qwen3:4b';
 
@@ -36,7 +36,7 @@ async function llmSkipReason() {
   }
 }
 
-test('L3: wiki source conforms to the KnowledgeSource contract', async () => {
+test('knowledge: wiki source conforms to the KnowledgeSource contract', async () => {
   const failures = await reinloop.checkKnowledgeSource(reinloop.wikiKnowledge({ dir: wikiDir }), {
     query: 'When does the Zorblax tide gate close?',
     expectId: 'harbour.md#tide-gate',
@@ -44,8 +44,8 @@ test('L3: wiki source conforms to the KnowledgeSource contract', async () => {
   assert.deepEqual(failures, []);
 });
 
-test('L3: Qdrant source (mcp-server-qdrant) conforms to the KnowledgeSource contract', { timeout: 700_000 }, async (t) => {
-  if (!(await qdrantUp())) return t.skip(`SKIPPED: Qdrant not reachable at ${QDRANT_URL}; run "make up LAYER=l3-knowledge"`);
+test('knowledge: Qdrant source (mcp-server-qdrant) conforms to the KnowledgeSource contract', { timeout: 700_000 }, async (t) => {
+  if (!(await qdrantUp())) return t.skip(`SKIPPED: Qdrant not reachable at ${QDRANT_URL}; run "make up LAYER=knowledge"`);
   await ensureIngested();
   const source = reinloop.mcpKnowledge({
     name: 'docs',
@@ -63,7 +63,7 @@ test('L3: Qdrant source (mcp-server-qdrant) conforms to the KnowledgeSource cont
   }
 });
 
-test('L3: an agent answers fictional facts through auto-retrieval', { timeout: 600_000 }, async (t) => {
+test('knowledge: an agent answers fictional facts through auto-retrieval', { timeout: 600_000 }, async (t) => {
   const reason = await llmSkipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
   const withQdrant = await qdrantUp();

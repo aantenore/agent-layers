@@ -20,7 +20,7 @@ async function skipReason() {
     const groups = ((await res.json()).data ?? []).map((m) => m.id);
     for (const g of ['default', 'fallback-test']) if (!groups.includes(g)) return `gateway has no model group "${g}"`;
   } catch {
-    return `gateway not reachable at ${gatewayUrl}; start it with "make up LAYER=l7-cache-router"`;
+    return `gateway not reachable at ${gatewayUrl}; start it with "make up LAYER=cache"`;
   }
   try {
     await fetch(`${llmUrl}/models`, { signal: AbortSignal.timeout(3000) });
@@ -44,7 +44,7 @@ async function complete(model, content) {
 const gateway = () => reinloop.openaiCompatible({ name: 'gateway', baseUrl: gatewayUrl, apiKey: gatewayKey });
 const modelRef = (model) => ({ provider: gateway(), model, params });
 
-test('L7: a reinloop agent completes through the gateway', { timeout: 240_000 }, async (t) => {
+test('cache: a reinloop agent completes through the gateway', { timeout: 240_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
   const agent = reinloop.agent({ model: modelRef('default'), instructions: 'Answer in one short sentence.' });
@@ -53,7 +53,7 @@ test('L7: a reinloop agent completes through the gateway', { timeout: 240_000 },
   assert.ok(result.output.trim().length > 0, 'empty output');
 });
 
-test('L7: an identical second request is served from the Valkey cache', { timeout: 240_000 }, async (t) => {
+test('cache: an identical second request is served from the Valkey cache', { timeout: 240_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
   const prompt = `Name one fruit. (${nonce}-cache)`;
@@ -65,7 +65,7 @@ test('L7: an identical second request is served from the Valkey cache', { timeou
   assert.equal(second.body.id, first.body.id, 'a cache hit replays the stored response');
 });
 
-test('L7: the fallback group is answered by its fallback', { timeout: 240_000 }, async (t) => {
+test('cache: the fallback group is answered by its fallback', { timeout: 240_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
   const { headers, body } = await complete('fallback-test', `Name one animal. (${nonce}-fallback)`);
@@ -76,7 +76,7 @@ test('L7: the fallback group is answered by its fallback', { timeout: 240_000 },
   assert.equal(result.status, 'completed', `status ${result.status}: ${result.reason ?? ''}`);
 });
 
-test('L7: ruleRouter picks the model per request, visible in the events', { timeout: 240_000 }, async (t) => {
+test('cache: ruleRouter picks the model per request, visible in the events', { timeout: 240_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
   const router = reinloop.ruleRouter({ rules: [{ when: { hasTools: true }, model: 'fallback-test' }], default: 'default' });

@@ -28,11 +28,11 @@ async function promptfooSkipReason(e) {
   return probe.code === 0 ? undefined : `${PROMPTFOO} is not available through npx (network?): ${probe.out.trim().split('\n').pop()}`;
 }
 
-test('L9: promptfoo runs the smoke dataset through the reinloop provider', { timeout: 900_000 }, async (t) => {
+test('eval: promptfoo runs the smoke dataset through the reinloop provider', { timeout: 900_000 }, async (t) => {
   const why = evalSkipReason(reinloop) ?? (await llmSkipReason());
   if (why) return t.skip(`SKIPPED: ${why}`);
 
-  const dir = await mkdtemp(join(tmpdir(), 'l9-pf-'));
+  const dir = await mkdtemp(join(tmpdir(), 'eval-pf-'));
   const e = {
     ...env,
     PROMPTFOO_CONFIG_DIR: join(dir, 'config'),

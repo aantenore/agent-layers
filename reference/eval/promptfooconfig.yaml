@@ -1,7 +1,7 @@
 # Regression suite for the platform. Run (pinned, see README):
-#   npx promptfoo@0.125.1 eval -c layers/l9-eval/promptfooconfig.yaml
+#   npx promptfoo@0.125.1 eval -c reference/eval/promptfooconfig.yaml
 # Tests come from the dataset (EVAL_DATASET, default datasets/smoke.jsonl) through promptfoo-tests.mjs.
-description: agent-layers L9 smoke
+description: agent-layers eval smoke
 
 providers:
   - id: file://reinloop-provider.mjs

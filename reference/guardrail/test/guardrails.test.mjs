@@ -25,7 +25,7 @@ const agentWith = (script, middleware, tools = []) => {
   return { name: 'l6', model: { provider, model: 'mock-1' }, tools, middleware, provider };
 };
 
-describe('L6 guardrails: Presidio', async (t) => {
+describe('guardrail: Presidio', async (t) => {
   let up = false;
   before(async () => {
     up = (await reachable(`${analyzerUrl}/health`)) && (await reachable(`${anonymizerUrl}/health`));
@@ -71,7 +71,7 @@ describe('L6 guardrails: Presidio', async (t) => {
   });
 });
 
-describe('L6 guardrails: LLM Guard', async () => {
+describe('guardrail: LLM Guard', async () => {
   let up = false;
   before(async () => {
     up = await reachable(`${llmGuardUrl}/healthz`, { timeoutMs: 3000 });

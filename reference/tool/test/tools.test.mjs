@@ -35,11 +35,11 @@ async function mcpAnswers(url) {
   }
 }
 const mcpUp = await mcpAnswers(mcpUrl);
-const needHttpbin = httpbinUp ? false : `httpbin not reachable at ${httpbin}; run "make up LAYER=l4-tools"`;
-const needMcp = mcpUp ? false : `OpenAPI MCP bridge is not answering at ${mcpUrl}; run "make up LAYER=l4-tools"`;
+const needHttpbin = httpbinUp ? false : `httpbin not reachable at ${httpbin}; run "make up LAYER=tool"`;
+const needMcp = mcpUp ? false : `OpenAPI MCP bridge is not answering at ${mcpUrl}; run "make up LAYER=tool"`;
 const skip = (reason) => (reason ? { skip: `SKIPPED: ${reason}` } : {});
 
-test('L4.1: a JS function is a tool (defineTool)', async () => {
+test('tool 1: a JS function is a tool (defineTool)', async () => {
   const add = reinloop.defineTool({
     name: 'add',
     description: 'Add two integers',
@@ -53,7 +53,7 @@ test('L4.1: a JS function is a tool (defineTool)', async () => {
   assert.deepEqual([res.status, result.content, result.isError], ['completed', '42', false]);
 });
 
-test('L4.2: declarative http tool against httpbin', { ...skip(needHttpbin) }, async () => {
+test('tool 2: declarative http tool against httpbin', { ...skip(needHttpbin) }, async () => {
   const decode = reinloop.httpTool({
     name: 'decode_b64', description: 'Decode base64url text', method: 'GET', url: `${httpbin}/base64/decode/{value}`,
     schema: schema({ value: { type: 'string' } }, ['value']),
@@ -83,7 +83,7 @@ test('L4.2: declarative http tool against httpbin', { ...skip(needHttpbin) }, as
   assert.equal((await bearer.run({}, ctx())).isError, true);
 });
 
-test('L4.3: native OpenAPI import against httpbin', { ...skip(needHttpbin) }, async () => {
+test('tool 3: native OpenAPI import against httpbin', { ...skip(needHttpbin) }, async () => {
   const spec = JSON.parse(await readFile(specFile, 'utf8'));
   const tools = byName(reinloop.openapiTools(spec, { baseUrl: httpbin, prefix: 'httpbin' }));
   assert.deepEqual(Object.keys(tools).sort(), ['httpbin__checkBearer', 'httpbin__decodeBase64', 'httpbin__echoJson', 'httpbin__echoQuery', 'httpbin__getStatus']);
@@ -96,7 +96,7 @@ test('L4.3: native OpenAPI import against httpbin', { ...skip(needHttpbin) }, as
   assert.match((await tools.httpbin__getStatus.run({ code: 503 }, ctx())).content, /^HTTP 503/);
 });
 
-test('L4.4: the same API through the OpenAPI to MCP bridge (streamable HTTP)', { ...skip(needMcp) }, async () => {
+test('tool 4: the same API through the OpenAPI to MCP bridge (streamable HTTP)', { ...skip(needMcp) }, async () => {
   const { client, tools } = await reinloop.mcpTools('httpbin', { url: mcpUrl, timeoutMs: 30_000 });
   try {
     const t = byName(tools);
@@ -109,7 +109,7 @@ test('L4.4: the same API through the OpenAPI to MCP bridge (streamable HTTP)', {
   }
 });
 
-test('L4.5: MCP reference server over stdio (server-everything)', { timeout: 180_000 }, async (t) => {
+test('tool 5: MCP reference server over stdio (server-everything)', { timeout: 180_000 }, async (t) => {
   let connected;
   try {
     connected = await reinloop.mcpTools('everything', {
@@ -140,7 +140,7 @@ async function llmSkip() {
   return false;
 }
 
-test('L4.6: end-to-end agent run calls an httpbin tool', { timeout: 420_000, ...skip(needHttpbin) }, async (t) => {
+test('tool 6: end-to-end agent run calls an httpbin tool', { timeout: 420_000, ...skip(needHttpbin) }, async (t) => {
   const reason = await llmSkip();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
   const spec = JSON.parse(await readFile(specFile, 'utf8'));

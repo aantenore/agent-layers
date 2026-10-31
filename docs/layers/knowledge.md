@@ -1,4 +1,6 @@
-# L4 Knowledge & memory (`knowledge`)
+# Knowledge & memory
+
+Layer id `knowledge` (L4), Agent plane. *What does it know?*
 
 ## Responsibility
 
@@ -6,7 +8,17 @@ Give agents information that is not in the model. That is more than RAG over doc
 graphs and ontologies, a curated wiki, long-term memory and procedural know-how. Retrieval returns passages; the
 runtime decides how to present them.
 
-## Standard
+## Ports
+
+| Port | What it does |
+|---|---|
+| [KnowledgePort](../../spec/ports/KnowledgePort.md) | `search` a source and answer with passages |
+| [MemoryPort](../../spec/ports/MemoryPort.md) | `remember` / `recall` / `forget` long-term memory in a scope |
+| [IngestionPort](../../spec/ports/IngestionPort.md) | `ingest` / `delete` documents in a backend |
+
+Data shapes: [passage.json](../../spec/schemas/passage.json), [knowledge-document.json](../../spec/schemas/knowledge-document.json).
+
+## Standards
 
 There is no single standard, because the sources differ:
 
@@ -19,70 +31,54 @@ There is no single standard, because the sources differ:
 | Long-term memory | none |
 | Procedural know-how | Agent Skills |
 
-**Transport is standardised, the result is not.** MCP defines how an agent reaches a source (tools, resources). It
-does not define what a search returns: every MCP server answers in its own shape. So L3 has two parts:
+**Transport is standardised, the result is not.** MCP defines how an agent reaches a source (tools, resources) but not
+what a search returns: every MCP server answers in its own shape. So the layer has two parts:
 
-- **Transport:** MCP, HTTP or a JS function.
-- **Result contract:** `KnowledgeSource.search → Passage { id, text, source, score, metadata }`.
+- **Transport:** MCP, HTTP or a function.
+- **Result contract:** `KnowledgePort.search` returns `Passage { id, text, source, score, metadata }`.
 
 Adapters translate each backend into `Passage`. The uniform result is what lets [telemetry](telemetry.md) trace and
-[eval](eval.md) evaluate retrieval quality the same way for every backend.
+[eval](eval.md) score retrieval the same way for every backend.
 
-## Extension point
+## Boundaries
 
-`KnowledgeSource.search({ query, k, filter, identity }) → Passage[]`. A source can be an MCP tool, an HTTP endpoint
-or a JS function.
+- Read-only context retrieval is knowledge; anything with side effects is a [tool](tool.md).
+- The stack injects the top passages before the model call as a delimited block marked untrusted, so retrieved text is
+  data and not instructions (see [security](../cross-cutting/security.md)).
+- The caller's identity reaches every source, so a source can enforce per-user access.
+- **Ingestion.** Converting PDF, DOCX and other formats to Markdown or chunks happens before indexing and is not part
+  of the search contract.
+- **Graph retrieval.** Graph-plus-vector systems sit behind an adapter; nothing in the contract changes.
 
-## Reference implementation
+## How to swap
 
-| Source | Adapter | Reference | License | Status |
-|---|---|---|---|---|
-| Documents (vector) | `mcpKnowledge` | Qdrant + mcp-server-qdrant (`qdrant-find`) | Apache-2.0 / Apache-2.0 | now |
-| Any HTTP search service | `httpKnowledge` | `POST {url}` returning passages | - | now |
-| Curated wiki | `wikiKnowledge` | Markdown folder (`WIKI_DIR`), zero infra | - | now |
-| Structured data | `sqlKnowledge` | MCP Toolbox for Databases | Apache-2.0 | next |
-| Graphs and ontologies | `sparqlKnowledge` | SPARQL 1.1 Protocol; Apache Jena Fuseki | Apache-2.0 | next |
-| Property graphs | graph adapter | Cypher / GQL (for example Neo4j; its Community edition is GPL-3.0, so it is a target, not a reference) | - | next |
-| Long-term memory | `memoryKnowledge` | to be chosen | - | next |
+- Any MCP server whose tool returns passages works through the `mcp` adapter.
+- Any HTTP service implementing `POST {url} {query,k,filter}` → `{passages}` works through `http-knowledge`.
+- Anything else is an adapter implementing KnowledgePort, checked with the conformance suite (fixed corpus, `k` is
+  respected, a filter narrows the result, results validate against `passage.json`).
 
-## Adapter SDK + conformance
+## Reference adapters
 
-`KnowledgeSource` plus a conformance check. It indexes a small fixed corpus, queries it, and verifies that results
-validate against [passage.json](../../spec/schemas/passage.json), respect `k`, and that a filter narrows the result. A
-new backend is supported when its adapter passes.
+| Adapter | Maps |
+|---|---|
+| `markdown-knowledge` | A folder of Markdown files, split by heading (zero infrastructure) |
+| `http-knowledge` | Any HTTP search service returning passages |
+| `mcp` | MCP servers as knowledge sources |
 
-## Around the layer
+Planned: Qdrant, SQL and SPARQL sources. Full list: [adapters.md](../adapters.md).
 
-- **Ingestion.** Docling (MIT) converts PDF, DOCX and other formats to Markdown or chunks before they are indexed.
-  Described, not wired into the tests.
-- **Long-term memory.** What the agent learns across sessions, exposed as a `KnowledgeSource` like any other.
-- **Optional GraphRAG.** Graphiti (Apache-2.0) and LightRAG (MIT) build a graph from documents and answer from it.
-  They sit behind an adapter; nothing in the contract changes.
+## Reference setup
 
-## How to swap it
-
-- Any MCP server whose tool returns passages works with a thin `mcpKnowledge` mapping.
-- Any HTTP service implementing `POST {url} {query,k,filter}` → `{passages}` works with `httpKnowledge`, no code.
-- Anything else is a JS function implementing `KnowledgeSource`.
-
-## Contract
-
-```ts
-interface KnowledgeSource { search(q: { query: string; k?: number; filter?: object; identity?: Identity }): Promise<Passage[]> }
-interface Passage { id: string; text: string; source?: string; score?: number; metadata?: object }
-```
-
-Schema: [passage.json](../../spec/schemas/passage.json). Details in the port spec: [KnowledgePort](../../spec/ports/KnowledgePort.md), [MemoryPort](../../spec/ports/MemoryPort.md) and [IngestionPort](../../spec/ports/IngestionPort.md).
-
-The reinloop `knowledge` middleware injects the top-k passages as a delimited block marked untrusted, so retrieved
-text is data and not instructions (see [security](../cross-cutting/security.md)).
-
-## How to test
+[`reference/knowledge/`](../../reference/knowledge/README.md) runs Qdrant (Apache-2.0) with `mcp-server-qdrant`
+(Apache-2.0) for documents, and a Markdown wiki folder that needs no services. Docling (MIT) is the suggested
+converter for PDFs and Office files; Graphiti (Apache-2.0) and LightRAG (MIT) are optional graph backends; Apache Jena
+Fuseki and MCP Toolbox for Databases (both Apache-2.0) are the next references for SPARQL and SQL. Variables:
+`QDRANT_URL`, `QDRANT_COLLECTION`, `WIKI_DIR`.
 
 ```bash
-make up LAYER=l3-knowledge
-make test LAYER=l3-knowledge
-make down LAYER=l3-knowledge
+make up LAYER=knowledge
+make test LAYER=knowledge
+make down LAYER=knowledge
 ```
 
-Variables: `QDRANT_URL`, `QDRANT_COLLECTION`, `WIKI_DIR`. The wiki tests run without Docker.
+The wiki tests run without Docker.

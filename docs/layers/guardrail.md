@@ -1,66 +1,60 @@
-# L7 Guardrails (`guardrail`)
+# Guardrails
+
+Layer id `guardrail` (L7), Control plane. *Is this content acceptable?*
 
 ## Responsibility
 
 Inspect what goes into and comes out of the agent, and what tools receive and return: PII, prompt injection, policy
 violations. A guard can allow, block or redact.
 
-## Standard
+## Ports
 
-None. The contract is defined by this repository.
+| Port | What it does |
+|---|---|
+| [GuardPort](../../spec/ports/GuardPort.md) | `check` a `GuardInput` at one of four stages and return a `GuardVerdict` |
 
-## Extension point
+Stages: `input`, `output`, `tool_args`, `tool_result`. Data shapes: [guard-request.json](../../spec/schemas/guard-request.json),
+[guard-verdict.json](../../spec/schemas/guard-verdict.json). `GuardInput.subject` is the caller's identity without its
+token (an object, not a string).
 
-`Guard.check(GuardInput) → GuardVerdict`, running at four stages: `input`, `output`, `tool_args`, `tool_result`.
+## Standards
 
-## Reference implementation
+None. The contract is defined by this repository; any service that accepts a `GuardInput` as a JSON `POST` and answers
+with a `GuardVerdict` can be a guard, in any language.
 
-| Role | Reference | License |
-|---|---|---|
-| PII detection and redaction | Microsoft Presidio (analyzer + anonymizer) | MIT |
-| Prompt injection, toxicity, etc. | LLM Guard API | MIT |
+## Boundaries
 
-Llama Guard is deliberately not used: it is under the Llama Community License, which is not OSI-approved.
+- Whether the content is acceptable is guardrail; who may do what is [identity](identity.md).
+- `block` on `input` or `output` ends the run with status `stopped` and reason `guardrail:<guard>:<stage>`; on
+  `tool_args` the call is denied; on `tool_result` the result is withheld. `redact` replaces the text.
+- Guards of a stage run in configuration order; a guard that fails counts as a block (fail closed).
+- Every block and redact is emitted to [telemetry](telemetry.md) without the sensitive text.
 
-## Adapter SDK + conformance
+## How to swap
 
-The `Guard` interface, the HTTP guard contract below, and a conformance check: known-bad and known-good samples per
-stage, verified against the verdict schema and the expected actions.
+Any HTTP guard works through `http-guard`; a function or a local classifier is an adapter on GuardPort, checked with
+the conformance suite (known-good and known-bad samples per stage). Other engines (NeMo Guardrails, Guardrails AI,
+Granite Guardian) fit behind a small HTTP shim.
 
-## Around the layer
+## Reference adapters
 
-- **Zero-infra regex guard.** A built-in pattern guard (emails, keys, simple injection phrases) for setups with no
-  Presidio or LLM Guard running. Coarse, but it works everywhere.
-- **Audit events.** Every block and redact is emitted to [telemetry](telemetry.md) (`agent.guardrail.actions`) without
-  the sensitive text.
+| Adapter | Maps |
+|---|---|
+| `regex-guard` | Regular expressions (emails, keys, simple injection phrases); coarse, but works everywhere |
+| `http-guard` | The guard HTTP contract |
+| `presidio` | Microsoft Presidio analyzer and anonymizer (PII) |
+| `llm-guard` | LLM Guard API (prompt injection, secrets) |
 
-## How to swap it
+Full list: [adapters.md](../adapters.md).
 
-Any service that accepts a `GuardInput` as a JSON `POST` and answers with a `GuardVerdict` works through the
-built-in `http` adapter, in any language. A JS function works through the `js` adapter. Built-in adapters:
-`presidio`, `llm-guard`, `http`, `js`.
+## Reference setup
 
-## Contract
-
-```ts
-interface Guard { check(input: GuardInput): Promise<GuardVerdict> }
-// GuardInput   { stage, text, agent, runId, tool?, subject? }
-// GuardVerdict { action: 'allow' | 'block' | 'redact', text?, reason? }
-```
-
-- `block` on `input` / `output` ends the run: status `stopped`, reason `guardrail:<guard>:<stage>`.
-- `block` on `tool_args` denies the call.
-- `redact` replaces the text with `GuardVerdict.text`.
-
-Schemas: [guard-request.json](../../spec/schemas/guard-request.json), [guard-verdict.json](../../spec/schemas/guard-verdict.json).
-Details in the port spec: [GuardPort](../../spec/ports/GuardPort.md).
-
-## How to test
+[`reference/guardrail/`](../../reference/guardrail/README.md) runs Presidio (MIT) and LLM Guard (MIT). Llama Guard is
+deliberately not used: it is under the Llama Community License, which is not OSI-approved. Variables:
+`PRESIDIO_ANALYZER_URL`, `PRESIDIO_ANONYMIZER_URL`, `LLM_GUARD_URL`, `LLM_GUARD_TOKEN`.
 
 ```bash
-make up LAYER=l6-guardrails
-make test LAYER=l6-guardrails
-make down LAYER=l6-guardrails
+make up LAYER=guardrail
+make test LAYER=guardrail
+make down LAYER=guardrail
 ```
-
-Variables: `PRESIDIO_ANALYZER_URL`, `PRESIDIO_ANONYMIZER_URL`, `LLM_GUARD_URL`, `LLM_GUARD_TOKEN`.

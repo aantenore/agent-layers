@@ -1,16 +1,16 @@
-# L9 Evaluation and improvement
+# Eval reference setup
 
-Measure the agent, attribute failures to a layer, verify fixes.
+Layer page: [docs/layers/eval.md](../../docs/layers/eval.md). Measure the agent, attribute failures to a layer, verify fixes.
 
 ## Standard situation
 
-There is no open standard for agent evaluation. L9 is therefore an adapter layer: a small contract (dataset, result,
+There is no open standard for agent evaluation. The eval layer is therefore an adapter layer: a small contract (dataset, result,
 `Evaluator`), a reference test runner, and layer attribution from runtime events. Assertion engines and optimisers stay
 upstream; this layer does not rebuild them.
 
 ## Extension point
 
-`Evaluator.score(case, run) -> EvalScore[]` (see [contracts](../../docs/contracts.md#l9-evaluation)). An evaluator is any
+`Evaluator.score(case, run) -> EvalScore[]` (port: [EvaluatorPort](../../spec/ports/EvaluatorPort.md)). An evaluator is any
 object with a `name` and a `score` function; a conformance check is shipped with reinloop:
 
 ```js
@@ -24,7 +24,7 @@ const failures = await reinloop.checkEvaluator(myEvaluator); // [] = conformant
 |---|---|---|---|
 | Test runner, assertions, comparison UI | [promptfoo](https://github.com/promptfoo/promptfoo) (pinned `0.125.1`) | MIT | [Inspect AI](https://github.com/UKGovernmentBEIS/inspect_ai) (MIT), DeepEval (Apache-2.0) |
 | Per-layer attribution | reinloop `layerSignals()` | MIT | any `Evaluator` |
-| Retrieval quality (L3) | not bundled | | [RAGAS](https://github.com/explodinggradients/ragas) (Apache-2.0) |
+| Retrieval quality (`knowledge`) | not bundled | | [RAGAS](https://github.com/explodinggradients/ragas) (Apache-2.0) |
 | Prompt optimisation | not bundled | | [DSPy](https://github.com/stanfordnlp/dspy) (MIT), [Opik](https://github.com/comet-ml/opik) (Apache-2.0) |
 | Judge | reinloop `judgeEvaluator` (the local model) | MIT | DeepEval metrics (Apache-2.0), promptfoo `llm-rubric` |
 
@@ -41,8 +41,8 @@ const failures = await reinloop.checkEvaluator(myEvaluator); // [] = conformant
 
 ## Contract
 
-- Dataset: JSONL of `{ id, input, expected?, tags?, layer? }` ([schema](../../contracts/eval-case.json)).
-- Results: JSONL of `{ id, runId, output, status, scores: [{ metric, value 0..1, layer?, reason? }] }` ([schema](../../contracts/eval-result.json)).
+- Dataset: JSONL of `{ id, input, expected?, tags?, layer? }` ([schema](../../spec/schemas/eval-case.json)).
+- Results: JSONL of `{ id, runId, output, status, scores: [{ metric, value 0..1, layer?, reason? }] }` ([schema](../../spec/schemas/eval-result.json)).
 - `layerSignals()` emits one `<layer>_health` score per layer that has a signal (1 = healthy): `tool` (tool errors, bad
   arguments), `identity` (denied calls), `guardrail`, `harness` (failed run, budget stop, compaction), `llm` (truncation,
   refusal, invalid structured output, provider errors), `knowledge` (empty retrievals), `cache` (hit rate). It reads a
@@ -51,7 +51,7 @@ const failures = await reinloop.checkEvaluator(myEvaluator); // [] = conformant
 Run the reinloop-native path (no promptfoo):
 
 ```sh
-reinloop eval layers/l9-eval/datasets/smoke.jsonl --agent smoke --agents layers/l9-eval/agents --out results.jsonl
+reinloop eval reference/eval/datasets/smoke.jsonl --agent smoke --agents reference/eval/agents --out results.jsonl
 reinloop replay --all --agent smoke --model ollama/qwen3:4b --out compare.jsonl   # needs a file store in reinloop.json
 ```
 
@@ -59,7 +59,7 @@ reinloop replay --all --agent smoke --model ollama/qwen3:4b --out compare.jsonl 
 
 ```sh
 export LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3:4b LLM_API_KEY=ollama
-npx promptfoo@0.125.1 eval -c layers/l9-eval/promptfooconfig.yaml
+npx promptfoo@0.125.1 eval -c reference/eval/promptfooconfig.yaml
 npx promptfoo@0.125.1 view            # comparison UI
 ```
 
@@ -72,7 +72,7 @@ Model-graded checks use promptfoo's own syntax, for example an `llm-rubric` asse
 
 ## The improvement loop
 
-1. Traces: every run is an event log (run store) and an OTLP trace (L8).
+1. Traces: every run is an event log (run store) and an OTLP trace (`telemetry`).
 2. Per-layer evaluators: `layerSignals()` over the logs (or traces) points at the weakest layer; `judgeEvaluator` and
    `expectedEvaluator` score the answer itself.
 3. Failing cases go into the dataset (`datasets/*.jsonl`, with `layer` set to the layer at fault).
@@ -90,19 +90,19 @@ Model-graded checks use promptfoo's own syntax, for example an `llm-rubric` asse
 ## Swapping
 
 - Runner: keep the dataset and result JSONL; point DeepEval or Inspect AI at `datasets/*.jsonl` and have them call the
-  agent through `reinloop serve` (L2, HTTP) or in-process like `reinloop-provider.mjs`.
+  agent through `reinloop serve` (HTTP) or in-process like `reinloop-provider.mjs`.
 - Evaluators: pass your own `Evaluator[]` to `evaluate()`; check them with `checkEvaluator`.
 - Judge model: any reinloop agent, local or hosted.
 
 ## Tests
 
 ```sh
-LAYER=l9-eval npm run test:layer      # or: node --test "layers/l9-eval/test/*.test.mjs"
+LAYER=eval npm run test:layer      # or: node --test "reference/eval/test/*.test.mjs"
 ```
 
 | Test | Needs |
 |---|---|
-| `dataset.test.mjs`: dataset follows the contract; `evaluate` rows follow the result contract (mock model) | a reinloop with the L9 API |
+| `dataset.test.mjs`: dataset follows the contract; `evaluate` rows follow the result contract (mock model) | a reinloop with the evaluation API |
 | `diagnose.test.mjs`: a tool-failure run is attributed to `tool`; the diagnose agent returns a schema-valid verdict | same, plus Ollama with `$LLM_MODEL` for the second test (slow with a reasoning model) |
 | `promptfoo.test.mjs`: promptfoo runs the dataset through the provider; the designed-to-fail case fails | same, plus Ollama, `npx` and network on first use |
 

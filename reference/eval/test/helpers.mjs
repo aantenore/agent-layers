@@ -23,9 +23,9 @@ export async function llmSkipReason() {
   if (!ids.includes(model)) return `model "${model}" is not available at ${baseUrl}; run "ollama pull ${model}"`;
 }
 
-/** Returns a reason when this reinloop has no L9 support (older install or REINLOOP_SRC unset). */
+/** Returns a reason when this reinloop has no evaluation support (older install or REINLOOP_SRC unset). */
 export function evalSkipReason(reinloop) {
   if (typeof reinloop.layerSignals !== 'function' || typeof reinloop.evaluate !== 'function') {
-    return 'this reinloop has no L9 evaluation API; set REINLOOP_SRC to a newer checkout';
+    return 'this reinloop has no evaluation API; set REINLOOP_SRC to a newer checkout';
   }
 }

@@ -26,7 +26,7 @@ variable "region" {
 }
 
 variable "argocd_application" {
-  description = "Path to the Argo CD Application to apply once the cluster is up (layers/l0-infra/argocd/application.yaml)."
+  description = "Path to the Argo CD Application to apply once the cluster is up (reference/infra/argocd/application.yaml)."
   type        = string
   default     = null
 }

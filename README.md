@@ -68,7 +68,8 @@ packages/conformance  @agent-layers/conformance: one suite per port
 packages/cli     @agent-layers/cli: init, dev, check, test, eval, deploy, diff, layers
 adapters/<name>  @agent-layers/adapter-<name>: one package per standard or technology; _template to start one
 examples/        sample projects (minimal)
-reference/<id>/  reference setups per layer: compose files and live tests (today under layers/)
+reference/<id>/  reference setup per layer id: compose files, configs and live tests
+scripts/         docs tooling: adapter catalog generator and docs check
 docs/            product, architecture, stack, guide, adapters, layers/<id>.md, cross-cutting/
 ```
 
@@ -78,7 +79,8 @@ docs/            product, architecture, stack, guide, adapters, layers/<id>.md, 
 npm install                                          # workspaces, dev dependencies only
 npx tsc -p packages/core && npx tsc -p packages/cli  # typecheck one package
 npm test -w @agent-layers/core                       # tests of one package
-make test LAYER=l3-knowledge                         # live test of one reference setup
+make test LAYER=knowledge                            # live test of one reference setup (layer id)
+npm run docs:check                                   # links, layer tables, ports, env, adapter catalog
 ```
 
 Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). Core paths need a spec change first.

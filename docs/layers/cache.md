@@ -1,66 +1,57 @@
-# L2 Model access: routing, fallback, quotas, cache (`cache`)
+# Model access
+
+Layer id `cache` (L2), Model plane. *Which model, at what cost and latency?*
 
 ## Responsibility
 
-Reduce cost and latency and choose the model per request: exact-match caching, routing between model groups,
-fallbacks and quotas.
+Reduce cost and latency and choose the model per request: exact-match caching, routing between models, fallbacks and
+quotas. The agent sees an ordinary [llm](llm.md) endpoint.
 
-## Standard
+## Ports
 
-An OpenAI-compatible gateway. The agent sees an ordinary [llm](llm.md) endpoint.
+| Port | What it does |
+|---|---|
+| [RouterPort](../../spec/ports/RouterPort.md) | `select` picks the model for a request |
+| [CachePort](../../spec/ports/CachePort.md) | `get` / `set` / `delete` with a TTL; usable by any layer (tool results, embeddings, retrieval) |
 
-## Extension point
+## Standards
 
-- `CacheStore.get/set`: backend for the reinloop response cache.
-- `ModelRouter.select(req) → model`: per-request model choice inside the runtime.
+An OpenAI-compatible gateway is the standard way to provide routing, fallback and quotas outside the process. Cache
+stores that speak the Redis protocol are interchangeable.
 
-## Reference implementation
+## Boundaries
 
-| Role | Reference | License |
-|---|---|---|
-| Gateway | LiteLLM proxy (model groups, fallbacks, exact cache) | MIT core; `enterprise/` excluded |
-| Cache store | Valkey | BSD-3-Clause |
-| In process | reinloop memory / file response cache | MIT |
+- Output guards also run on cached answers: the cache stores the raw model response, see [architecture](../architecture.md#composition-pipelines).
+- Semantic caching is deliberately not part of the agent loop; exact-match caching is safe for tests and repeated
+  identical requests.
+- Rate and spend limits per key are quotas; see [cost](../cross-cutting/cost.md).
 
-Only the MIT-licensed parts of LiteLLM are used.
+## How to swap
 
-## Adapter SDK + conformance
+- A gateway replaces or complements the in-process router: set the `openai-compatible` adapter's base URL to it.
+- Any Redis-protocol store replaces Valkey; a custom cache implements CachePort.
+- A custom routing policy implements RouterPort.
 
-`ModelRouter`. A conformance check feeds fixed requests and verifies that `select` returns a model from the
-configured set and is deterministic for the same input. Gateways need no SDK: the OpenAI-compatible API is the
-standard.
+## Reference adapters
 
-## Around the layer
+| Adapter | Maps |
+|---|---|
+| `static-router` | A static model mapping |
+| `rule-router` | Rule-based choice, for example by prompt size or agent |
+| `memory-cache` | An in-process map (prototype) |
 
-- **In-process rule router.** A rule-based `ModelRouter` (for example by prompt size or agent) that works without a
-  gateway.
-- **Fallbacks.** If a model fails, the next one in the group is tried.
-- **Quotas.** Rate and spend limits per key; see [cost](../cross-cutting/cost.md).
+A model gateway sits behind `openai-compatible`. Full list: [adapters.md](../adapters.md).
 
-Semantic caching is deliberately not part of the agent loop; exact-match caching is safe for tests and repeated
-identical requests.
+## Reference setup
 
-## How to swap it
-
-- Any OpenAI-compatible gateway (Portkey, Helicone, Envoy AI Gateway, a plain reverse proxy) replaces LiteLLM:
-  set `GATEWAY_URL` and `GATEWAY_KEY`.
-- Any Redis-protocol store replaces Valkey.
-- A custom cache implements `CacheStore`; a custom routing policy implements `ModelRouter`.
-
-## Contract
-
-- Gateway: transparent OpenAI-compatible endpoint at `GATEWAY_URL`.
-- In process: `responseCache` over a `CacheStore`; `ModelRouter.select(req)` returns the model to use.
-
-Details in the port spec: [CachePort](../../spec/ports/CachePort.md) and [RouterPort](../../spec/ports/RouterPort.md).
-
-## How to test
+[`reference/cache/`](../../reference/cache/README.md) runs the LiteLLM proxy (MIT core; the `enterprise/` directory is
+under a separate commercial license and is not used) with Valkey (BSD-3-Clause) as the cache. The gateway exposes model
+groups, a fallback group and an exact-match cache. Variables: `GATEWAY_URL`, `GATEWAY_KEY`, `VALKEY_URL`.
 
 ```bash
-make up LAYER=l7-cache-router
-make test LAYER=l7-cache-router
-make down LAYER=l7-cache-router
+make up LAYER=cache
+make test LAYER=cache
+make down LAYER=cache
 ```
 
-The test sends the same request twice through the gateway and checks the second one is a cache hit.
-Variables: `GATEWAY_URL`, `GATEWAY_KEY`, `VALKEY_URL`.
+The test sends the same request twice through the gateway and checks that the second is a cache hit.

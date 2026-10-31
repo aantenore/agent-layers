@@ -12,7 +12,7 @@ async function loadCases() {
   return lines.map((l) => JSON.parse(l));
 }
 
-test('L9: the smoke dataset follows the EvalCase contract', async () => {
+test('eval: the smoke dataset follows the EvalCase contract', async () => {
   const cases = await loadCases();
   assert.equal(cases.length, 4);
   assert.equal(new Set(cases.map((c) => c.id)).size, cases.length, 'ids are unique');
@@ -25,7 +25,7 @@ test('L9: the smoke dataset follows the EvalCase contract', async () => {
   assert.ok(cases.some((c) => c.tags?.includes('designed-to-fail')), 'a case designed to fail');
 });
 
-test('L9: reinloop evaluate writes contract-shaped rows for the dataset', async (t) => {
+test('eval: reinloop evaluate writes contract-shaped rows for the dataset', async (t) => {
   const why = evalSkipReason(reinloop);
   if (why) return t.skip(`SKIPPED: ${why}`);
 

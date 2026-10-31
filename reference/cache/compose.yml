@@ -1,7 +1,7 @@
-# L7 gateway: LiteLLM proxy (OpenAI-compatible) with an exact-match response cache on Valkey (Redis protocol).
+# Model access gateway: LiteLLM proxy (OpenAI-compatible) with an exact-match response cache on Valkey (Redis protocol).
 # The LiteLLM config is inlined (`configs.*.content`) so this file has no relative bind mounts and keeps working when
 # several layer compose files are merged with multiple -f.
-name: l7-cache-router
+name: agent-layers-cache
 
 services:
   valkey:

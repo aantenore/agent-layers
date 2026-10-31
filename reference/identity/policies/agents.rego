@@ -1,4 +1,4 @@
-# Tool-call authorization for agents. Input: an AccessRequest (see docs/contracts.md, L5).
+# Tool-call authorization for agents. Input: an AccessRequest (see spec/schemas/access-request.json).
 #
 #   data.agents.allow     boolean, used by the reinloop `opa` adapter (default path agents/allow)
 #   data.agents.decision  { allow, reason }, the same decision with a reason (path agents/decision)

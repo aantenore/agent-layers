@@ -1,6 +1,6 @@
-# L1 LLM
+# LLM reference setup
 
-Model access for the platform. Documentation: [docs/layers/L1-llm.md](../../docs/layers/L1-llm.md).
+A local model for the platform. Layer page: [docs/layers/llm.md](../../docs/layers/llm.md).
 
 | Path | Content |
 |---|---|
@@ -33,9 +33,9 @@ Containers reach the host Ollama at `host.docker.internal:11434`.
 ## Optional: Ollama in a container
 
 ```bash
-docker compose -f layers/l1-llm/compose.yml --profile container-ollama up -d --wait
-docker compose -f layers/l1-llm/compose.yml --profile container-ollama exec ollama ollama pull qwen3:4b
-docker compose -f layers/l1-llm/compose.yml --profile container-ollama down      # add -v to drop the models
+docker compose -f reference/llm/compose.yml --profile container-ollama up -d --wait
+docker compose -f reference/llm/compose.yml --profile container-ollama exec ollama ollama pull qwen3:4b
+docker compose -f reference/llm/compose.yml --profile container-ollama down      # add -v to drop the models
 ```
 
 It listens on the same port as the host Ollama: stop the host one first, or set `OLLAMA_PORT` to another port and
@@ -44,9 +44,9 @@ adjust `LLM_BASE_URL`. `make up-all` does not start it (the profile is off).
 ## Test
 
 ```bash
-make test LAYER=l1-llm
+make test LAYER=llm
 # against a local reinloop checkout
-REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=l1-llm
+REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=llm
 ```
 
 The test checks the model with reinloop's `checkProvider` conformance check (text turn, forced tool call, usage, stop

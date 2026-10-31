@@ -1,4 +1,6 @@
-# L3 Knowledge
+# Knowledge reference setup
+
+Layer page: [docs/layers/knowledge.md](../../docs/layers/knowledge.md).
 
 Gives the agent facts it was not trained on. No standard exists for the shape of a retrieval result, so this layer is
 an adapter SDK: one small interface, adapters for the open standards that do exist (MCP tools, HTTP), and a
@@ -19,7 +21,7 @@ interface KnowledgeSource { name: string; search(q: { query: string; k?: number;
 interface Passage { id: string; text: string; source?: string; score?: number; metadata?: object }
 ```
 
-Schema: [`contracts/passage.json`](../../contracts/passage.json). Wire options, any of which can back a source:
+Schema: [`spec/schemas/passage.json`](../../spec/schemas/passage.json). Wire options, any of which can back a source:
 
 1. An MCP tool that returns passages (Qdrant: `qdrant-find`).
 2. HTTP: `POST {url}` with `{query, k, filter}` returns `{passages: Passage[]}`.
@@ -44,10 +46,10 @@ numbered citations, and emits a `knowledge_retrieval` event (source, query, numb
 ## Run
 
 ```bash
-make up LAYER=l3-knowledge                       # Qdrant on :6333
-node layers/l3-knowledge/scripts/ingest.mjs      # first run downloads the embedding model (~90 MB) via uvx
+make up LAYER=knowledge                       # Qdrant on :6333
+node reference/knowledge/scripts/ingest.mjs      # first run downloads the embedding model (~90 MB) via uvx
 export REINLOOP_MODEL=ollama/qwen3:4b OLLAMA_BASE_URL=http://localhost:11434/v1
-cd layers/l3-knowledge
+cd reference/knowledge
 reinloop run -a librarian "When does the Zorblax tide gate close?"
 reinloop run -a librarian "How often does the Aurelian Archive rotate its vault code?"
 ```
@@ -81,9 +83,9 @@ const failures = await reinloop.checkKnowledgeSource(mySource, { query: 'a quest
 ## Test
 
 ```bash
-make test LAYER=l3-knowledge
+make test LAYER=knowledge
 # against a local reinloop checkout
-REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=l3-knowledge
+REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=knowledge
 ```
 
 Three tests:
@@ -91,7 +93,7 @@ Three tests:
 1. Conformance of the wiki source (no infrastructure).
 2. Conformance of the Qdrant source through `mcp-server-qdrant`. Skips when Qdrant is unreachable; ingests the sample
    documents if the collection is empty.
-3. An agent on the L1 model (`LLM_MODEL`, default `qwen3:4b`) answers a wiki fact and a Qdrant fact using auto-retrieval,
+3. An agent on the local model (`LLM_MODEL`, default `qwen3:4b`) answers a wiki fact and a Qdrant fact using auto-retrieval,
    and the run records a `knowledge_retrieval` event with the expected passage id. Skips when Ollama or the model is
    missing; the Qdrant half is dropped when Qdrant is unreachable.
 

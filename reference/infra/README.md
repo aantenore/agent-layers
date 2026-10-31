@@ -1,7 +1,7 @@
-# L0 Infra
+# Infra reference setup
 
 Deploy targets, ingress, secrets and provisioning for the platform. Documentation, including the deploy-target
-contract: [docs/layers/L0-infra.md](../../docs/layers/L0-infra.md).
+contract: [docs/layers/infra.md](../../docs/layers/infra.md).
 
 | Path | Content |
 |---|---|

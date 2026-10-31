@@ -1,5 +1,5 @@
 ---
-description: Short-answer agent with read-only file access, used by the L9 smoke dataset
+description: Short-answer agent with read-only file access, used by the eval smoke dataset
 tools: [read_file]
 budget: { maxTurns: 6 }
 params: { temperature: 0, maxTokens: 2048 }

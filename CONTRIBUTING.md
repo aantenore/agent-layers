@@ -14,13 +14,16 @@ Adapters are independent packages, so anyone can add and maintain one without to
 4. Tests: `test/conformance.test.ts` with `checkAdapter` from `@agent-layers/conformance` must report no failures.
    For an upstream service, add a live contract test against a pinned version that skips when the service is down.
 5. `README.md`: what it maps onto which port, tiers, an options table and a config snippet.
-6. Add a row to [docs/adapters.md](docs/adapters.md) and, if you will maintain it, a line in [CODEOWNERS](CODEOWNERS).
+6. Run `npm run docs:adapters` to add the adapter to the catalog in [docs/adapters.md](docs/adapters.md) (the table is
+   generated from the descriptor; remove the adapter from the Planned list if it was there) and, if you will maintain
+   it, add a line in [CODEOWNERS](CODEOWNERS).
 
 Checks for the pull request, run only for the package you touched:
 
 ```bash
 npx tsc -p adapters/<name>/tsconfig.json
 npm test -w @agent-layers/adapter-<name>
+npm run docs:check
 ```
 
 New adapters start as `experimental`; the criteria for `beta` and `stable` are in
@@ -36,9 +39,23 @@ maintainers listed in CODEOWNERS. A core change starts with a spec change:
 3. Then the core, then the conformance suite, then the adapters that declare the old version.
 
 If the stack config schema changes, regenerate it with `npm run gen:schema -w @agent-layers/core`.
+Documentation follows the same rule: a changed layer, port or environment variable must be reflected in `docs/`;
+`npm run docs:check` catches the drift (see below).
 
 ## Style
 
 TypeScript, ESM, Node >= 22.18, `node --test`, small files, short JSDoc. Zero runtime dependencies in the core
 packages. Documentation in English, short sentences, no marketing language. Never put tokens or secrets in errors,
 logs or telemetry.
+
+## Documentation checks
+
+`npm run docs:check` (also `make docs-check`, and a step of the CI lint job) verifies that:
+
+- relative Markdown links and `#anchors` resolve;
+- layer ids, numbers, names and questions in tables match `LAYERS` in `packages/core`, and ports sit under their layer;
+- every port in `PORTS` has a page in `spec/ports/` with the same layer and version, and every page is a port;
+- `.env.example`, the environment table in [docs/contracts.md](docs/contracts.md) and the defaults in
+  `reference/*/compose.yml` agree;
+- the adapter catalog in [docs/adapters.md](docs/adapters.md) is what `npm run docs:adapters` generates;
+- no stale paths or model names remain, and the docs name no assistant tooling.

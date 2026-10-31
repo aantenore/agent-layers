@@ -5,8 +5,8 @@ node_modules/
 
 # data volumes and local state
 data/
-layers/*/data/
-layers/*/volumes/
+reference/*/data/
+reference/*/volumes/
 .terraform/
 .tofu/
 *.tfstate

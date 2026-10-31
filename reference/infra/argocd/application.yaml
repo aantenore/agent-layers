@@ -13,13 +13,13 @@ spec:
   source:
     repoURL: https://github.com/aantenore/agent-layers
     targetRevision: main
-    path: layers/l0-infra/helm/agent-layers
+    path: reference/infra/helm/agent-layers
     helm:
       valuesObject:
         global:
           domain: agents.example.com
         layers:
-          l3-knowledge:
+          knowledge:
             enabled: true
   destination:
     server: https://kubernetes.default.svc

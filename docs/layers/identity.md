@@ -1,68 +1,70 @@
-# L6 Identity & access (`identity`)
+# Identity & access
+
+Layer id `identity` (L6), Control plane. *Who is it, on whose behalf, and what is allowed?*
 
 ## Responsibility
 
 Know who is calling, act with the right credentials, and decide what is allowed. An agent acts either on behalf of a
 user or as its own identity.
 
-## Standard
+## Ports
+
+| Port | What it does |
+|---|---|
+| [IdentityPort](../../spec/ports/IdentityPort.md) | `verify` an inbound credential into an `Identity` |
+| [CredentialPort](../../spec/ports/CredentialPort.md) | `token` for an outbound call, on behalf of the caller or as the agent |
+| [AuthorizationPort](../../spec/ports/AuthorizationPort.md) | `evaluate` an access request into a decision |
+| [ApprovalPort](../../spec/ports/ApprovalPort.md) | Human approval for actions the policy marks `ask` |
+
+Data shapes: [identity.json](../../spec/schemas/identity.json), [access-request.json](../../spec/schemas/access-request.json),
+[access-decision.json](../../spec/schemas/access-decision.json), [approval.json](../../spec/schemas/approval.json).
+
+## Standards
 
 - OIDC / OAuth 2: JWT access tokens verified through discovery and JWKS.
 - RFC 8693 token exchange: on-behalf-of.
 - Client credentials: the agent's own identity.
 - OpenID AuthZEN for authorization requests.
 
-## Extension point
+## Boundaries
 
-- `IdentityVerifier`: token in, `Identity { subject, kind, roles, scopes, claims }` out.
-- `CredentialProvider.token(audience)`: token for an outbound call.
-- `Authorizer`: decision for a tool call.
+- Who may do what is identity; whether the content is acceptable is [guardrail](guardrail.md).
+- Authorization is local rules first (`allow` / `ask` / `deny` by tool, risk and `when: {roles, scopes, kind}`), then
+  the external decision point. A local `deny` is final, and a failing decision point denies (fail closed).
+- Tokens never appear in events, logs or traces. Telemetry masks attribute keys that look like secrets.
+- Every policy decision is emitted to [telemetry](telemetry.md) as an audit event.
 
-## Reference implementation
+## How to swap
 
-| Role | Reference | License |
-|---|---|---|
-| IdP | Keycloak (realm `agents`) | Apache-2.0 |
-| Policy | Open Policy Agent | Apache-2.0 |
+- Any OIDC provider (Keycloak, Entra ID, Auth0, Zitadel, Authentik) works through the same adapter by changing the
+  issuer and client; on-behalf-of needs RFC 8693 support at the token endpoint.
+- Any AuthZEN-compliant decision point, or OPA, implements AuthorizationPort.
+- Corporate identity is a profile change, not a code change; see [guide.md](../guide.md#from-prototype-to-production).
 
-## Adapter SDK + conformance
+## Reference adapters
 
-Authorizer adapters (`opa`, `authzen`) ship with the runtime. A new policy decision point implements `Authorizer`; a
-conformance check sends allow and deny cases and verifies the decision and the fail-closed behaviour when the PDP is
-down. Identity itself needs no SDK: OIDC and OAuth 2 are the standard.
+| Adapter | Maps |
+|---|---|
+| `static-identity` | A static token table (development only); IdentityPort and CredentialPort |
+| `rules-authorization` | A local rule list |
+| `memory-approval` | An in-process approval store |
+| `oidc` | OIDC / OAuth 2.0: JWT verification, RFC 8693 token exchange, client credentials |
+| `authzen` | OpenID AuthZEN access evaluation |
+| `opa` | Open Policy Agent data API |
 
-## Around the layer
+Full list: [adapters.md](../adapters.md).
 
-- **Automatic token forwarding.** When a tool or knowledge source declares an audience, the runtime obtains a token
-  from `CredentialProvider` and attaches it to the MCP or HTTP call. Agents and prompts never see it.
-- **Never logged.** Tokens do not appear in events, logs or traces.
-- **Audit.** Every policy decision is emitted to [telemetry](telemetry.md) (`agent.policy.decisions`).
+## Reference setup
 
-## How to swap it
-
-- Any OIDC provider (Auth0, Zitadel, Entra ID, Authentik) replaces Keycloak: set `OIDC_ISSUER`, `OIDC_CLIENT_ID`,
-  `OIDC_CLIENT_SECRET`. The provider must support token exchange if you use `on-behalf-of`.
-- Any AuthZEN-compliant PDP replaces OPA through the `authzen` adapter; OPA itself uses the `opa` adapter.
-
-## Contract
-
-- Inbound `Authorization: Bearer <JWT>` becomes an `Identity`.
-- Outbound token modes: `on-behalf-of` (RFC 8693, caller's token as `subject_token`) and `self` (`client_credentials`).
-- Authorization is local rules first (`allow` / `ask` / `deny` by tool, risk, `when: {roles, scopes, kind}`), then
-  the external `Authorizer`.
-- AuthZEN `POST /access/v1/evaluation` and OPA `POST {OPA_URL}/v1/data/agents/allow` share one `AccessRequest`.
-
-Schemas: [access-request.json](../../spec/schemas/access-request.json),
-[access-decision.json](../../spec/schemas/access-decision.json). Details in
-the port spec: [IdentityPort](../../spec/ports/IdentityPort.md), [CredentialPort](../../spec/ports/CredentialPort.md), [AuthorizationPort](../../spec/ports/AuthorizationPort.md) and [ApprovalPort](../../spec/ports/ApprovalPort.md).
-
-## How to test
+[`reference/identity/`](../../reference/identity/README.md) runs Keycloak (Apache-2.0, realm `agents`) and Open Policy
+Agent (Apache-2.0). Keycloak listens on `KEYCLOAK_PORT` (default 8080; use 18080 when 8080 is busy and set
+`OIDC_ISSUER` to match); OPA on 8181. Variables: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
+`TOOLS_AUDIENCE`, `OPA_URL`.
 
 ```bash
-make up LAYER=l5-identity
-make test LAYER=l5-identity
-make down LAYER=l5-identity
+make up LAYER=identity
+make test LAYER=identity
+make down LAYER=identity
 ```
 
-Variables: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `TOOLS_AUDIENCE`, `OPA_URL`. The test gets a real
-token from Keycloak, exchanges it, and checks allow and deny decisions from OPA.
+The test gets a real token from Keycloak, exchanges it, and checks allow and deny decisions from OPA.

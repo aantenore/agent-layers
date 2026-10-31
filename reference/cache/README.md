@@ -1,6 +1,6 @@
-# L7 Cache and router
+# Cache (model access) reference setup
 
-Response cache and model routing. Documentation: [docs/layers/L7-cache-router.md](../../docs/layers/L7-cache-router.md).
+Response cache and model routing. Layer page: [docs/layers/cache.md](../../docs/layers/cache.md).
 
 | Path | Content |
 |---|---|
@@ -39,8 +39,8 @@ back carries `x-litellm-attempted-fallbacks: 1`.
 ## Run
 
 ```bash
-make up LAYER=l7-cache-router      # LiteLLM needs about a minute to become healthy
-make down LAYER=l7-cache-router    # Valkey keeps no data on disk
+make up LAYER=cache      # LiteLLM needs about a minute to become healthy
+make down LAYER=cache    # Valkey keeps no data on disk
 ```
 
 Use it from reinloop as an OpenAI-compatible provider:
@@ -71,9 +71,9 @@ In-process routing with a rule router (works with models from different provider
 ## Test
 
 ```bash
-make test LAYER=l7-cache-router
+make test LAYER=cache
 # against a local reinloop checkout
-REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=l7-cache-router
+REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=cache
 ```
 
 It needs the stack above and the host Ollama, and skips with a message otherwise. It checks that a reinloop agent

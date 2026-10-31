@@ -1,10 +1,10 @@
-# L6 Guardrails
+# Guardrail reference setup
 
-Checks the text that flows through a run at four points: `input` (before the model), `output` (after it), `tool_args` and `tool_result`. A guard answers `allow`, `block` or `redact`.
+Layer page: [docs/layers/guardrail.md](../../docs/layers/guardrail.md). Checks the text that flows through a run at four points: `input` (before the model), `output` (after it), `tool_args` and `tool_result`. A guard answers `allow`, `block` or `redact`.
 
 ## Standard situation
 
-No open standard exists for agent guardrails, so L6 is an adapter layer: a `Guard` interface (see [contracts](../../docs/contracts.md#l6-guardrails)) plus references.
+No open standard exists for agent guardrails, so the layer is defined by this repository: [GuardPort](../../spec/ports/GuardPort.md) plus references.
 
 | Need | Reference | License | Port |
 |---|---|---|---|
@@ -17,9 +17,9 @@ Images are pinned in [`compose.yml`](compose.yml): `presidio-analyzer:2.2.362`, 
 The first start downloads the prompt-injection model and takes a few minutes; the container reports healthy once it is loaded. Memory: about 2 GB (analyzer) and 3 GB (LLM Guard) at most.
 
 ```sh
-make up LAYER=l6-guardrails          # needs .env (copy .env.example)
-make test LAYER=l6-guardrails
-make down LAYER=l6-guardrails
+make up LAYER=guardrail          # needs .env (copy .env.example)
+make test LAYER=guardrail
+make down LAYER=guardrail
 ```
 
 ## Extension point
@@ -27,7 +27,7 @@ make down LAYER=l6-guardrails
 Any object with `name` and `check(input) -> verdict` is a guard:
 
 ```ts
-interface GuardInput { stage: 'input' | 'output' | 'tool_args' | 'tool_result'; text: string; agent: string; runId: string; tool?: string; subject?: string }
+interface GuardInput { stage: 'input' | 'output' | 'tool_args' | 'tool_result'; text: string; agent: string; runId: string; tool?: string; subject?: Omit<Identity, 'token'> }
 interface GuardVerdict { action: 'allow' | 'block' | 'redact'; text?: string; reason?: string }
 ```
 
@@ -68,14 +68,14 @@ const failures = await checkGuard(myGuard, { benign: 'What is the capital of Fra
 
 ## Contract
 
-Provided: `Guard.check(GuardInput) -> GuardVerdict`; JSON Schemas [`guard-request.json`](../../contracts/guard-request.json) and [`guard-verdict.json`](../../contracts/guard-verdict.json). Env: `PRESIDIO_ANALYZER_URL` (5002), `PRESIDIO_ANONYMIZER_URL` (5001), `LLM_GUARD_URL` (8000), `LLM_GUARD_TOKEN`.
+Provided: `Guard.check(GuardInput) -> GuardVerdict`; JSON Schemas [`guard-request.json`](../../spec/schemas/guard-request.json) and [`guard-verdict.json`](../../spec/schemas/guard-verdict.json). Env: `PRESIDIO_ANALYZER_URL` (5002), `PRESIDIO_ANONYMIZER_URL` (5001), `LLM_GUARD_URL` (8000), `LLM_GUARD_TOKEN`.
 
-The reinloop `GuardInput.subject` is the caller's subject string (`identity.subject`); the schema in `contracts/` describes an object. A shim written against the schema should accept a string.
+`GuardInput.subject` is the caller's identity without its token: an object `{ subject, kind, roles?, scopes?, claims? }`, as in the schema and in `@agent-layers/core`. A shim should read `subject.subject` for the caller's name.
 
 ## Test
 
 `test/guardrails.test.mjs` runs against the live services and skips when they are not reachable. It checks both references with `checkGuard`, that an email is redacted before the model sees it, that a prompt injection stops the run with `guardrail:llm-guard:input`, and that a `tool_args` block denies the call. The model is a scripted mock; no LLM is needed.
 
 ```sh
-REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=l6-guardrails
+REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=guardrail
 ```

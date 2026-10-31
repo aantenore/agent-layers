@@ -10,15 +10,15 @@ setup, and each can be swapped by changing one line of config. The design is in 
 |---|---|---|---|---|---|
 | Foundation | L0 | [Infrastructure & delivery](layers/infra.md) (`infra`) | Where does it run and how does it get there? | DeployPort, SecretPort | `compose-deploy` (Compose Spec); OpenBao, Kubernetes and OpenTofu planned |
 | Model | L1 | [Models](layers/llm.md) (`llm`) | Who thinks? | ModelPort | `openai-compatible` (Ollama, vLLM, LiteLLM, hosted APIs); `mock-model` for offline work |
-| Model | L2 | [Model access](layers/cache.md) (`cache`): routing, fallback, quotas, cache | Which model, at what cost and latency? | RouterPort, CachePort | `static-router`, `memory-cache`; a model gateway behind `openai-compatible`; Valkey planned |
+| Model | L2 | [Model access](layers/cache.md) (`cache`): routing, fallback, quotas, cache | Which model, at what cost and latency? | RouterPort, CachePort | `static-router`, `rule-router`, `memory-cache`; a model gateway behind `openai-compatible`; Valkey planned |
 | Agent | L3 | [Agent runtime](layers/harness.md) (`harness`) | How does the agent loop run and keep state? | RuntimePort, StatePort | `basic-runtime`, `memory-state`; reinloop and agent-to-agent runtimes planned |
-| Agent | L4 | [Knowledge & memory](layers/knowledge.md) (`knowledge`) | What does it know? | KnowledgePort, MemoryPort, IngestionPort | `markdown-knowledge`; Qdrant, SQL, SPARQL planned |
-| Agent | L5 | [Tools](layers/tool.md) (`tool`) | What can it do? | ToolPort | `functions`; MCP and OpenAPI planned |
-| Control | L6 | [Identity & access](layers/identity.md) (`identity`) | Who is it, on whose behalf, and what is allowed? | IdentityPort, CredentialPort, AuthorizationPort, ApprovalPort | `static-identity` (dev only), `rules-authorization`, `memory-approval`; OIDC (Keycloak or any IdP) and OPA planned |
-| Control | L7 | [Guardrails](layers/guardrail.md) (`guardrail`) | Is this content acceptable? | GuardPort | `regex-guard`; Presidio and LLM Guard planned |
+| Agent | L4 | [Knowledge & memory](layers/knowledge.md) (`knowledge`) | What does it know? | KnowledgePort, MemoryPort, IngestionPort | `markdown-knowledge`, `http-knowledge`, `mcp`; Qdrant, SQL, SPARQL planned |
+| Agent | L5 | [Tools](layers/tool.md) (`tool`) | What can it do? | ToolPort | `functions`, `http-tools`, `mcp`, `openapi` |
+| Control | L6 | [Identity & access](layers/identity.md) (`identity`) | Who is it, on whose behalf, and what is allowed? | IdentityPort, CredentialPort, AuthorizationPort, ApprovalPort | `static-identity` (dev only), `rules-authorization`, `memory-approval`, `oidc` (Keycloak or any IdP), `authzen`, `opa` |
+| Control | L7 | [Guardrails](layers/guardrail.md) (`guardrail`) | Is this content acceptable? | GuardPort | `regex-guard`, `http-guard`, `presidio`, `llm-guard` |
 | Experience | L8 | [Interfaces, channels & triggers](layers/interface.md) (`interface`) | Who talks to it and what starts it? | ChannelPort, TriggerPort | `terminal-channel`; OpenAI-compatible chat API, MCP server, A2A, CloudEvents planned |
-| Insight | L9 | [Telemetry & observability](layers/telemetry.md) (`telemetry`) | What happened? | TelemetryPort | `console-telemetry`, `jsonl-telemetry`; OTLP (to Langfuse, Jaeger or any collector) planned |
-| Insight | L10 | [Evaluation & improvement](layers/eval.md) (`eval`) | Was it good, and if not, which layer failed? | EvaluatorPort, FeedbackPort | `expected-eval`; judge and per-layer evaluators planned |
+| Insight | L9 | [Telemetry & observability](layers/telemetry.md) (`telemetry`) | What happened? | TelemetryPort | `console-telemetry`, `jsonl-telemetry`, `otlp` (to Langfuse, Jaeger or any collector) |
+| Insight | L10 | [Evaluation & improvement](layers/eval.md) (`eval`) | Was it good, and if not, which layer failed? | EvaluatorPort, FeedbackPort | `expected-eval`, `judge-eval`, `layer-signals`; promptfoo planned |
 
 The full catalog with status and maturity is in [adapters.md](adapters.md). Layer ids are stable; the numbers are
 for reading only. Reference setups (compose files and live tests) live in `reference/<layer id>/`.
@@ -30,26 +30,26 @@ Boundary rules: read-only context retrieval is `knowledge`, anything with side e
 
 ```mermaid
 flowchart TB
-  client([Person, app, agent, event]) --> L8[L8 interface<br/>channels & triggers]
-  L8 --> L6v[L6 identity: verify]
-  L6v --> L3[L3 harness: runtime]
-  L3 --> L7[L7 guardrail]
-  L3 --> L4[L4 knowledge]
-  L3 --> L5[L5 tool]
-  L6a[L6 identity: authorize, approve,<br/>credentials on behalf of the caller] -.-> L5
-  L6a -.-> L4
-  L3 --> L2[L2 cache: route, cache]
-  L2 --> L1[L1 llm]
-  L3 -.-> L9[L9 telemetry]
-  L7 -.-> L9
-  L4 -.-> L9
-  L5 -.-> L9
-  L2 -.-> L9
-  L1 -.-> L9
-  L9 --> L10[L10 eval]
-  L10 -.->|fixes, regression cases| L3
-  subgraph L0[L0 infra: deploy, secrets]
-    L8
+  client([Person, app, agent, event]) --> interface[interface<br/>channels & triggers]
+  interface --> idv[identity: verify]
+  idv --> harness[harness: runtime]
+  harness --> guardrail[guardrail]
+  harness --> knowledge[knowledge]
+  harness --> tool[tool]
+  ida[identity: authorize, approve,<br/>credentials on behalf of the caller] -.-> tool
+  ida -.-> knowledge
+  harness --> cache[cache: route, cache]
+  cache --> llm[llm]
+  harness -.-> telemetry[telemetry]
+  guardrail -.-> telemetry
+  knowledge -.-> telemetry
+  tool -.-> telemetry
+  cache -.-> telemetry
+  llm -.-> telemetry
+  telemetry --> eval[eval]
+  eval -.->|fixes, regression cases| harness
+  subgraph infra[infra: deploy, secrets]
+    interface
   end
 ```
 

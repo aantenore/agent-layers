@@ -1,5 +1,5 @@
 # Manual pipeline: nothing runs on push or pull request. Trigger it from the Actions tab or with
-#   gh workflow run ci.yml -f layers='["l3-knowledge"]'
+#   gh workflow run ci.yml -f layers='["knowledge"]'
 name: ci
 
 on:
@@ -8,7 +8,7 @@ on:
       layers:
         description: JSON array of layer ids for the per-layer tests
         type: string
-        default: '["l1-llm","l3-knowledge","l4-tools","l6-guardrails","l7-cache-router","l8-telemetry"]'
+        default: '["llm","knowledge","tool","guardrail","cache","telemetry"]'
       run_layer_tests:
         description: Run the per-layer live tests (starts containers)
         type: boolean
@@ -42,11 +42,15 @@ jobs:
       - name: Parse JSON files
         run: |
           set -e
-          for f in contracts/*.json layers/*/openapi.json; do
+          for f in spec/schemas/*.json reference/*/openapi.json; do
             [ -f "$f" ] || continue
             node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$f"
             echo "ok $f"
           done
+      - name: Install dependencies
+        run: npm install
+      - name: Docs check (links, layer tables, ports, env, adapter catalog, stale strings)
+        run: npm run docs:check
       - name: Helm lint and template (pinned container image)
         run: make helm-template
       - name: OpenTofu fmt and validate (pinned container image)
@@ -70,7 +74,7 @@ jobs:
         run: npm install
       - name: Prepare .env
         run: cp .env.example .env
-      # Layers that need Ollama on the host (L2, L7 model calls) skip their live tests when it is unreachable.
+      # Layers that need Ollama on the host (llm, cache and harness model calls) skip their live tests when it is unreachable.
       - name: Up
         run: make up LAYER=${{ matrix.layer }}
       - name: Test
@@ -80,9 +84,9 @@ jobs:
         run: make down LAYER=${{ matrix.layer }}
 
   # Image promotion, dev -> staging -> prod. The repository builds no images yet (layers use upstream images pinned
-  # in layers/<id>/compose.yml), so this job only states the flow and gates it on a GitHub environment.
+  # in reference/<id>/compose.yml), so this job only states the flow and gates it on a GitHub environment.
   #
-  #   1. dev      Tags in layers/<id>/compose.yml and helm/agent-layers/values.yaml move together in one commit.
+  #   1. dev      Tags in reference/<id>/compose.yml and reference/infra/helm/agent-layers/values.yaml move together in one commit.
   #               The live layer tests above are the gate.
   #   2. staging  Same commit, same digests: re-tag the image (or copy it with `crane copy`), never rebuild.
   #               Argo CD syncs the staging Application from that commit.
@@ -98,5 +102,5 @@ jobs:
       - name: Promotion plan
         run: |
           echo "Promote to ${{ inputs.promote_to }} from ${GITHUB_SHA}"
-          grep -rhoE 'image: [^ ]+' layers/*/compose.yml | sort -u
+          grep -rhoE 'image: [^ ]+' reference/*/compose.yml | sort -u
           echo "No images are built or pushed yet; see the comment above this job for the promotion flow."

@@ -23,7 +23,7 @@ async function skipReason() {
   if (!ids.includes(model)) return `model "${model}" is not available at ${baseUrl}; run "ollama pull ${model}"`;
 }
 
-test('L2: reinloop answers a trivial prompt through the L1 model', { timeout: 180_000 }, async (t) => {
+test('harness: reinloop answers a trivial prompt through the llm model', { timeout: 180_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
 

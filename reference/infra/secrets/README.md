@@ -4,7 +4,7 @@ OpenBao (MPL-2.0) is the reference secret store; it is an open-source, API-compa
 can hand environment variables to a container can replace it.
 
 Locally it runs in dev mode from `../compose.yml` (`make infra-up`), is seeded with `make secrets-seed` and rendered
-to a `.env` with `make env-from-openbao`; see [docs/layers/L0-infra.md](../../../docs/layers/L0-infra.md#secrets).
+to a `.env` with `make env-from-openbao`; see [docs/layers/infra.md](../../../docs/layers/infra.md#secrets).
 The layout below is what those scripts use.
 
 ## What goes in the store
@@ -40,5 +40,5 @@ Pick one:
 ## Rules
 
 - Secrets are not committed. `.env` is git-ignored.
-- Tokens issued by L5 are short-lived and never logged, put in events or in traces.
+- Tokens issued by the identity layer are short-lived and never logged, put in events or in traces.
 - Rotate `change-me` defaults before exposing any service beyond localhost.

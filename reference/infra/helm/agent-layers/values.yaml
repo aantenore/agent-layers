@@ -22,9 +22,9 @@ global:
     className: traefik
     annotations: {}
 
-# Tags mirror the layers/<id>/compose.yml files, which stay the source of truth.
+# Tags mirror the reference/<id>/compose.yml files, which stay the source of truth.
 layers:
-  l1-llm:
+  llm:
     enabled: false
     services:
       ollama:
@@ -33,7 +33,7 @@ layers:
         health: /api/version
         persistence: { mountPath: /root/.ollama, size: 20Gi }
 
-  l3-knowledge:
+  knowledge:
     enabled: false
     services:
       qdrant:
@@ -43,7 +43,7 @@ layers:
         ingress: true
         persistence: { mountPath: /qdrant/storage, size: 5Gi }
 
-  l4-tools:
+  tool:
     enabled: false
     services:
       httpbin:
@@ -51,7 +51,7 @@ layers:
         port: 8080
         ingress: true
 
-  l6-guardrails:
+  guardrail:
     enabled: false
     services:
       presidio-analyzer:
@@ -72,7 +72,7 @@ layers:
         secretRefs: [LLM_GUARD_TOKEN]
         ingress: true
 
-  l7-cache-router:
+  cache:
     enabled: false
     services:
       valkey:
@@ -80,7 +80,7 @@ layers:
         port: 6379
         args: [valkey-server, --save, "", --appendonly, "no"]
 
-  l8-telemetry:
+  telemetry:
     enabled: false
     services:
       jaeger:

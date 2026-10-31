@@ -1,62 +1,64 @@
-# L1 Models (`llm`)
+# Models
+
+Layer id `llm` (L1), Model plane. *Who thinks?*
 
 ## Responsibility
 
-Generate completions, including tool calls. This is the only layer that talks to a model.
+Generate completions, including tool calls and streamed output. This is the only layer that talks to a model.
 
-## Standard
+## Ports
 
-- OpenAI Chat Completions (de facto standard).
+| Port | What it does |
+|---|---|
+| [ModelPort](../../spec/ports/ModelPort.md) | `chat` and optional `stream` over a provider-neutral request with tools and usage |
+
+Data shapes: [chat-request.json](../../spec/schemas/chat-request.json), [chat-response.json](../../spec/schemas/chat-response.json).
+
+## Standards
+
+- OpenAI Chat Completions, the de facto wire format.
 - Anthropic Messages.
 
-## Extension point
+Any server that speaks one of them is a drop-in model; the rest is an adapter for the provider's native API.
 
-reinloop `Provider.generate(request, { signal, onText })`. One method; any model API.
+## Boundaries
 
-## Reference implementation
+- Routing, fallback, quotas and caching in front of the model belong to [cache](cache.md), not here.
+- The model never sees tokens or secrets; credentials stay in the adapter.
 
-Ollama running natively on the host (MIT), model `qwen3:4b` (Apache-2.0).
+## How to swap
+
+Point an `openai-compatible` adapter at another server (vLLM, llama.cpp, LM Studio, a gateway, a hosted API) by changing
+`baseUrl` and `model`. For an API that is neither compatible, write an adapter that maps its native calls onto
+ModelPort and passes the conformance suite.
+
+## Reference adapters
+
+| Adapter | Maps |
+|---|---|
+| `openai-compatible` | OpenAI Chat Completions: Ollama, vLLM, LiteLLM, hosted APIs |
+| `mock-model` | A scripted deterministic model for offline tests |
+
+Full list and maturity: [adapters.md](../adapters.md).
+
+## Reference setup
+
+[`reference/llm/`](../../reference/llm/README.md) uses Ollama (MIT) running natively on the host, with the model
+`qwen3:4b` (Apache-2.0).
 
 ```bash
 ollama pull qwen3:4b
 ```
 
-Containers reach it at `host.docker.internal:11434`. Ollama runs on the host rather than in a container to use the
-GPU / Metal acceleration.
+Containers reach it at `host.docker.internal:11434`. Ollama runs on the host rather than in a container to use GPU or
+Metal acceleration. Variables: `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` (defaults in
+[contracts.md](../contracts.md#host-ports-and-environment)).
 
-Model weights are licensed separately from Ollama's MIT. `qwen3:4b` is Apache-2.0. Not every popular small model is
-OSI-licensed (`qwen2.5:3b`, for one, is not), so check the license of any model you swap in. See the
-[license note](../../README.md#licenses).
-
-## Adapter SDK + conformance
-
-Where the model API is neither OpenAI- nor Anthropic-compatible, implement `Provider`. reinloop exports the
-interface. A conformance check sends a fixed set of requests (plain text, tool call, streaming, usage reporting) to a
-provider and verifies the response shapes. A provider that passes can be used by any agent.
-
-## Around the layer
-
-- **Provider conformance check**, run before a new provider is used in an agent.
-- Caching, routing, fallbacks and quotas in front of the model belong to [cache](cache.md), not here.
-
-## How to swap it
-
-- Any server with an OpenAI- or Anthropic-compatible URL is a drop-in: set `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`
-  (vLLM, llama.cpp server, LM Studio, a hosted API).
-- Anything else implements `Provider` and registers through a reinloop plugin.
-
-## Contract
-
-- In: OpenAI chat completions request with `tools`.
-- Out: completion with `tool_calls` and `usage`.
-
-Details in the port spec: [ModelPort](../../spec/ports/ModelPort.md).
-
-## How to test
+Model weights are licensed separately from the tools that serve them. Not every popular small model is OSI-licensed,
+so check the license of any model you swap in; see the [license note](../../README.md#licenses-of-the-reference-technologies).
 
 ```bash
-make test LAYER=l1-llm
+make test LAYER=llm
 ```
 
-Requires Ollama with the model pulled. The test skips with a message when Ollama is unreachable or the model is
-missing.
+The test skips with a message when Ollama is unreachable or the model is missing.

@@ -14,7 +14,8 @@ neutral:
 
 ## Host ports and environment
 
-All values are defaults for local development and live in [`.env.example`](../.env.example).
+All values are defaults for local development and live in [`.env.example`](../.env.example), which this table mirrors
+(`npm run docs:check` compares them). Ports are bound to `127.0.0.1`.
 
 | Layer | Variable | Default |
 |---|---|---|
@@ -24,14 +25,17 @@ All values are defaults for local development and live in [`.env.example`](../.e
 | harness | `REINLOOP_SERVE_PORT` | `8700` |
 | knowledge | `QDRANT_URL` | `http://localhost:6333` |
 | knowledge | `QDRANT_COLLECTION` | `docs` |
-| knowledge | `WIKI_DIR` | `layers/l3-knowledge/wiki` |
+| knowledge | `WIKI_DIR` | `reference/knowledge/wiki` |
 | tool | `HTTPBIN_URL` | `http://localhost:8085` |
+| tool | `HTTPBIN_PORT` | `8085` |
 | tool | `OPENAPI_MCP_URL` | `http://localhost:8090/mcp` |
+| tool | `OPENAPI_MCP_PORT` | `8090` |
 | identity | `OIDC_ISSUER` | `http://localhost:8080/realms/agents` |
 | identity | `OIDC_CLIENT_ID` | `agent-runtime` |
 | identity | `OIDC_CLIENT_SECRET` | `change-me` |
 | identity | `TOOLS_AUDIENCE` | `tools-api` |
 | identity | `OPA_URL` | `http://localhost:8181` |
+| identity | `KEYCLOAK_PORT` | `8080` |
 | guardrail | `PRESIDIO_ANALYZER_URL` | `http://localhost:5002` |
 | guardrail | `PRESIDIO_ANONYMIZER_URL` | `http://localhost:5001` |
 | guardrail | `LLM_GUARD_URL` | `http://localhost:8000` |
@@ -44,9 +48,27 @@ All values are defaults for local development and live in [`.env.example`](../.e
 | telemetry | `LANGFUSE_PUBLIC_KEY` | `pk-lf-local` |
 | telemetry | `LANGFUSE_SECRET_KEY` | `sk-lf-local` |
 | telemetry | `JAEGER_UI` | `http://localhost:16686` |
-| eval | `EVAL_DATASET` | `layers/l9-eval/datasets/smoke.jsonl` |
+| eval | `EVAL_DATASET` | `reference/eval/datasets/smoke.jsonl` |
 
 Ollama runs natively on the host. Containers reach it at `host.docker.internal:11434`.
 
-These defaults belong to the reference setups (`reference/<layer>/`, today still under `layers/`). A stack config
-reads them through `${env:NAME:-default}`.
+Keycloak listens on `KEYCLOAK_PORT` (8080 by default). When 8080 is busy, start with `KEYCLOAK_PORT=18080` and set
+`OIDC_ISSUER=http://localhost:18080/realms/agents`. The OpenAPI MCP bridge listens on `OPENAPI_MCP_PORT` (8090 by
+default); if you change it, change `OPENAPI_MCP_URL` too.
+
+### Compose overrides
+
+Optional variables read by the reference compose files, with the defaults they use when unset. They are not in
+`.env.example`.
+
+| Layer | Variable | Default |
+|---|---|---|
+| infra | `INFRA_HTTP_PORT` | `8088` |
+| infra | `INFRA_DASHBOARD_PORT` | `8089` |
+| infra | `OPENBAO_PORT` | `8200` |
+| infra | `OPENBAO_DEV_ROOT_TOKEN` | `dev-root-token` |
+| llm | `OLLAMA_PORT` | `11434` |
+| identity | `KEYCLOAK_ADMIN_PASSWORD` | `change-me` |
+
+These defaults belong to the reference setups (`reference/<layer id>/`). A stack config reads them through
+`${env:NAME:-default}`.
