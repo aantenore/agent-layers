@@ -5,15 +5,17 @@ three runtimes and three profiles. Between cells only `agent-layers.json` change
 so identity, authorization, guardrails and telemetry are enforced outside the runtime. In production, faults are
 injected one at a time, and the recorded telemetry is used to find which layer failed.
 
-Two runs are recorded. The latest is a minimal re-verification after the SDK language 1.0
-([ADR 0001](decisions/0001-sdk-language.md)): pilot and production, one question per cell, faults on reinloop. The full
+Three runs are recorded. The latest tries the hosted model and injects the faults on Pydantic AI; the one before is a
+minimal re-verification after the SDK language 1.0 ([ADR 0001](decisions/0001-sdk-language.md)): pilot and
+production, one question per cell, faults on reinloop. The full
 matrix was recorded before 1.0, so span and event names in it are the old ones: `chat` is now `agent.model.call` and
 `knowledge.error` is `agent.knowledge.error`.
 
 Driver: [`scripts/slice.mjs`](../scripts/slice.mjs) (`node --conditions=source scripts/slice.mjs`). It brings up only
 the reference services each tier needs and takes them down with their volumes at the end. Every wait has a time
 limit. `--minimal` asks only the tool question, on reinloop and Pydantic AI, skips the comparison cell and injects
-the faults on reinloop only. Full run before 1.0: under five minutes from the first cell to teardown. Minimal run after
+the faults on reinloop only; `--inject <runtimes|none>` and `--inject-model <group>` choose where the faults run and on
+which model group. Full run before 1.0: under five minutes from the first cell to teardown. Minimal run after
 1.0: about two and a half minutes from the first `docker compose up` to the last `down -v`. Both local, nothing left
 running.
 
@@ -57,7 +59,7 @@ Models in the real-model tiers: the LiteLLM group `fast` (`lfm2.5:8b` on the hos
 `default` (`qwen3:4b`). Thinking cannot be turned off for these tags on Ollama 0.32.1: `think: false` and
 `reasoning_effort: "none"` move the reasoning into the answer text but do not stop it. So the comparison is between a
 faster model and a slower reasoning one. If a hosted model is configured through `.env`, the gateway's `hosted` group
-(capped at 1 USD) replaces `fast`. This run did not use one.
+(capped at 1 USD) replaces `fast` for the cells (`node --env-file=.env ...`); the latest run tried it.
 
 ## Only configuration changes
 
@@ -105,6 +107,47 @@ the gateway to loopback with `allowedHosts`.
 
 ## Results
 
+### After 1.0: hosted model and Pydantic AI faults
+
+Two runs on 2026-10-31, `KEYCLOAK_PORT=18080`, `OPENAPI_MCP_PORT=8091`, gateway on port 8799, tool question as alice,
+one run per cell. Run A: `node --env-file=.env --conditions=source scripts/slice.mjs --only pilot,production --minimal
+--inject pydantic --inject-model fast`. Run B, the same cells on the local model: `... --minimal --inject none`. Each
+run took about two minutes from the first `docker compose up` to the last `down -v`; nothing was left running.
+
+| Tier | Runtime | Hosted model configured through `.env` (run A) | `fast` (run B): tool (expects 212) | Tokens in / out (B) | Cost USD (B) | Spans: telemetry file / Jaeger (B) |
+|---|---|---|---|---|---|---|
+| pilot | reinloop | failed 2.3 s: key rejected ¹ | ok 5.7 s | 840 / 485 | 0.000278 | 15 / 15 |
+| pilot | Pydantic AI | failed 2.5 s: key rejected ¹ | ok 3.0 s | 692 / 365 | 0.000215 | 18 / 18 |
+| production | reinloop | failed 2.1 s: key rejected ¹ | ok 1.8 s | 840 / 485 | 0.000278 | 15 / 15 |
+| production | Pydantic AI | failed 2.6 s: key rejected ¹ | ok 566 ms | 300 / 66 | 0.000056 | 16 / 16 |
+
+1. The model gateway answered HTTP 400: the provider refuses the key because it is not scoped to a workspace and the
+   request names none. The `hosted` group sends only the model and the key, so the hosted model was not exercised.
+   No token was used; reinloop reported a cost of 0 for 0 tokens, Pydantic AI no figures for a failed run.
+   `layer-signals` attributed all four runs to `llm`.
+
+Cost: the Pydantic AI agent now reports usage and cost in its A2A task (`MODEL_PRICING`, the same illustrative
+0.10 / 0.40 USD per million tokens as the in-process runtimes), and the stack's `a2a` runtime carries them into
+`RunResult`. Jaeger now holds every span of every cell, the first long pilot run included (see below for the cause).
+
+Budget guards, configured and not exhausted: the `hosted` deployment has a LiteLLM `max_budget` of 1 USD per 30 days
+(`reference/cache/compose.yml`), and reinloop stops a run at `maxCostUsd` 0.05, priced with the illustrative table,
+not the provider's prices. The Pydantic AI agent has no cost budget of its own: `MAX_MODEL_REQUESTS` (8) and the
+LiteLLM budget bound it.
+
+Faults, production, Pydantic AI, `fast` (run A), one at a time:
+
+| Fault | Run | Attributed | Evidence (layer-signals reason) | Latency | Cost USD |
+|---|---|---|---|---|---|
+| bob (role `viewer`) asks to save a note: OPA denies the write tool | completed | identity | `1/1 denied: util__save_note` | 2.6 s | 0.000176 |
+| input with an email and a prompt-injection sentence | completed | guardrail | `1 redacted (presidio@input)` | 3.5 s | 0.000173 |
+| Qdrant stopped | failed | knowledge | `2 knowledge tool errors (of 2)` | 7.6 s | n/a (failed run) |
+| model at an unreachable URL | failed | llm | `run failed: error` | 1.6 s | n/a (failed run) |
+
+All four faults were attributed to the expected layer, as on reinloop. Checks in run A as before: both production
+checks passed, `production-basic` refused by the readiness gate, no credential / foreign `Origin` / foreign `Host`
+401 / 403 / 403, and no caller token, gateway secret or hosted key in any process output or telemetry file.
+
 ### After 1.0: minimal re-run
 
 `node --conditions=source scripts/slice.mjs --only pilot,production --minimal`, 2026-10-31, model group `fast`
@@ -118,9 +161,12 @@ recreated so the realm's fixed service-account id is imported. The tool question
 | production | reinloop | ok 1.7 s | 676 | 0.000149 | 7 / 7 |
 | production | Pydantic AI | ok 552 ms | 355 | n/a | 16 / 16 |
 
-1. The first cell after the collector started: Jaeger held 2 of the 7 spans when the driver read it (it stops at the
-   first count that does not grow between two reads). Every span is in the gateway's telemetry file with the
-   driver's trace id. Not investigated further.
+1. The first cell after the collector started: Jaeger held 2 of the 7 spans when the driver read it. Every span was in
+   the gateway's telemetry file with the driver's trace id. Cause, found later: the driver stopped reading when the
+   count did not change between two reads 1.5 s apart, while spans reach Jaeger in steps up to 3 s apart (the OTLP
+   adapter exports every 2 s, the collector batches for 1 s). This 7.9 s run exported two spans while it ran, and the
+   driver returned before the other five arrived. No span was lost. The driver now waits until the count reaches the
+   file's, or stays the same for 5 s.
 
 | Check | Result |
 |---|---|
@@ -178,7 +224,7 @@ driver sent. In the real-model tiers the same trace is found in Jaeger, Pydantic
 
 Cost: `costUsd` comes from the run result (RuntimePort 0.2.0). basic-runtime and reinloop price tokens with an
 illustrative 0.10 / 0.40 USD per million input / output tokens, set in the profile: the local models are free, and the
-price only exercises the cost path. The Pydantic AI agent does not report usage in its A2A task, so its cost is n/a.
+price only exercises the cost path. At the time the Pydantic AI agent did not report usage in its A2A task, so its cost is n/a.
 Its tokens are still on the gateway's `chat` spans (1084 for the pilot tool run).
 
 Quality against latency: on the tool question, qwen3:4b (reasoning) took 44.5 s and 4128 tokens. lfm2.5:8b took
@@ -258,12 +304,13 @@ No judge model was run (`judge-eval`). It grades answers, not layers, and would 
 ## Not covered yet
 
 - Statistical weight: one run per question and per fault, three questions before 1.0, one after.
-- After 1.0 only the minimal run: no knowledge or plain question, no basic-runtime cell, no qwen3:4b comparison, and
-  the faults on reinloop only. The Pydantic AI fault attribution was last verified before 1.0.
+- After 1.0 only minimal runs: no knowledge or plain question, no basic-runtime cell, no qwen3:4b comparison. Faults
+  ran on reinloop and on Pydantic AI, each with the local model.
 - Prompt-injection detection: LLM Guard was not run, and Langfuse was skipped.
-- Pydantic AI cost: the agent does not put usage or cost in its A2A task metadata, which the stack's `a2a` runtime would read.
-- The `hosted` model group: configured (key and model only in `.env`, 1 USD LiteLLM budget, `maxCostUsd` 0.05 per
-  reinloop run as a second guard). Not exercised in this run, so the budget enforcement is untested live.
+- The hosted model: configured through `.env` (1 USD LiteLLM budget, `maxCostUsd` 0.05 per reinloop run as a second
+  guard), but its key was rejected (not scoped to a workspace), so no answer, latency or cost on it is recorded and
+  the budget enforcement is untested live.
+- Costs are priced with an illustrative table, not real prices; the Pydantic AI agent has no cost budget of its own.
 - Approvals (`ask` policy) and their resume in a later run of the same session are covered by unit tests and an A2A
   test through the gateway (`adapters/a2a/test/approval-resume.test.ts`), not by the slice. Conversation continuity
   across runs is not provided by `basic-runtime` or `reinloop`: a session carries approval decisions only.
@@ -276,8 +323,9 @@ No judge model was run (`judge-eval`). It grades answers, not layers, and would 
 ## Next steps
 
 1. Move the attribution rule into `layer-signals` (an `attributed` score or helper), so `agent-layers eval` reports it.
-2. Report usage and cost from the Pydantic AI runtime in task metadata.
+2. Configure a hosted key scoped to a workspace (or let the `hosted` group send a workspace id from `.env`) and repeat
+   run A.
 3. Add LLM Guard on a machine with more memory and repeat the injection case; record block versus redact.
 4. Fixed reasons for `knowledge.error`, as for guard and telemetry warnings.
-5. Repeat runs (N ≥ 5) and add latency percentiles; add the hosted-model column when a key is configured.
+5. Repeat runs (N ≥ 5) and add latency percentiles.
 6. Show `gateway` settings in `agent-layers diff`.
