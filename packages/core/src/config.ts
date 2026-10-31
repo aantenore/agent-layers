@@ -66,7 +66,7 @@ export interface GatewayConfig {
   corsMaxAgeS?: number;
   /** Longest `X-Request-Id` kept from the caller; longer or malformed ones are replaced (default 64). */
   maxRequestIdChars?: number;
-  /** Longest `traceparent` and `tracestate` kept from the caller, each; longer or non-printable ones are dropped (default 512). */
+  /** Longest trace context header values (parent, state) kept from the caller, each; longer or non-printable ones are dropped (default 512). */
   maxTraceChars?: number;
   /** Public origin used in absolute URLs (agent cards), when the gateway sits behind a proxy. */
   publicOrigin?: string;
