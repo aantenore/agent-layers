@@ -1,0 +1,38 @@
+name: l4-tools
+
+services:
+  httpbin:
+    image: mccutchen/go-httpbin:2.26.0
+    # The image has no shell or curl, so it has no container healthcheck; the bridge's check below probes it.
+    ports:
+      - "127.0.0.1:${HTTPBIN_PORT:-8085}:8080"
+
+  openapi-mcp:
+    build: ./bridge
+    image: l4-tools-openapi-mcp:fastmcp-4.1.4
+    environment:
+      UPSTREAM_URL: http://httpbin:8080
+      OPENAPI_SPEC: /app/openapi.json
+    volumes:
+      - ./openapi.json:/app/openapi.json:ro
+    depends_on:
+      - httpbin
+    ports:
+      - "127.0.0.1:${OPENAPI_MCP_PORT:-8090}:8000"
+    healthcheck:
+      # MCP endpoint answers (any HTTP status) and the upstream API is up.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import urllib.request, urllib.error
+          urllib.request.urlopen("http://httpbin:8080/get?health=1", timeout=3)
+          try:
+              urllib.request.urlopen("http://127.0.0.1:8000/mcp", timeout=3)
+          except urllib.error.HTTPError:
+              pass
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s

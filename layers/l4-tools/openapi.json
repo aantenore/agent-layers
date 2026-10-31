@@ -1,0 +1,63 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "httpbin (subset)", "version": "1.0.0", "description": "A few go-httpbin endpoints used to test the tools layer." },
+  "servers": [{ "url": "http://localhost:8085" }],
+  "paths": {
+    "/get": {
+      "get": {
+        "operationId": "echoQuery",
+        "summary": "Echo the query parameters of the request",
+        "parameters": [
+          { "name": "message", "in": "query", "required": true, "description": "Text to echo back", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "The request as seen by the server" } }
+      }
+    },
+    "/post": {
+      "post": {
+        "operationId": "echoJson",
+        "summary": "Echo a JSON body",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Note" } } }
+        },
+        "responses": { "200": { "description": "The request as seen by the server" } }
+      }
+    },
+    "/status/{code}": {
+      "get": {
+        "operationId": "getStatus",
+        "summary": "Answer with the given HTTP status code",
+        "parameters": [{ "name": "code", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 100, "maximum": 599 } }],
+        "responses": { "default": { "description": "Empty body with the requested status" } }
+      }
+    },
+    "/base64/decode/{value}": {
+      "get": {
+        "operationId": "decodeBase64",
+        "summary": "Decode a base64url string to text",
+        "parameters": [{ "name": "value", "in": "path", "required": true, "description": "base64url-encoded text", "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Decoded text", "content": { "text/plain": { "schema": { "type": "string" } } } } }
+      }
+    },
+    "/bearer": {
+      "get": {
+        "operationId": "checkBearer",
+        "summary": "Succeeds only when a bearer token is sent",
+        "responses": { "200": { "description": "Authenticated" }, "401": { "description": "No bearer token" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Note": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string", "description": "Short title" },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}
