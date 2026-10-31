@@ -5,11 +5,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { checkAdapter } from '@agent-layers/conformance';
+import type { RunEvent } from '@agent-layers/core';
 import { adapter, createSqliteState, SCHEMA_VERSION, storeSchemaVersion } from '../src/index.ts';
 
 let dir: string;
 before(async () => { dir = await mkdtemp(join(tmpdir(), 'sqlite-state-')); });
 after(() => rm(dir, { recursive: true, force: true }));
+
+const start = (runId: string): RunEvent => ({ type: 'run.start', runId, agent: 'a' });
+const end: RunEvent = { type: 'run.end', status: 'completed' };
+const text = (t: string): RunEvent => ({ type: 'text', text: t });
+const note = (n: number): RunEvent => ({ type: 'acme.note', n, nested: { x: [1, 2] } });
 
 const fresh = (name: string) => createSqliteState({ path: join(dir, `${name}.db`) });
 
@@ -21,17 +27,17 @@ test('sqlite-state passes StatePort conformance', async () => {
 
 test('read returns appended events in order, across appends', async () => {
   const state = fresh('order');
-  await state.append('s', [{ type: 'a', n: 1 }, { type: 'b' }]);
+  await state.append('s', [start('r1'), text('b')]);
   await state.append('s', []);
-  await state.append('s', [{ type: 'c', nested: { x: [1, 2] } }]);
-  assert.deepEqual(await state.read('s'), [{ type: 'a', n: 1 }, { type: 'b' }, { type: 'c', nested: { x: [1, 2] } }]);
+  await state.append('s', [note(1)]);
+  assert.deepEqual(await state.read('s'), [start('r1'), text('b'), note(1)]);
   assert.deepEqual(await state.read('other'), []);
   await state.close();
 });
 
 test('list returns the most recently appended sessions first, limited', async () => {
   const state = fresh('list');
-  for (const id of ['one', 'two', 'three', 'one']) await state.append(id, [{ type: 'x' }]);
+  for (const id of ['one', 'two', 'three', 'one']) await state.append(id, [text('x')]);
   assert.deepEqual(await state.list(), ['one', 'three', 'two']);
   assert.deepEqual(await state.list({ limit: 2 }), ['one', 'three']);
   assert.deepEqual(await state.list({ limit: 0 }), []);
@@ -40,8 +46,8 @@ test('list returns the most recently appended sessions first, limited', async ()
 
 test('delete forgets a session and its events', async () => {
   const state = fresh('delete');
-  await state.append('s', [{ type: 'a' }]);
-  await state.append('t', [{ type: 'b' }]);
+  await state.append('s', [text('a')]);
+  await state.append('t', [text('b')]);
   await state.delete('s');
   assert.deepEqual(await state.read('s'), []);
   assert.deepEqual(await state.list(), ['t']);
@@ -51,15 +57,15 @@ test('delete forgets a session and its events', async () => {
 test('events survive close and reopen', async () => {
   const path = join(dir, 'durable.db');
   const first = createSqliteState({ path });
-  await first.append('session-1', [{ type: 'run_start', runId: 'r1' }, { type: 'run_end', status: 'completed' }]);
-  await first.append('session-2', [{ type: 'run_start', runId: 'r2' }]);
+  await first.append('session-1', [start('r1'), end]);
+  await first.append('session-2', [start('r2')]);
   await first.close();
   await assert.rejects(first.read('session-1'), /closed/);
 
   const second = createSqliteState({ path });
-  assert.deepEqual(await second.read('session-1'), [{ type: 'run_start', runId: 'r1' }, { type: 'run_end', status: 'completed' }]);
+  assert.deepEqual(await second.read('session-1'), [start('r1'), end]);
   assert.deepEqual(await second.list(), ['session-2', 'session-1']);
-  await second.append('session-1', [{ type: 'run_start', runId: 'r3' }]);
+  await second.append('session-1', [start('r3')]);
   assert.equal((await second.read('session-1')).length, 3);
   assert.deepEqual(await second.list(), ['session-1', 'session-2']);
   await second.close();
@@ -87,7 +93,7 @@ test('a database from a newer schema is refused', async () => {
 
 test(':memory: works without a file', async () => {
   const state = createSqliteState({ path: ':memory:' });
-  await state.append('s', [{ type: 'a' }]);
-  assert.deepEqual(await state.read('s'), [{ type: 'a' }]);
+  await state.append('s', [text('a')]);
+  assert.deepEqual(await state.read('s'), [text('a')]);
   await state.close();
 });

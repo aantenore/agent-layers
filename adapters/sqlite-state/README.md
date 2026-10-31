@@ -6,6 +6,9 @@ Keeps each session's append-only event log in one SQLite file through `node:sqli
 Node, so the package has no dependencies. `read` returns events in append order, `list` returns the most recently
 appended sessions first, `delete` removes a session and its events. Events survive restarts.
 
+Events are stored as `RunEvent` values (language 1.0), unchanged, as JSON. Logs written before 1.0 are not converted:
+they keep their old event types and are replayed as they are, so start a new database file when you upgrade.
+
 - **Node**: `node:sqlite` is available without flags from Node 22.13 and 23.4; this repository requires 22.18, so no
   flag is needed. Node 22 prints an `ExperimentalWarning` the first time the module loads.
 - **Durability**: WAL journal with `synchronous = NORMAL`; each `append` and `delete` is one transaction.
