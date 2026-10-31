@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/contracts/passage.json",
+  "title": "Passage",
+  "description": "One retrieved unit of knowledge (L3).",
+  "type": "object",
+  "required": ["id", "text"],
+  "properties": {
+    "id": { "type": "string" },
+    "text": { "type": "string" },
+    "source": { "type": "string", "description": "File path, URL or document id the text came from." },
+    "score": { "type": "number" },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": false
+}

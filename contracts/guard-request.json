@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/contracts/guard-request.json",
+  "title": "GuardInput",
+  "description": "Body sent to a guard (L6). Same shape for in-process guards and the HTTP guard contract.",
+  "type": "object",
+  "required": ["stage", "text", "agent", "runId"],
+  "properties": {
+    "stage": { "enum": ["input", "output", "tool_args", "tool_result"] },
+    "text": { "type": "string", "description": "The text to inspect (for tool_args: the JSON-encoded arguments)." },
+    "agent": { "type": "string" },
+    "runId": { "type": "string" },
+    "tool": { "type": "string", "description": "Tool name; set for tool_args and tool_result." },
+    "subject": {
+      "type": "object",
+      "description": "Identity of the caller (L5). Never contains tokens.",
+      "required": ["subject", "kind"],
+      "properties": {
+        "subject": { "type": "string" },
+        "kind": { "enum": ["user", "agent"] },
+        "roles": { "type": "array", "items": { "type": "string" } },
+        "scopes": { "type": "array", "items": { "type": "string" } },
+        "claims": { "type": "object" }
+      }
+    }
+  },
+  "additionalProperties": false
+}

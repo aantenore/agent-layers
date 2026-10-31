@@ -1,0 +1,14 @@
+.env
+node_modules/
+.reinloop/
+.DS_Store
+
+# data volumes and local state
+data/
+layers/*/data/
+layers/*/volumes/
+.terraform/
+.tofu/
+*.tfstate
+*.tfstate.*
+*.tfvars

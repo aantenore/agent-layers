@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/contracts/access-request.json",
+  "title": "AccessRequest",
+  "description": "OpenID AuthZEN evaluation request (L5), as sent to POST /access/v1/evaluation and, wrapped in {input}, to OPA.",
+  "type": "object",
+  "required": ["subject", "action", "resource"],
+  "properties": {
+    "subject": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string", "examples": ["user", "agent"] },
+        "id": { "type": "string" },
+        "properties": {
+          "type": "object",
+          "properties": {
+            "roles": { "type": "array", "items": { "type": "string" } },
+            "scopes": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "examples": ["call"] },
+        "properties": { "type": "object" }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string", "examples": ["tool"] },
+        "id": { "type": "string", "description": "Tool name." },
+        "properties": {
+          "type": "object",
+          "properties": {
+            "risk": { "enum": ["read", "write", "exec"] },
+            "agent": { "type": "string" }
+          }
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "args": { "description": "Arguments of the tool call." }
+      }
+    }
+  }
+}

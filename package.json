@@ -1,0 +1,17 @@
+{
+  "name": "agent-layers",
+  "private": true,
+  "type": "module",
+  "description": "Open-source, runtime-agnostic agent platform in ten swappable layers",
+  "license": "MIT",
+  "author": "Antonio Antenore",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test:layer": "node --test \"layers/$LAYER/test/**/*.test.mjs\" \"layers/$LAYER/test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "reinloop": "github:aantenore/reinloop"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/contracts/eval-result.json",
+  "title": "EvalResult",
+  "description": "One line of a result JSONL file (L9).",
+  "type": "object",
+  "required": ["id", "runId", "output", "status", "scores"],
+  "properties": {
+    "id": { "type": "string", "description": "EvalCase id." },
+    "runId": { "type": "string" },
+    "output": { "type": "string" },
+    "status": { "type": "string", "description": "Run status as reported by the harness, e.g. completed, failed, stopped." },
+    "scores": { "type": "array", "items": { "$ref": "#/$defs/EvalScore" } }
+  },
+  "$defs": {
+    "EvalScore": {
+      "type": "object",
+      "required": ["metric", "value"],
+      "properties": {
+        "metric": { "type": "string" },
+        "value": { "type": "number" },
+        "layer": { "enum": ["infra", "llm", "harness", "knowledge", "tool", "identity", "guardrail", "cache", "telemetry", "eval"] },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
