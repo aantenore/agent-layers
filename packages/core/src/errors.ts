@@ -54,6 +54,18 @@ export class MissingLayerError extends AgentLayersError {
   }
 }
 
+export type InboundRejection = 'unauthenticated' | 'forbidden' | 'not_found' | 'invalid';
+
+/** A host refused an inbound call or trigger. Inbound adapters map `kind` to their protocol's error. */
+export class InboundRejected extends AgentLayersError {
+  override name = 'InboundRejected';
+  readonly kind: InboundRejection;
+  constructor(kind: InboundRejection, message: string) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

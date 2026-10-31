@@ -24,7 +24,7 @@ const HELP = `agent-layers <command> [options]
   up | down                  start or stop the services of a profile
   diff <profileA> <profileB> what changes between two profiles, slot by slot
   layers                     the eleven layers: ports, versions, adapters in use and installed
-  gateway                    run the network gateway (@agent-layers/gateway)
+  gateway                    host the stack on the network: mounted channels and triggers, identity on every request (--port, --host)
 
 Callers: --token <t> or AGENT_LAYERS_TOKEN authenticates dev, eval and test runs (prototype profiles default to the static-identity dev token)
 Common options: --config <file> (default agent-layers.json), --profile <name> (or AGENT_LAYERS_PROFILE)`;
@@ -34,14 +34,13 @@ const OPTIONS = {
   template: { type: 'string' }, runtime: { type: 'string' }, name: { type: 'string' }, out: { type: 'string' },
   min: { type: 'string' }, message: { type: 'string' }, force: { type: 'boolean' }, yes: { type: 'boolean' },
   'dry-run': { type: 'boolean' }, 'skip-conformance': { type: 'boolean' }, 'no-deploy': { type: 'boolean' },
-  trace: { type: 'boolean' }, token: { type: 'string' }, help: { type: 'boolean', short: 'h' },
+  trace: { type: 'boolean' }, token: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' }, help: { type: 'boolean', short: 'h' },
 } as const;
 
 /** Runs one command. Resolves to the exit code; never calls process.exit. */
 export async function main(argv: string[], io: Io = processIo()): Promise<number> {
   const [command, ...rest] = argv;
   if (!command || command === 'help' || command === '--help' || command === '-h') { io.out(HELP); return 0; }
-  if (command === 'gateway') return gateway(io, rest);
   try {
     const { values: v, positionals: pos } = parseArgs({ args: rest, options: OPTIONS, allowPositionals: true, strict: true });
     if (v.help) { io.out(HELP); return 0; }
@@ -56,6 +55,7 @@ export async function main(argv: string[], io: Io = processIo()): Promise<number
       case 'down': return await down(io, { ...common, ...(v['dry-run'] ? { dryRun: true } : {}) });
       case 'diff': return await diff(io, { ...common, ...(pos[0] ? { a: pos[0] } : {}), ...(pos[1] ? { b: pos[1] } : {}) });
       case 'layers': return await layers(io, common);
+      case 'gateway': return await gateway(io, { ...common, ...pick(v, ['port', 'host']) });
       default: throw new UsageError(`unknown command "${command}"\n\n${HELP}`);
     }
   } catch (err) {

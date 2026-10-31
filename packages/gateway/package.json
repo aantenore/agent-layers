@@ -1,0 +1,36 @@
+{
+  "name": "@agent-layers/gateway",
+  "version": "0.1.0",
+  "description": "Network host for a composed agent-layers stack: inbound standards, identity, limits and access logs in one place",
+  "license": "MIT",
+  "author": "Antonio Antenore",
+  "type": "module",
+  "private": false,
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --conditions=source --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@agent-layers/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@agent-layers/adapter-basic-runtime": "0.1.0",
+    "@agent-layers/adapter-mock-model": "0.1.0",
+    "@agent-layers/adapter-static-identity": "0.1.0",
+    "@types/node": "^24.19.0",
+    "typescript": "^7.0.2"
+  }
+}

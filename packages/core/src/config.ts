@@ -29,6 +29,24 @@ export interface PipelineConfig {
   approvalTimeoutMs?: number;
 }
 
+/** Network host of the stack (gateway mode). */
+export interface GatewayConfig {
+  port?: number;
+  host?: string;
+  /** Instance names of the channels and triggers to mount; every mountable one when omitted. */
+  inbound?: string[];
+  /** Accept requests without a credential. Default false; a production-tier profile never runs triggers anonymously. */
+  anonymous?: boolean;
+  /** Largest accepted request body in bytes (default 1 MiB). */
+  maxBodyBytes?: number;
+  /** Time limit of one request, streams included (default 300000). */
+  requestTimeoutMs?: number;
+  /** Public origin used in absolute URLs (agent cards), when the gateway sits behind a proxy. */
+  publicOrigin?: string;
+  /** Cross-origin access; off when omitted. */
+  cors?: { origins: string[] };
+}
+
 export interface AgentConfig { file?: string; instructions?: string; model?: string; tools?: string[]; knowledge?: string[]; params?: Record<string, unknown> }
 
 /** Profile layers: like LayersConfig, but an entry may omit `adapter` to change only its options. */
@@ -47,6 +65,7 @@ export interface ProfileConfig {
   layers?: LayersOverlay;
   policy?: PolicyRule[];
   pipeline?: PipelineConfig;
+  gateway?: GatewayConfig;
 }
 
 /** Contents of agent-layers.json. Schema: spec/schemas/stack-config.json. */
@@ -58,6 +77,7 @@ export interface StackConfig {
   layers?: LayersConfig;
   policy?: PolicyRule[];
   pipeline?: PipelineConfig;
+  gateway?: GatewayConfig;
   profiles?: Record<string, ProfileConfig>;
   agents?: Record<string, AgentConfig>;
 }
@@ -74,6 +94,7 @@ export interface ResolvedConfig {
   layers: LayersConfig;
   policy: PolicyRule[];
   pipeline: PipelineConfig;
+  gateway: GatewayConfig;
   agents: Record<string, AgentConfig>;
   /** Directory of the config file; relative paths resolve against it. */
   dir: string;
@@ -144,6 +165,7 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
   let layers = mergeLayers({}, config.layers);
   let policy = config.policy ?? [];
   let pipeline: PipelineConfig = config.pipeline ?? {};
+  let gateway: GatewayConfig = config.gateway ?? {};
   let tier: Tier = 'prototype';
   let requires: SlotName[] | undefined;
   for (const name of chain) {
@@ -151,6 +173,7 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
     layers = mergeLayers(layers, p.layers);
     if (p.policy) policy = p.policy;
     if (p.pipeline) pipeline = deepMerge(pipeline, p.pipeline);
+    if (p.gateway) gateway = deepMerge(gateway, p.gateway);
     if (p.tier) tier = p.tier;
     if (p.requires) requires = p.requires;
   }
@@ -164,7 +187,7 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
     ...(config.name ? { name: config.name } : {}),
     ...(profile ? { profile } : {}),
     chain, tier, ...(requires ? { requires } : {}),
-    plugins: config.plugins ?? [], layers, policy, pipeline, agents: config.agents ?? {}, dir,
+    plugins: config.plugins ?? [], layers, policy, pipeline, gateway, agents: config.agents ?? {}, dir,
   };
 }
 
@@ -194,8 +217,9 @@ export function parseConfig(text: string, opts: LoadOptions & { file?: string; d
   const envErrors: string[] = [];
   const layers = interpolate(resolved.layers, env, envErrors, '$.layers');
   const agents = interpolate(resolved.agents, env, envErrors, '$.agents');
+  const gateway = interpolate(resolved.gateway, env, envErrors, '$.gateway');
   if (envErrors.length) throw new ConfigError(envErrors.map((e) => profile ? `${e} (profile ${profile})` : e), opts.file);
-  return { ...resolved, layers, agents };
+  return { ...resolved, layers, agents, gateway };
 }
 
 export async function loadConfig(file: string, opts: LoadOptions = {}): Promise<ResolvedConfig> {

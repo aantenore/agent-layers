@@ -76,3 +76,13 @@ test('policy rules accept when.authenticated in the base config and in profiles'
   assert.deepEqual(c.policy, rules);
   assert.throws(() => parseConfig(JSON.stringify({ policy: [{ effect: 'allow', when: { authenticated: 'yes' } }] })), ConfigError);
 });
+
+test('gateway block: profiles merge into the base and ${env:} is interpolated', () => {
+  const c = parseConfig(JSON.stringify({
+    gateway: { port: 8787, inbound: ['openai-compatible'], cors: { origins: ['http://a'] } },
+    profiles: { p: { gateway: { host: '${env:GW_HOST:-0.0.0.0}', anonymous: true } } },
+  }), { profile: 'p', env: {} });
+  assert.deepEqual(c.gateway, { port: 8787, inbound: ['openai-compatible'], cors: { origins: ['http://a'] }, host: '0.0.0.0', anonymous: true });
+  assert.throws(() => parseConfig(JSON.stringify({ gateway: { port: 'x' } })), ConfigError);
+  assert.deepEqual(parseConfig('{}').gateway, {});
+});

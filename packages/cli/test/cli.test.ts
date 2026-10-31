@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { gateway } from '../src/commands/gateway.ts';
 import { referenceTests } from '../src/commands/test.ts';
 import { main } from '../src/main.ts';
 import { captureIo, linkModules, tempProject } from './helpers.ts';
@@ -130,7 +131,7 @@ test('usage errors exit 1 with a message', async () => {
   const { io, errors } = captureIo(dir);
   assert.equal(await main(['frobnicate'], io), 1);
   assert.match(errors(), /unknown command "frobnicate"/);
-  assert.equal(await main(['gateway'], captureIo(dir).io), 1);
+  assert.equal(await main(['gateway', '--port', 'nope'], captureIo(dir).io), 1);
 });
 
 test('reference tests live only in reference/<layer id>/test', async () => {
@@ -138,4 +139,20 @@ test('reference tests live only in reference/<layer id>/test', async () => {
   await mkdir(join(root, 'layers', 'l4-tools', 'test'), { recursive: true });
   assert.deepEqual(referenceTests(root, 'tool'), [join(root, 'reference', 'tool', 'test')]);
   assert.deepEqual(referenceTests(root, 'guardrail'), []);
+});
+
+test('gateway hosts the profile on the network until stopped; production needs the readiness gate', async () => {
+  const { io, errors } = captureIo(dir);
+  let health = 0;
+  const code = await gateway(io, { port: '0' }, async () => {
+    const url = /gateway (http:\/\/\S+)/.exec(errors())![1]!;
+    health = (await fetch(`${url}/healthz`)).status;
+  });
+  assert.equal(code, 0);
+  assert.equal(health, 200);
+  assert.match(errors(), /tier prototype/);
+  assert.match(errors(), /only \/healthz and \/readyz/);
+  const prod = captureIo(dir);
+  assert.equal(await main(['gateway', '--profile', 'production'], prod.io), 1);
+  assert.match(prod.errors(), /not installed/);
 });

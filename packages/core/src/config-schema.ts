@@ -82,6 +82,27 @@ const pipeline: JsonSchema = {
   additionalProperties: false,
 };
 
+const gateway: JsonSchema = {
+  type: 'object',
+  description: 'Network host of the stack (agent-layers gateway).',
+  properties: {
+    port: { type: 'integer', minimum: 0, maximum: 65535 },
+    host: { type: 'string', minLength: 1 },
+    inbound: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Channel and trigger instance names to mount; every mountable one when omitted.' },
+    anonymous: { type: 'boolean', description: 'Accept requests without a credential (default false).' },
+    maxBodyBytes: { type: 'integer', minimum: 1 },
+    requestTimeoutMs: { type: 'integer', minimum: 1 },
+    publicOrigin: { type: 'string', minLength: 1 },
+    cors: {
+      type: 'object',
+      properties: { origins: { type: 'array', items: { type: 'string', minLength: 1 } } },
+      required: ['origins'],
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
 const agent: JsonSchema = {
   type: 'object',
   properties: {
@@ -105,6 +126,7 @@ const profile: JsonSchema = {
     layers: { $ref: '#/$defs/layersOverlay' },
     policy: { type: 'array', items: { $ref: '#/$defs/policyRule' } },
     pipeline: { $ref: '#/$defs/pipeline' },
+    gateway: { $ref: '#/$defs/gateway' },
   },
   additionalProperties: false,
 };
@@ -124,9 +146,10 @@ export const configSchema: JsonSchema = {
     layers: { $ref: '#/$defs/layers' },
     policy: { type: 'array', items: { $ref: '#/$defs/policyRule' } },
     pipeline: { $ref: '#/$defs/pipeline' },
+    gateway: { $ref: '#/$defs/gateway' },
     profiles: { type: 'object', additionalProperties: { $ref: '#/$defs/profile' } },
     agents: { type: 'object', additionalProperties: { $ref: '#/$defs/agent' } },
   },
   additionalProperties: false,
-  $defs: { adapterRef: ref, adapterRefOverlay: refOverlay, append, layers, layersOverlay, policyRule, pipeline, agent, profile },
+  $defs: { adapterRef: ref, adapterRefOverlay: refOverlay, append, layers, layersOverlay, policyRule, pipeline, gateway, agent, profile },
 };

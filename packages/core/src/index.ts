@@ -11,7 +11,7 @@ export {
   parseConfig, readRawConfig, resolveProfile, validateConfig,
 } from './config.ts';
 export type {
-  AdapterRef, AgentConfig, AppendList, ConfiguredAdapter, LayersConfig, LayersOverlay, LoadOptions, PipelineConfig, ProfileConfig, ResolvedConfig, StackConfig,
+  AdapterRef, AgentConfig, AppendList, ConfiguredAdapter, GatewayConfig, LayersConfig, LayersOverlay, LoadOptions, PipelineConfig, ProfileConfig, ResolvedConfig, StackConfig,
 } from './config.ts';
 export { readiness, type Readiness, type ReadinessProblem } from './readiness.ts';
 export { diffProfiles, formatDiff, type DiffRow, type DiffStatus } from './diff.ts';

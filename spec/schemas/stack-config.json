@@ -34,6 +34,9 @@
     "pipeline": {
       "$ref": "#/$defs/pipeline"
     },
+    "gateway": {
+      "$ref": "#/$defs/gateway"
+    },
     "profiles": {
       "type": "object",
       "additionalProperties": {
@@ -817,6 +820,62 @@
       },
       "additionalProperties": false
     },
+    "gateway": {
+      "type": "object",
+      "description": "Network host of the stack (agent-layers gateway).",
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inbound": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Channel and trigger instance names to mount; every mountable one when omitted."
+        },
+        "anonymous": {
+          "type": "boolean",
+          "description": "Accept requests without a credential (default false)."
+        },
+        "maxBodyBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "publicOrigin": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cors": {
+          "type": "object",
+          "properties": {
+            "origins": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "origins"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "agent": {
       "type": "object",
       "properties": {
@@ -902,6 +961,9 @@
         },
         "pipeline": {
           "$ref": "#/$defs/pipeline"
+        },
+        "gateway": {
+          "$ref": "#/$defs/gateway"
         }
       },
       "additionalProperties": false
