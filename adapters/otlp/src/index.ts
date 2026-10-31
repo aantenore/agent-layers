@@ -85,6 +85,7 @@ function assertPlainEndpoint(endpoint: string): void {
 
 /** Why an export failed, from a fixed set. Error text can echo URLs, headers or payloads, so it is never used. */
 function failureReason(err: unknown): string {
+  if (err instanceof RedirectRefused) return `redirects are not followed (HTTP ${err.status})`;
   if (err instanceof ExportStatusError) return `HTTP ${err.status}`;
   if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) return 'timeout';
   if (err instanceof InvalidResponse) return 'invalid response';
@@ -96,6 +97,7 @@ class ExportStatusError extends Error {
   constructor(status: number) { super('export failed'); this.status = status; }
 }
 class InvalidResponse extends Error {}
+class RedirectRefused extends ExportStatusError {}
 
 function errorInfo(err: unknown): { type: string; message: string } {
   if (err instanceof Error) return { type: err.name || 'Error', message: err.message };
@@ -140,10 +142,13 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
         method: 'POST',
         headers: { 'content-type': 'application/json', ...options.headers },
         body: JSON.stringify(body),
+        // Redirects are not followed: the telemetry and the headers stay with the configured collector.
+        redirect: 'manual',
         signal: timeoutSignal(timeoutMs),
       });
       if (typeof res?.ok !== 'boolean') throw new InvalidResponse();
       await res.body?.cancel().catch(() => {});
+      if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) throw new RedirectRefused(res.status);
       if (!res.ok) throw new ExportStatusError(res.status);
       return true;
     } catch (err) {

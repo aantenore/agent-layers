@@ -228,8 +228,14 @@ export class HttpTransport implements Transport {
         ...withAuth(this.#cfg.headers, auth),
       },
       body: JSON.stringify(body),
+      // Redirects are not followed: the arguments, the session and the credentials stay with the configured host.
+      redirect: 'manual',
       signal: anySignal(signal, timeoutSignal(this.#limits.timeoutMs)),
     });
+    if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+      await res.body?.cancel().catch(() => {});
+      throw new McpHttpError(res.status, 'redirects are not followed');
+    }
     this.#session = res.headers.get('mcp-session-id') ?? this.#session;
     // Mask the whole body before cutting it: a secret that straddles the cut would otherwise survive in part.
     if (!res.ok) throw new McpHttpError(res.status, redact(await res.text().catch(() => ''), this.#secrets(auth)).slice(0, this.#limits.errorBodyChars));
@@ -265,6 +271,7 @@ export class HttpTransport implements Transport {
     await fetch(this.#cfg.url!, {
       method: 'DELETE',
       headers: { 'mcp-session-id': this.#session, ...withAuth(this.#cfg.headers, auth) },
+      redirect: 'manual',
       signal: timeoutSignal(this.#limits.timeoutMs),
     }).catch(() => {});
   }

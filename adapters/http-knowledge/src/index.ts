@@ -96,8 +96,14 @@ export function createHttpKnowledge(
         headers: { 'content-type': 'application/json', accept: 'application/json', ...sent },
         // The wire keeps its own field names: `query` is the language's `KnowledgeQuery.text`.
         body: JSON.stringify({ query: q.text, k, ...(q.filter ? { filter: q.filter } : {}) }),
+        // Redirects are not followed: the query and the credentials stay with the configured host.
+        redirect: 'manual',
         signal: anySignal(q.signal, timeoutSignal(timeoutMs)),
       });
+      if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+        await res.body?.cancel().catch(() => {});
+        throw new Error(`knowledge HTTP: redirects are not followed (HTTP ${res.status})`);
+      }
       // The error body may echo the credentials; mask the whole body before cutting it.
       if (!res.ok) throw new Error(`knowledge HTTP ${res.status}: ${redact(await res.text().catch(() => ''), secretForms(headerSecrets(sent), minSecretChars)).slice(0, errorBodyChars)}`);
       const body: unknown = await res.json().catch(() => undefined);

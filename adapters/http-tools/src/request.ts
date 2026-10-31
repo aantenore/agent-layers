@@ -147,7 +147,12 @@ export async function sendRequest(name: string, spec: RequestSpec & { method: Ht
     secrets.push(token);
   }
 
-  const res = await fetch(target, { method: spec.method, headers, ...(body !== undefined ? { body } : {}), signal: anySignal(ctx.signal, timeoutSignal(timeoutMs)) });
+  // Redirects are not followed: the arguments and the credentials stay with the configured host.
+  const res = await fetch(target, { method: spec.method, headers, ...(body !== undefined ? { body } : {}), redirect: 'manual', signal: anySignal(ctx.signal, timeoutSignal(timeoutMs)) });
+  if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+    await res.body?.cancel().catch(() => {});
+    return failure(`${name}: redirects are not followed (HTTP ${res.status})`);
+  }
   const type = res.headers.get('content-type') ?? '';
   if (res.ok && type && !TEXTUAL.test(type)) {
     return { ok: true, text: `HTTP ${res.status}: ${(await res.arrayBuffer()).byteLength} bytes of ${type.split(';')[0]} (not shown)` };

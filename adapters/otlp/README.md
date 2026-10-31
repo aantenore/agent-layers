@@ -45,8 +45,9 @@ spans: `gen_ai.client.operation.duration` and `agent.runs`.
 **No content, no secrets.** Prompts, answers, tool arguments and results, queries, reasons and error text are left out
 unless `captureContent` is true; secret-looking attribute keys are masked as the TelemetryPort requires. Span status
 carries only `error.type` by default. Export failures never reach the run: the first one per signal is reported with
-`process.emitWarning`: the origin and one of `HTTP <status>`, `timeout`, `invalid response`, `network error`, never error
-text. An endpoint with credentials in the URL is rejected at creation; put them in `headers`. Spans of a failed batch are dropped; metrics are re-sent with the next export.
+`process.emitWarning`: the origin and one of `HTTP <status>`, `redirects are not followed (HTTP <status>)`, `timeout`,
+`invalid response`, `network error`, never error text. Redirects are never followed, so spans and `headers` stay with
+the configured collector. An endpoint with credentials in the URL is rejected at creation; put them in `headers`. Spans of a failed batch are dropped; metrics are re-sent with the next export.
 
 **Trace context.** The core treats `TraceContext {parent, state}` as opaque; this adapter owns the W3C Trace Context
 format (`src/w3c.ts`). `current()` (and `native().traceparent()`) return the context of the active span as `traceparent`

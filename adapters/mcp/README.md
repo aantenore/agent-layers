@@ -31,7 +31,8 @@ Lists the tools of the server and calls them. Tool names are the server's own, w
 - **Results**: `{ ok, text, data? }`: the text items of `content[]` joined, `ok` = `!isError`, `structuredContent` in
   `data`. Images, audio and resources go to `ext["mcp.content"]` (without any text item the text is the structured
   content as JSON, or a marker such as `[image]`). Secrets are masked in all three. A JSON-RPC error answering a call is
-  a result with `ok: false`. An unreachable server, an HTTP error status and a cancelled call reject.
+  a result with `ok: false`. An unreachable server, an HTTP error status and a cancelled call reject. Redirects are
+  never followed over HTTP (a 3xx rejects), so arguments, the session and credentials stay with the configured server.
 - **Auth**: with `auth: { audience, scopes }` (HTTP only) every call carries `Authorization: Bearer <token>` from
   `ctx.credentials`, which replaces a static `authorization` header. Without credentials nothing is sent and the call
   is an error result. A token echoed back by the server is redacted. The connection requests (initialize, tool list)

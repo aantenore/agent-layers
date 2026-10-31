@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { createMappings, noMappings, type BoundCredentials, type CallContext } from '@agent-layers/core';
 import { createMcpTools, McpHttpError, McpSession, toolAdapter, TOOL_RULES } from '../src/index.ts';
-import { startMcpMock } from './mock.ts';
+import { redirecting, startMcpMock } from './mock.ts';
 
 const ctx = (over: Partial<CallContext> = {}): CallContext => ({ runId: 'run-1', agent: 'agent-1', ...over });
 const stdioServer = fileURLToPath(new URL('./stdio-server.ts', import.meta.url));
@@ -321,3 +321,17 @@ test('the governed spec keeps annotations and _meta in ext', async () => {
     await mock.close();
   }
 });
+
+for (const status of [307, 308]) {
+  test(`a ${status} redirect is refused: requests and credentials never reach the other host`, async () => {
+    const r = await redirecting(status);
+    const tools = createMcpTools({ url: r.url, headers: { authorization: 'Bearer static-token' } });
+    try {
+      await assert.rejects(tools.listTools(ctx()), (err: unknown) => err instanceof McpHttpError && err.status === status && /redirects are not followed/.test(err.message));
+      assert.deepEqual(r.hits, []);
+    } finally {
+      await tools.close?.();
+      await r.close();
+    }
+  });
+}

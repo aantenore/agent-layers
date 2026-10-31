@@ -14,6 +14,8 @@ Declares HTTP endpoints as tools in the config, with no code. Each call is one r
 - **Auth**: with `auth: { audience, scopes? }` the request carries `Authorization: Bearer <token>` from
   `ctx.credentials`. Without credentials, or when the token request fails, nothing is sent and the result is an error.
   The token (and the secret of a static `Authorization` header) is removed from the response before the model sees it.
+  Redirects are never followed: a 3xx answer is a result with `ok: false`, so arguments and credentials stay with the
+  configured host.
 - **Results**: `{ ok, text, data? }`. A non-2xx status is a result with `ok: false` and the start of the body. JSON is pretty-printed and returned as
   `data` too; binary bodies are summarized; text is cut at `maxResultChars`. An unreachable host, a timeout and a
   cancelled call reject.

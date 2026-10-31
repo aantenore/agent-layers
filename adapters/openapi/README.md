@@ -23,7 +23,8 @@ given as a file path relative to the config directory, an `http(s)` URL, or inli
   the URL the document came from).
 - **Requests, auth, results**: as in `http-tools`. With `auth` every operation carries a bearer token from
   `ctx.credentials`, never sends without it, and redacts the token from responses. Results are `{ ok, text, data? }`;
-  non-2xx is `ok: false`.
+  non-2xx is `ok: false`. Operation requests never follow redirects (a 3xx is `ok: false`); the spec download, which
+  carries no headers, does.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|

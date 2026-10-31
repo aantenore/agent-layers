@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CallContext } from '@agent-layers/core';
 import { adapter, createHttpTools, type HttpToolsOptions } from '../src/index.ts';
-import { startApi } from './mock.ts';
+import { redirecting, startApi } from './mock.ts';
 
 const ctx = (over: Partial<CallContext> = {}): CallContext => ({ runId: 'run-1', agent: 'agent-1', ...over });
 
@@ -203,3 +203,17 @@ test('a secret echoed as \\u escapes is masked in text and data, for successes a
   assert.equal(bad.text.includes('key-from-env-123'), false);
   assert.match(bad.text, /\[redacted\]/);
 }));
+
+for (const status of [307, 308]) {
+  test(`a ${status} redirect is refused: arguments and credentials never reach the other host`, async () => {
+    const r = await redirecting(status);
+    try {
+      const tools = createHttpTools({ tools: { save: { description: 'Save', method: 'POST', url: `${r.url}/save`, body: 'json', headers: { 'x-api-key': 'static-key' } } } });
+      const out = await tools.callTool('save', { note: 'private' }, ctx());
+      assert.deepEqual(out, { ok: false, text: `save: redirects are not followed (HTTP ${status})` });
+      assert.deepEqual(r.hits, []);
+    } finally {
+      await r.close();
+    }
+  });
+}

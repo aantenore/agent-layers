@@ -37,3 +37,18 @@ export async function startApi(): Promise<ApiMock> {
   const { port } = server.address() as AddressInfo;
   return { url: `http://127.0.0.1:${port}`, requests, close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }) };
 }
+
+/** A server that answers every request with `status` and a Location on a second server, which records what reaches it. */
+export async function redirecting(status: number): Promise<{ url: string; hits: string[]; close(): Promise<void> }> {
+  const hits: string[] = [];
+  const listen = async (s: ReturnType<typeof createServer>) => {
+    await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', resolve));
+    return `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
+  };
+  const stop = (s: ReturnType<typeof createServer>) => new Promise<void>((resolve) => { s.close(() => resolve()); s.closeAllConnections(); });
+  const target = createServer((req, res) => { hits.push(req.url ?? ''); req.resume(); res.writeHead(200, { 'content-type': 'application/json' }).end('{}'); });
+  const targetUrl = await listen(target);
+  const origin = createServer((req, res) => { req.resume(); res.writeHead(status, { location: `${targetUrl}${req.url ?? '/'}` }).end(); });
+  const url = await listen(origin);
+  return { url, hits, close: async () => { await Promise.all([stop(origin), stop(target)]); } };
+}

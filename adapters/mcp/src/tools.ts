@@ -42,12 +42,10 @@ export const TOOL_EXT = { annotations: 'mcp.annotations', meta: 'mcp.meta', name
 
 /**
  * Default `in` rules from an MCP tool to its spec: the risk from the annotations. `exec` unless `destructiveHint` is
- * false (`write`) or `readOnlyHint` is true (`read`). Replaceable by the `mappings` block of the stack config. The
- * constant comes first because a `map` table also applies to a rule's `default`.
+ * false (`write`) or `readOnlyHint` is true (`read`). Replaceable by the `mappings` block of the stack config.
  */
 export const TOOL_RULES: readonly MappingRule[] = [
-  { to: '/risk', default: 'exec' },
-  { from: '/annotations/destructiveHint', to: '/risk', map: { true: 'exec', false: 'write' } },
+  { from: '/annotations/destructiveHint', to: '/risk', map: { true: 'exec', false: 'write' }, default: 'exec' },
   { from: '/annotations/readOnlyHint', to: '/risk', map: { true: 'read' } },
 ];
 

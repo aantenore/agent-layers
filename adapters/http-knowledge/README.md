@@ -22,7 +22,8 @@ rule `{ "from": "/source", "to": "/attrs/source" }`, which a `mappings` entry fo
 extend (the rule source is the raw item). The service returns at most `k` passages, best first, applies `filter` to its
 attributes, and answers an empty list when nothing matches. An item without text is dropped; a missing `id` is derived
 from the text. A non-2xx status, a body without a `passages` array, an unreachable service and a cancelled query
-reject; the stack reports them and carries on without the source.
+reject; the stack reports them and carries on without the source. Redirects are never followed (a 3xx rejects), so the
+query and the headers stay with the configured host.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import { createOtlpTelemetry, type OtlpOptions } from '../src/index.ts';
-import { attr, collector, type Collector, type OtlpSpan } from './collector.ts';
+import { attr, collector, redirecting, type Collector, type OtlpSpan } from './collector.ts';
 
 let sink: Collector;
 before(async () => { sink = await collector(); });
@@ -471,3 +471,23 @@ test('an invalid parent never fails the run', async () => {
     assert.equal(await t.span('root', L('telemetry'), async () => 1, { parent: trace }), 1);
   }
 });
+
+for (const status of [307, 308]) {
+  test(`a ${status} redirect is refused: telemetry and headers never reach the other host`, async () => {
+    const r = await redirecting(status);
+    const warnings: string[] = [];
+    const onWarning = (w: Error) => { warnings.push(w.message); };
+    process.on('warning', onWarning);
+    try {
+      const t = createOtlpTelemetry({ endpoint: r.url, headers: { authorization: 'Bearer abc123' }, intervalMs: 60_000, captureContent: true });
+      await t.span('x', L('telemetry'), async () => {});
+      await t.flush!();
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      process.off('warning', onWarning);
+      await r.close();
+    }
+    assert.deepEqual(r.hits, []);
+    assert.ok(warnings.includes(`OTLP trace export to ${r.url} failed: redirects are not followed (HTTP ${status})`), warnings.join('; '));
+  });
+}

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createMappings } from '@agent-layers/core';
 import { createHttpKnowledge } from '../src/index.ts';
-import { startKnowledgeService } from './mock.ts';
+import { redirecting, startKnowledgeService } from './mock.ts';
 
 test('sends {query, k, filter} and translates items to passages: source is the instance, the service source an attr', async () => {
   const svc = await startKnowledgeService();
@@ -98,3 +98,16 @@ test('an error body that echoes the credentials is masked, also across the trunc
     await svc.close();
   }
 });
+
+for (const status of [307, 308]) {
+  test(`a ${status} redirect is refused: the query and credentials never reach the other host`, async () => {
+    const r = await redirecting(status);
+    try {
+      const source = createHttpKnowledge({ url: r.url, headers: { authorization: 'Bearer static-token' } });
+      await assert.rejects(source.search({ text: 'private question' }), new RegExp(`redirects are not followed \\(HTTP ${status}\\)`));
+      assert.deepEqual(r.hits, []);
+    } finally {
+      await r.close();
+    }
+  });
+}

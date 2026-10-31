@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { createMappings, type CallContext } from '@agent-layers/core';
 import { adapter, createOpenApiTools, type OpenApiOptions } from '../src/index.ts';
-import { startApi } from './mock.ts';
+import { redirecting, startApi } from './mock.ts';
 import { sampleSpec } from './spec.ts';
 
 const ctx = (over: Partial<CallContext> = {}): CallContext => ({ runId: 'run-1', agent: 'agent-1', ...over });
@@ -168,3 +168,18 @@ test('in mapping rules shape the specs from the operation object; name and reque
   assert.equal(s!.risk, 'exec');
   assert.deepEqual(s!.attrs, { owner: 'ops', path: '/items/{id}' });
 });
+
+for (const status of [307, 308]) {
+  test(`a ${status} redirect is refused: arguments and credentials never reach the other host`, async () => {
+    const r = await redirecting(status);
+    try {
+      const tools = await createOpenApiTools({ spec: sampleSpec(r.url), headers: { 'x-api-key': 'static-key' } });
+      const out = await tools.callTool('echoJson', { title: 'private' }, ctx());
+      assert.equal(out.ok, false);
+      assert.equal(out.text, `echoJson: redirects are not followed (HTTP ${status})`);
+      assert.deepEqual(r.hits, []);
+    } finally {
+      await r.close();
+    }
+  });
+}
