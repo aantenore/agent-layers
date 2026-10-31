@@ -9,6 +9,7 @@ export async function checkDeploy(port: DeployPort, f: DeployFixtures = {}, c = 
   services.forEach((s, i) => c.all(conforms('service-spec', s), `fixture service[${i}]`));
   const plan = await c.attempt('plan', () => port.plan(services, { dryRun: true }));
   if (plan) {
+    c.produced('plan', plan);
     c.expect(Array.isArray(plan.artifacts) && plan.artifacts.every((a) => typeof a.path === 'string' && typeof a.content === 'string'), 'plan: artifacts must be {path, content}');
     c.expect(Array.isArray(plan.steps) && plan.steps.every((s) => typeof s === 'string'), 'plan: steps must be strings');
     c.expect(!JSON.stringify(plan).includes('change-me'), 'plan: must not inline secret values');
@@ -16,6 +17,7 @@ export async function checkDeploy(port: DeployPort, f: DeployFixtures = {}, c = 
   if (!f.live) { c.skip('up/down: live fixture not set'); return c; }
   const endpoints = await c.attempt('up', () => port.up(services), c.deployTimeoutMs);
   c.expect(Array.isArray(endpoints), 'up: must resolve to endpoints');
+  c.produced('up', endpoints);
   await c.attempt('down', () => port.down(services), c.deployTimeoutMs);
   return c;
 }
@@ -27,12 +29,12 @@ export async function checkSecrets(port: SecretPort, f: { known?: [string, strin
   return c;
 }
 
-const fakeHost = (): ChannelHost & { calls: string[] } => {
+const fakeHost = (c: Checks): ChannelHost & { calls: string[] } => {
   const calls: string[] = [];
   return {
     calls,
     agents: () => ['conformance'],
-    run: async (_agent, input) => { calls.push(typeof input === 'string' ? input : 'messages'); return { runId: 'conformance-run', status: 'completed', output: `echo:${typeof input === 'string' ? input : ''}` }; },
+    run: async (_agent, input) => { calls.push(typeof input === 'string' ? input : 'messages'); c.produced('channel input', input); return { runId: 'conformance-run', status: 'completed', output: `echo:${typeof input === 'string' ? input : ''}` }; },
   };
 };
 
@@ -49,7 +51,7 @@ export async function inboundFetch(mount: InboundMount, req: Request, ctx: Parti
   const url = new URL(req.url);
   const { route, allowed } = findRoute(mount.routes, req.method, url.pathname);
   if (!route) return new Response(null, { status: allowed.length ? 405 : 404 });
-  return route.handle(req, { requestId: 'conformance-request', signal: req.signal, origin: url.origin, identity: { subject: 'conformance-user', kind: 'user' }, ...ctx });
+  return route.handle(req, { requestId: 'conformance-request', signal: req.signal, origin: url.origin, caller: { id: 'conformance-user', kind: 'user', roles: [], scopes: [] }, ...ctx });
 }
 
 function checkMount(mount: InboundMount | undefined, c: Checks, label: string): mount is InboundMount {
@@ -65,7 +67,7 @@ function checkMount(mount: InboundMount | undefined, c: Checks, label: string): 
 export async function checkChannel(port: ChannelPort, f: ChannelFixtures = {}, c = new Checks()): Promise<Checks> {
   c.expect(typeof port.serve === 'function' || typeof port.mount === 'function', 'channel needs serve() or mount()');
   if (port.serve) {
-    const host = fakeHost();
+    const host = fakeHost(c);
     const handle = await c.attempt('serve', () => port.serve!(host));
     if (handle) {
       c.expect(typeof handle.close === 'function', 'serve: handle needs close()');
@@ -77,7 +79,7 @@ export async function checkChannel(port: ChannelPort, f: ChannelFixtures = {}, c
     }
   }
   if (port.mount) {
-    const host = fakeHost();
+    const host = fakeHost(c);
     const mount = await c.attempt('mount', () => port.mount!(host));
     if (checkMount(mount, c, 'mount')) {
       if (f.exerciseMount) {
@@ -102,6 +104,7 @@ export async function checkTrigger(port: TriggerPort, f: TriggerFixtures = {}, c
   const validate = (label: string) => {
     c.expect(seen.length > 0, `${label}: no trigger was delivered`);
     seen.forEach((t, i) => c.all(conforms('trigger', t), `trigger[${i}]`));
+    c.produced(label, seen);
     seen.length = 0;
   };
   if (port.start) {

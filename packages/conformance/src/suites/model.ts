@@ -1,48 +1,59 @@
-import { assembleChunks, type CachePort, type ChatChunk, type ChatRequest, type ModelPort, type RouterPort } from '@agent-layers/core';
+import { assembleDeltas, callsOf, type CachePort, type ModelDelta, type ModelPort, type ModelReply, type ModelRequest, type RouterPort } from '@agent-layers/core';
 import { Checks, testContext } from '../check.ts';
 import { conforms } from '../schemas.ts';
 
 export interface ModelFixtures {
   model?: string;
   prompt?: string;
-  /** Offer one tool with tool_choice=required and expect a tool call (default false). */
+  /** Offer one tool with toolMode=required and expect a call part (default false). */
   toolCall?: boolean;
   /** Check that an aborted signal rejects (default true). */
   abort?: boolean;
   timeoutMs?: number;
 }
 
+const userMessage = (text: string): ModelRequest['messages'][number] => ({ role: 'user', parts: [{ type: 'text', text }] });
+
 export async function checkModel(port: ModelPort, f: ModelFixtures = {}, c = new Checks()): Promise<Checks> {
   const model = f.model ?? 'test';
-  const req: ChatRequest = { model, messages: [{ role: 'user', content: f.prompt ?? 'Reply with the single word OK.' }], max_tokens: 64 };
+  const req: ModelRequest = { model, messages: [userMessage(f.prompt ?? 'Reply with the single word OK.')], settings: { maxOutputTokens: 64 } };
   const res = await c.attempt('chat', () => port.chat(req, testContext()), f.timeoutMs);
   if (res) {
-    c.all(conforms('chat-response', res), 'chat response');
-    const msg = res.choices[0]?.message;
-    c.expect(typeof msg?.content === 'string' || msg?.tool_calls?.length, 'chat: first choice has neither content nor tool calls');
+    c.all(conforms('model-reply', res), 'model reply');
+    c.produced('chat', res);
+    const parts = res.message?.parts ?? [];
+    c.expect(parts.some((p) => p.type === 'text' || p.type === 'call'), 'chat: the reply has neither text nor call parts');
+    c.expect((res.finish === 'tools') === parts.some((p) => p.type === 'call'), 'chat: finish must be "tools" exactly when the reply has call parts');
   }
   if (port.stream) {
-    const chunks = await c.attempt('stream', async () => {
-      const out: ChatChunk[] = [];
-      for await (const ch of port.stream!(req, testContext())) out.push(ch);
+    const deltas = await c.attempt('stream', async () => {
+      const out: ModelDelta[] = [];
+      for await (const d of port.stream!(req, testContext())) out.push(d);
       return out;
     }, f.timeoutMs);
-    if (chunks) {
-      c.expect(chunks.length > 0, 'stream: yielded no chunks');
-      c.expect(chunks.every((ch) => Array.isArray(ch.choices)), 'stream: every chunk needs a choices array');
-      c.all(conforms('chat-response', assembleChunks(chunks, model)), 'assembled stream');
+    if (deltas) {
+      c.expect(deltas.length > 0, 'stream: yielded no deltas');
+      deltas.forEach((d, i) => c.all(conforms('model-delta', d), `stream delta[${i}]`));
+      const ends = deltas.filter((d) => d.type === 'end');
+      c.expect(ends.length === 1 && deltas[deltas.length - 1]?.type === 'end', `stream: must end with exactly one end delta (found ${ends.length})`);
+      c.produced('stream', deltas);
+      c.all(conforms('model-reply', assembleDeltas(deltas, model)), 'assembled stream');
     }
   } else c.skip('stream: not implemented (optional)');
   if (f.toolCall) {
-    const tooled = await c.attempt('chat with tools', () => port.chat({
-      ...req, messages: [{ role: 'user', content: 'What time is it? Use the tool.' }],
-      tools: [{ type: 'function', function: { name: 'get_time', description: 'Current time', parameters: { type: 'object', properties: {} } } }],
-      tool_choice: 'required',
+    const tooled: ModelReply | undefined = await c.attempt('chat with tools', () => port.chat({
+      ...req, messages: [userMessage('What time is it? Use the tool.')],
+      tools: [{ name: 'get_time', description: 'Current time', params: { type: 'object', properties: {} } }],
+      toolMode: 'required',
     }, testContext()), f.timeoutMs);
-    const call = tooled?.choices[0]?.message.tool_calls?.[0];
-    if (tooled && c.expect(call, 'chat with tools: expected a tool call')) {
-      c.expect(call!.function.name === 'get_time', `chat with tools: called "${call!.function.name}"`);
-      c.expect(isJson(call!.function.arguments), 'chat with tools: arguments must be a JSON string');
+    if (tooled) {
+      c.produced('chat with tools', tooled);
+      const call = callsOf(tooled.message)[0];
+      if (c.expect(call, 'chat with tools: expected a call part')) {
+        c.expect(call!.tool === 'get_time', `chat with tools: called "${call!.tool}"`);
+        c.expect(!!call!.args && typeof call!.args === 'object' && !Array.isArray(call!.args), 'chat with tools: args must be an object');
+        c.expect(call!.invalid === undefined, 'chat with tools: the arguments did not parse (invalid is set)');
+      }
     }
   }
   if (f.abort !== false) {
@@ -53,12 +64,10 @@ export async function checkModel(port: ModelPort, f: ModelFixtures = {}, c = new
   return c;
 }
 
-const isJson = (s: string) => { try { JSON.parse(s); return true; } catch { return false; } };
-
-export interface RouterFixtures { requests?: ChatRequest[]; expect?: string[] }
+export interface RouterFixtures { requests?: ModelRequest[]; expect?: string[] }
 
 export async function checkRouter(port: RouterPort, f: RouterFixtures = {}, c = new Checks()): Promise<Checks> {
-  const reqs = f.requests ?? [{ model: 'default', messages: [{ role: 'user', content: 'hello' }] }];
+  const reqs = f.requests ?? [{ model: 'default', messages: [userMessage('hello')] }];
   for (const [i, r] of reqs.entries()) {
     const m = await c.attempt(`select #${i}`, () => port.select(r, testContext()));
     if (m === undefined) continue;
@@ -75,7 +84,9 @@ export async function checkCache(port: CachePort, f: CacheFixtures = {}, c = new
   const value = { a: 1, b: ['x'], c: { d: null } };
   c.expect(await c.attempt('get missing', () => port.get(`${key}:missing`)) === undefined, 'get: a missing key must resolve to undefined');
   await c.attempt('set', () => port.set(key, value));
-  c.expect(JSON.stringify(await c.attempt('get', () => port.get(key))) === JSON.stringify(value), 'get: must return the stored value');
+  const stored = await c.attempt('get', () => port.get(key));
+  c.expect(JSON.stringify(stored) === JSON.stringify(value), 'get: must return the stored value');
+  c.produced('get', stored);
   if (port.delete) {
     await c.attempt('delete', () => port.delete!(key));
     c.expect(await c.attempt('get deleted', () => port.get(key)) === undefined, 'delete: key still present');

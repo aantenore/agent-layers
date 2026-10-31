@@ -1,4 +1,4 @@
-import { CHECK_LIMITS, limitValue, type CallContext } from '@agent-layers/core';
+import { CHECK_LIMITS, extWriteProblems, limitValue, type CallContext } from '@agent-layers/core';
 
 /** Time limits of the probes (`limits.check` in the stack config). */
 export interface CheckLimits {
@@ -8,16 +8,38 @@ export interface CheckLimits {
   deployTimeoutMs?: number;
 }
 
+/**
+ * What the adapter under test declared about `ext` (its descriptor's name and `ext` block). Without a declaration only
+ * the namespace rules apply: keys are namespaced and none is in the core's `sdk` namespace.
+ */
+export interface ExtDeclarationCheck {
+  adapter: string;
+  /** Defaults to the adapter name. */
+  namespace?: string;
+  /** The keys the adapter may write; when set, any other key fails. */
+  produces?: readonly string[];
+}
+
 /** Collects failures; every check is framework-free. */
 export class Checks {
   readonly failures: string[] = [];
   readonly skipped: string[] = [];
   readonly timeoutMs: number;
   readonly deployTimeoutMs: number;
+  readonly ext?: ExtDeclarationCheck;
 
-  constructor(limits: CheckLimits = {}) {
+  constructor(limits: CheckLimits = {}, ext?: ExtDeclarationCheck) {
+    this.ext = ext;
     this.timeoutMs = limitValue(CHECK_LIMITS.timeoutMs, limits.timeoutMs);
     this.deployTimeoutMs = limitValue(CHECK_LIMITS.deployTimeoutMs, limits.deployTimeoutMs);
+  }
+
+  /** Records a value the adapter produced: the `ext` keys inside it must follow the adapter's declaration. */
+  produced(label: string, value: unknown): void {
+    for (const problem of extWriteProblems(value, this.ext)) {
+      const message = `${label}: ${problem}`;
+      if (!this.failures.includes(message)) this.failures.push(message);
+    }
   }
 
   expect(ok: unknown, message: string): boolean {
