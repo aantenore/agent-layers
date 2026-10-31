@@ -55,13 +55,13 @@ configs:
           litellm_params:
             model: ollama_chat/lfm2.5:8b
             api_base: http://host.docker.internal:11434
-        # A hosted model read from the environment (HOSTED_MODEL, HOSTED_API_KEY), with a spend cap of 1 USD per 30 days.
+        # A hosted model read from the environment (HOSTED_MODEL, HOSTED_API_KEY), with a spend cap (default 1 USD per 30 days).
         - model_name: hosted
           litellm_params:
             model: os.environ/HOSTED_MODEL
             api_key: os.environ/HOSTED_API_KEY
-            max_budget: 1.0
-            budget_duration: 30d
+            max_budget: ${HOSTED_MAX_BUDGET_USD:-1.0}
+            budget_duration: ${HOSTED_BUDGET_DURATION:-30d}
         # Primary points to a model that does not exist, so every request falls back to `default`.
         - model_name: fallback-test
           litellm_params:
@@ -69,7 +69,7 @@ configs:
             api_base: http://host.docker.internal:11434
 
       router_settings:
-        num_retries: 0
+        num_retries: ${LITELLM_NUM_RETRIES:-0}
         fallbacks:
           - fallback-test: ["default"]
 
@@ -79,7 +79,7 @@ configs:
           type: redis
           host: valkey
           port: 6379
-          ttl: 600
+          ttl: ${CACHE_TTL_S:-600}
 
       general_settings:
         master_key: os.environ/LITELLM_MASTER_KEY

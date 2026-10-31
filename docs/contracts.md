@@ -70,7 +70,14 @@ Optional variables read by the reference compose files, with the defaults they u
 | infra | `OPENBAO_PORT` | `8200` |
 | infra | `OPENBAO_DEV_ROOT_TOKEN` | `dev-root-token` |
 | llm | `OLLAMA_PORT` | `11434` |
+| cache | `HOSTED_MAX_BUDGET_USD` | `1.0` |
+| cache | `HOSTED_BUDGET_DURATION` | `30d` |
+| cache | `LITELLM_NUM_RETRIES` | `0` |
+| cache | `CACHE_TTL_S` | `600` |
 | identity | `KEYCLOAK_ADMIN_PASSWORD` | `change-me` |
+| guardrail | `PRESIDIO_ANALYZER_MEM_LIMIT` | `2g` |
+| guardrail | `PRESIDIO_ANONYMIZER_MEM_LIMIT` | `512m` |
+| guardrail | `LLM_GUARD_MEM_LIMIT` | `3g` |
 
 These defaults belong to the reference setups (`reference/<layer id>/`). A stack config reads them through
 `${env:NAME:-default}`.

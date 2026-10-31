@@ -81,8 +81,9 @@ Every request goes through the same steps before any route runs (details in the
    `WWW-Authenticate`, and the adapter's error text is never returned. A request without a credential is a 401 unless
    `gateway.anonymous: true`. On the production tier the gateway refuses to start without an identity adapter or with
    `anonymous: true`.
-3. **Limits.** Body size (`maxBodyBytes`, 413), time limit (`requestTimeoutMs`, 504, streams included), JSON content
-   types (415). An error inside a route is a 500 without its message.
+3. **Limits.** Body size (`maxBodyBytes`, 413), time limit (`requestTimeoutMs`, 504, streams included), header and
+   body upload time (`headersTimeoutMs`, `bodyTimeoutMs`), JSON content types (415). Defaults and safe ranges are in
+   [limits.md](limits.md#gateway). An error inside a route is a 500 without its message.
 4. **Access log.** One `gateway.request` span on the `interface` layer per request: method, path without the query
    string, route, inbound adapter, status, duration, whether the caller was authenticated. Runs and tool calls nest
    under it. When the request carries a W3C `traceparent` (and `tracestate`), the span joins that trace and the
@@ -115,8 +116,9 @@ event) or, without one, with the identity of the sender; never anonymously unles
 ```
 
 `gateway` takes `port`, `host`, `inbound` (instance names to mount; every mountable channel and trigger by default),
-`anonymous`, `maxBodyBytes`, `requestTimeoutMs`, `publicOrigin`, `cors`, `allowedOrigins` and `allowedHosts`, and a
-profile can override any of them. `agent-layers gateway --profile production [--port n] [--host h]` composes the
+`anonymous`, `publicOrigin`, `cors`, `allowedOrigins`, `allowedHosts` and the limits `maxBodyBytes`, `requestTimeoutMs`,
+`headersTimeoutMs`, `bodyTimeoutMs`, `closeGraceMs`, `corsMaxAgeS` and `maxRequestIdChars`, and a profile can override
+any of them. `agent-layers gateway --profile production [--port n] [--host h]` composes the
 profile, refuses to start a production-tier profile that fails the readiness gate, prints the mounted routes, and
 stops gracefully on SIGINT or SIGTERM. `agent-layers dev` keeps using only the channels that serve themselves (the
 terminal), so the same profile works in both.

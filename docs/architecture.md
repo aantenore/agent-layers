@@ -156,7 +156,8 @@ flowchart TB
 A config defines `profiles` that `extend` each other and list only the slots that differ. Adapters declare `tiers`
 (`prototype`, `production`); a profile declares its `tier`. The readiness gate (`agent-layers check --profile`)
 fails when a production-tier profile uses a prototype-only adapter or lacks a required slot (default: identity,
-authorization, guardrails, telemetry, state). Agent specs and code never change between profiles.
+authorization, guardrails, telemetry, state) or sets an unsafe limit to `"unbounded"` ([limits.md](limits.md)). Agent
+specs and code never change between profiles.
 
 ## Data flow of one run
 

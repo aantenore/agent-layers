@@ -10,7 +10,9 @@ Adapters are independent packages, so anyone can add and maintain one without to
    peer dependency. Runtime dependencies only when the technology needs a client library.
 3. In `src/index.ts`: a factory plus a `defineAdapter` descriptor with `layer`, `port`, `name` (= `<name>`),
    `direction`, `maps` (`standard` or `technology`), `portVersion: PORT_VERSIONS.<Port>`, `tiers` and
-   `optionsSchema`. Technology-specific features go behind `native()` or the `extra` / `meta` fields.
+   `optionsSchema`. Technology-specific features go behind `native()` or the `extra` / `meta` fields. Every timeout,
+   size, count or truncation length is an option declared once with `defineLimits` and set as the descriptor's
+   `limits` (see [docs/limits.md](docs/limits.md)), never a literal in the code.
 4. Tests: `test/conformance.test.ts` with `checkAdapter` from `@agent-layers/conformance` must report no failures.
    For an upstream service, add a live contract test against a pinned version that skips when the service is down.
 5. `README.md`: what it maps onto which port, tiers, an options table and a config snippet.
@@ -58,4 +60,6 @@ logs or telemetry.
 - `.env.example`, the environment table in [docs/contracts.md](docs/contracts.md) and the defaults in
   `reference/*/compose.yml` agree;
 - the adapter catalog in [docs/adapters.md](docs/adapters.md) is what `npm run docs:adapters` generates;
+- every limit declared in code has a row in [docs/limits.md](docs/limits.md) with the same default, ranges and check,
+  and every row there is declared (a missing row is printed ready to paste);
 - no stale paths or model names remain, and the docs name no assistant tooling.

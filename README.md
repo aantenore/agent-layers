@@ -15,6 +15,7 @@ an adapter too, so it can be replaced like anything else.
 - **Every diagram, and the colour conventions:** [docs/diagrams.md](docs/diagrams.md)
 - **Start a project, write an adapter, go to production:** [docs/guide.md](docs/guide.md)
 - **Adapters, status and maturity:** [docs/adapters.md](docs/adapters.md)
+- **Every limit, its default and safe range:** [docs/limits.md](docs/limits.md)
 - **The vertical slice, results and open gaps:** [docs/slice.md](docs/slice.md)
 - **The language-neutral spec:** [spec/](spec/README.md)
 

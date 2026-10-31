@@ -149,11 +149,12 @@ in as a remote runtime (the `a2a` adapter) or uses the gateway's OpenAI-compatib
 | `plugins` | Modules that export adapter descriptors, for adapters outside `@agent-layers/adapter-*` |
 | `profile` | Default profile; `--profile` or `AGENT_LAYERS_PROFILE` override it |
 | `layers` | Base slots shared by all profiles |
-| `profiles.<name>` | `extends`, `tier`, `requires`, `layers` (only what differs), `policy`, `pipeline`, `gateway`, `description` |
+| `profiles.<name>` | `extends`, `tier`, `requires`, `layers` (only what differs), `policy`, `pipeline`, `gateway`, `limits`, `description` |
 | `policy` | Local authorization rules `{ effect: allow\|ask\|deny, tools?, risk?, when?: { roles, scopes, kind, authenticated } }`, first match wins; `authenticated: true` matches any verified caller, `false` only an anonymous one |
-| `pipeline.knowledge` | `k`, `maxChars`, `mode`: `system` (default), `user`, `tools` (expose sources as tools), `off` |
+| `pipeline.knowledge` | `k`, `maxChars`, `maxK`, `mode`: `system` (default), `user`, `tools` (expose sources as tools), `off` |
 | `pipeline.cacheTtlMs`, `pipeline.approvalTimeoutMs` | Cache lifetime; how long a tool call waits for an approval |
-| `gateway` | Network host: `port`, `host`, `inbound` (channel and trigger names to mount), `anonymous`, `maxBodyBytes`, `requestTimeoutMs`, `publicOrigin`, `cors`, `allowedOrigins`, `allowedHosts`; see [gateway.md](gateway.md) |
+| `gateway` | Network host: `port`, `host`, `inbound` (channel and trigger names to mount), `anonymous`, `publicOrigin`, `cors`, `allowedOrigins`, `allowedHosts`, and its limits (`maxBodyBytes`, `requestTimeoutMs`, ...); see [gateway.md](gateway.md) |
+| `limits.check` | Time limits of the `check` probes. Every limit, adapters included, with defaults and safe ranges: [limits.md](limits.md) |
 | `agents.<name>` | `file` (Markdown with front matter `model`, `tools`, `knowledge`; body = instructions) or inline `instructions`, `model`, `tools`, `knowledge`, `params` |
 
 Slots under `layers`:
@@ -203,7 +204,9 @@ Adapters that are named but not installed are reported as "not installed", not a
 
 **The readiness gate.** Adapters declare `tiers`; profiles declare `tier`. `check` fails when a production-tier
 profile uses a prototype-only adapter, or lacks a required slot. The required set is `requires` on the profile;
-the default for the production tier is identity, authorization, guardrails, telemetry and state.
+the default for the production tier is identity, authorization, guardrails, telemetry and state. It also fails a
+limit set to `"unbounded"` where that is unsafe (request bodies, responses, timeouts, sessions) and warns for values
+outside the safe range; see [limits.md](limits.md).
 Conformance probes run against the live services. A credentials adapter that issues tokens only on behalf of a caller
 (`oidc` in `on-behalf-of` mode) needs one: pass `--token <caller token>` (or `AGENT_LAYERS_TOKEN`); the token is verified
 through the identity adapter and the probe exchanges it. Without a caller the probe is reported as `skip`, not as a failure.

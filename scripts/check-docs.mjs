@@ -10,6 +10,9 @@
 //            port names used in docs exist
 //   env      .env.example, the environment table in docs/contracts.md and reference/*/compose.yml defaults agree
 //   catalog  the adapter catalog in docs/adapters.md equals what scripts/gen-adapters-catalog.mjs generates
+//   limits   every limit declared in code (STACK_LIMITS in packages/core, `limits` on adapter descriptors, LIMITS in
+//            runtimes/pydantic-ai settings.py) has a row in docs/limits.md with the same default, accepted range,
+//            safe range and production check, and every row there is a declared limit
 //   stale    forbidden strings: old paths, old layer folder names, old model name, assistant-tooling mentions
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -253,6 +256,82 @@ for (const file of markdown) {
   }
 }
 
+// ---- limits ---------------------------------------------------------------------------------------------------
+
+{
+  const DOC = 'docs/limits.md';
+  const { STACK_LIMITS } = await importSource('packages/core/src/stack-limits.ts');
+  const { collectAdapters } = await import('./gen-adapters-catalog.mjs');
+  const num = (v) => (typeof v === 'number' ? String(v) : v);
+  /** The cells of a row that follow from the declaration; `Why` is free text. */
+  const cellsOf = (s) => ({
+    Default: s.default === null || s.default === undefined ? '—' : s.default === 'unbounded' ? '`unbounded`' : `\`${num(s.default)}\`${s.unit === 'count' ? '' : ` ${s.unit}`}`,
+    Accepted: `${num(s.min)}–${s.max === undefined || s.max === null ? '∞' : num(s.max)}${s.unbounded ? ' or unbounded' : ''}`,
+    'Safe range': s.safe ? `${num(s.safe.min ?? s.min)}–${num(s.safe.max ?? s.max ?? '∞')}` : '—',
+    'On production': [s.unbounded ? `${s.unbounded === 'fail' ? 'fail' : 'warn'} if unbounded` : null, s.safe ? 'warn outside safe range' : null].filter(Boolean).join('; ') || '—',
+  });
+  const declared = new Map();
+  const add = (component, spec) => {
+    if (!declared.has(component)) declared.set(component, new Map());
+    declared.get(component).set(spec.path, spec);
+  };
+  for (const s of STACK_LIMITS) add(s.path.split('.')[0], s);
+  for (const { descriptor: d } of (await collectAdapters()).rows) for (const s of Object.values(d.limits ?? {})) add(`${d.name} · ${d.port}`, s);
+  // Python runtime: one `'NAME': Limit(key=value, ...)` per line in settings.py; values are kept as written.
+  const settings = 'runtimes/pydantic-ai/src/agent_layers_pydantic_ai/settings.py';
+  for (const line of lines(join(ROOT, settings))) {
+    const m = /^\s*'([A-Z][A-Z0-9_]*)':\s*Limit\((.*)\),?\s*$/.exec(line);
+    if (!m) continue;
+    const kw = Object.fromEntries([...m[2].matchAll(/(\w+)=('(?:[^'\\]|\\.)*'|[^,]+)/g)].map(([, k, v]) => [k, v.trim().replace(/^'|'$/g, '')]));
+    const val = (v) => (v === undefined || v === 'None' ? undefined : v);
+    add('pydantic-ai', {
+      path: m[1], unit: kw.unit, min: kw.low, max: val(kw.high),
+      default: kw.default === 'None' ? null : kw.default,
+      ...(kw.unbounded === 'True' ? { unbounded: 'warn' } : {}),
+      ...(val(kw.safe_low) || val(kw.safe_high) ? { safe: { ...(val(kw.safe_low) ? { min: kw.safe_low } : {}), ...(val(kw.safe_high) ? { max: kw.safe_high } : {}) } } : {}),
+    });
+  }
+  const documented = new Map();
+  const docPath = join(ROOT, DOC);
+  if (!existsSync(docPath)) fail('limits', DOC, null, 'missing');
+  else {
+    let component = null;
+    let header = null;
+    lines(docPath).forEach((line, i) => {
+      if (/^#{1,3}\s/.test(line)) {
+        const h = /^###\s+`([a-z0-9-]+)`(?:\s+·\s+(\w+Port))?\s*$/.exec(line);
+        component = h ? (h[2] ? `${h[1]} · ${h[2]}` : h[1]) : null;
+        header = null;
+        if (component) {
+          if (documented.has(component)) fail('limits', DOC, i + 1, `section ${component} appears twice`);
+          documented.set(component, new Map());
+        }
+        return;
+      }
+      if (!component || !isRow(line)) return;
+      const cells = splitRow(line);
+      if (!header) { header = cells; return; }
+      const m = /^`([^`]+)`$/.exec(cells[0] ?? '');
+      if (m) documented.get(component).set(m[1], { cells: Object.fromEntries(header.map((h, j) => [h, cells[j] ?? ''])), line: i + 1 });
+    });
+  }
+  const rowFor = (spec) => { const c = cellsOf(spec); return `| \`${spec.path}\` | ${c.Default} | ${c.Accepted} | ${c['Safe range']} | ${c['On production']} | <why> |`; };
+  for (const [component, specs] of declared) {
+    const rows = documented.get(component);
+    if (!rows) { fail('limits', DOC, null, `no section "### \`${component.replace(' · ', '` · ')}" for ${specs.size} declared limit(s)`); continue; }
+    for (const [path, spec] of specs) {
+      const row = rows.get(path);
+      if (!row) { fail('limits', DOC, null, `${component}: ${path} is declared in code but not documented; add ${rowFor(spec)}`); continue; }
+      for (const [col, want] of Object.entries(cellsOf(spec))) {
+        if (row.cells[col] !== want) fail('limits', DOC, row.line, `${component} ${path}: ${col} "${row.cells[col] ?? ''}", code says "${want}"`);
+      }
+      if (!row.cells.Why?.trim()) fail('limits', DOC, row.line, `${component} ${path}: Why is empty`);
+    }
+    for (const [path, row] of rows) if (!specs.has(path)) fail('limits', DOC, row.line, `${component}: ${path} is documented but not declared in code`);
+  }
+  for (const component of documented.keys()) if (!declared.has(component)) fail('limits', DOC, null, `section ${component} has no declared limits`);
+}
+
 // ---- stale strings --------------------------------------------------------------------------------------------
 
 {
@@ -285,7 +364,7 @@ for (const file of markdown) {
 
 // ---- report ---------------------------------------------------------------------------------------------------
 
-const ORDER = ['links', 'layers', 'ports', 'env', 'catalog', 'stale'];
+const ORDER = ['links', 'layers', 'ports', 'env', 'catalog', 'limits', 'stale'];
 let total = 0;
 for (const check of ORDER) {
   const list = problems.get(check) ?? [];
