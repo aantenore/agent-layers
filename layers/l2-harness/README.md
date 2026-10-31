@@ -11,7 +11,7 @@ Documentation: [docs/layers/L2-harness.md](../../docs/layers/L2-harness.md).
 ## Run the sample agent
 
 ```bash
-export REINLOOP_MODEL=ollama/qwen2.5:3b
+export REINLOOP_MODEL=ollama/qwen3:4b
 export OLLAMA_BASE_URL=http://localhost:11434/v1
 reinloop run --agents layers/l2-harness/agents -a assistant "Say hello"
 reinloop serve --agents layers/l2-harness/agents --port 8700

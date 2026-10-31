@@ -11,7 +11,7 @@
     "expected": { "description": "Reference answer or structured expectation; free-form." },
     "tags": { "type": "array", "items": { "type": "string" } },
     "layer": {
-      "enum": ["infra", "llm", "harness", "knowledge", "tool", "identity", "guardrail", "cache", "telemetry", "eval"],
+      "enum": ["infra", "llm", "harness", "knowledge", "tool", "identity", "guardrail", "cache", "telemetry", "eval", "interface"],
       "description": "Layer the case is meant to exercise."
     }
   },

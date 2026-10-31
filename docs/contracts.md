@@ -3,8 +3,11 @@
 Single source of truth for the interfaces between layers. Layer docs link here; if something disagrees with this
 file, this file wins. JSON Schemas (draft 2020-12) for the data shapes live in [`../contracts/`](../contracts).
 
-Interfaces are written in TypeScript because the reference runtime is. The wire formats (HTTP, MCP, JSONL) are
-language neutral. For the overall picture see [stack.md](stack.md).
+The contracts belong to the platform and are language neutral. The source of truth is the JSON Schemas in
+[`../contracts/`](../contracts) plus the HTTP endpoints described in this file. The TypeScript interfaces shown below
+(`KnowledgeSource`, `Guard`, `Evaluator`, ...) are reinloop's binding of those contracts, used here as readable
+notation; another runtime binds the same contracts in its own language. For the overall picture see
+[stack.md](stack.md).
 
 ## Host ports and environment
 
@@ -65,7 +68,10 @@ resources per provider. Details in [layers/L0-infra.md](layers/L0-infra.md).
 
 - In: agent file + input (+ identity).
 - Out: a `RunEvent` stream that ends in `run_end { status, output, usage, costUsd }`.
-- HTTP: `reinloop serve` (port 8700).
+- HTTP: `reinloop serve` (port 8700) in the reference binding.
+
+L2 is a runtime contract, not a product: any runtime that accepts an agent file plus input (and identity), emits the
+run events, and honours the layer contracts below can fill the slot. reinloop is the first binding.
 
 ### Triggers
 
@@ -200,7 +206,7 @@ Effects:
 - OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT`.
 - Spans follow the GenAI semantic conventions: `invoke_agent`, `chat`, `execute_tool`. Each span also carries
   `agent.layer`, one of: `infra`, `llm`, `harness`, `knowledge`, `tool`, `identity`, `guardrail`, `cache`,
-  `telemetry`, `eval` (the `Layer` enum).
+  `telemetry`, `eval`, `interface` (the `Layer` enum; `interface` is L10, and the reinloop binding will add it).
 - Metrics: `gen_ai.client.token.usage`, `gen_ai.client.operation.duration`, `agent.tool.calls`, `agent.cost.usd`,
   `agent.policy.decisions`, `agent.guardrail.actions`.
 - The collector fans out to Langfuse and Jaeger.

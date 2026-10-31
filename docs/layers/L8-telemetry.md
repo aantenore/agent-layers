@@ -43,7 +43,8 @@ or any OTLP backend. No agent change is needed.
 
 - OTLP/HTTP to `OTEL_EXPORTER_OTLP_ENDPOINT`.
 - Spans: `invoke_agent`, `chat`, `execute_tool`, each with the attribute `agent.layer` (`infra`, `llm`, `harness`,
-  `knowledge`, `tool`, `identity`, `guardrail`, `cache`, `telemetry`, `eval`).
+  `knowledge`, `tool`, `identity`, `guardrail`, `cache`, `telemetry`, `eval`, `interface`; the last is L10 and the
+  reinloop binding will add it).
 - Metrics: `gen_ai.client.token.usage`, `gen_ai.client.operation.duration`, `agent.tool.calls`, `agent.cost.usd`,
   `agent.policy.decisions`, `agent.guardrail.actions`.
 - The collector fans out to Langfuse and Jaeger.

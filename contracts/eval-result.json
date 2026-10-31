@@ -19,7 +19,7 @@
       "properties": {
         "metric": { "type": "string" },
         "value": { "type": "number" },
-        "layer": { "enum": ["infra", "llm", "harness", "knowledge", "tool", "identity", "guardrail", "cache", "telemetry", "eval"] },
+        "layer": { "enum": ["infra", "llm", "harness", "knowledge", "tool", "identity", "guardrail", "cache", "telemetry", "eval", "interface"] },
         "reason": { "type": "string" }
       },
       "additionalProperties": false

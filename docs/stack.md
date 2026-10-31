@@ -1,7 +1,12 @@
 # The stack on one page
 
 agent-layers is an open-source, runtime-agnostic agent platform. It has eleven layers, L0 to L10. L0-L9 cover what
-runs; L10 is the interface. The reference runtime is [reinloop](https://github.com/aantenore/reinloop).
+runs; L10 is the interface.
+
+agent-layers is the container. The agent runtime is one component inside it, not the platform: L2 defines a runtime
+contract, and [reinloop](https://github.com/aantenore/reinloop) is its first binding (the reference runtime). LangGraph,
+Pydantic AI, the OpenAI Agents SDK and Google ADK are candidate runtimes. Planned layout: `runtimes/<name>/` holds only
+configuration and the binding; the runtime is a versioned dependency, never vendored source.
 
 One rule applies to every layer:
 
@@ -22,7 +27,7 @@ Each layer is described with the same five fields:
 |---|---|---|---|---|---|---|---|
 | 0 | [Infrastructure & delivery](layers/L0-infra.md) | Run, provision and ship everything else | OCI, Compose Spec, Kubernetes API / Helm, OpenTofu (HCL), Vault-compatible secrets API | Deploy target adapter: `compose` or `k8s`; OpenTofu modules per cloud | Docker Compose, Traefik, OpenBao, OpenTofu | Deploy-target contract (images, env, secret refs in; endpoints out) | Ingress (Traefik), secrets (OpenBao), CI/CD + GitOps (Argo CD) |
 | 1 | [Models](layers/L1-llm.md) | Generate completions and tool calls | OpenAI Chat Completions, Anthropic Messages | `Provider` | Ollama + `qwen3:4b` (Apache-2.0) | Provider conformance check | - |
-| 2 | [Agent runtime](layers/L2-harness.md) | Run the agent loop: prompts, tools, policy, budgets, durability | Markdown agent files, Agent Skills | Middleware, patterns, `RunStore` | reinloop | - | Session state (Postgres store), workers, queues and scheduled triggers (CloudEvents), know-how as Skills |
+| 2 | [Agent runtime](layers/L2-harness.md) | Run the agent loop: prompts, tools, policy, budgets, durability | Markdown agent files, Agent Skills | Middleware, patterns, `RunStore` | reinloop (first runtime binding; swappable) | Runtime contract | Session state (Postgres store), workers, queues and scheduled triggers (CloudEvents), know-how as Skills |
 | 3 | [Knowledge & memory](layers/L3-knowledge.md) | Give agents information that is not in the model | Per source type (see below); MCP for transport | `KnowledgeSource` | Qdrant, wiki folder, Apache Jena Fuseki, MCP Toolbox for Databases | `KnowledgeSource` + conformance | Ingestion (Docling), long-term memory, optional GraphRAG (Graphiti, LightRAG) |
 | 4 | [Tools](layers/L4-tools.md) | Let agents act on the outside world | MCP, OpenAPI 3 | Any JS function (`defineTool`) | MCP reference servers, declarative HTTP tools | - | OpenAPI import, sandbox for code-executing tools |
 | 5 | [Identity & access](layers/L5-identity.md) | Know who calls, act with the right credentials, decide what is allowed | OIDC / OAuth 2, RFC 8693, client credentials, OpenID AuthZEN | `IdentityVerifier`, `CredentialProvider`, `Authorizer` | Keycloak + OPA | Authorizer adapters + conformance | Tokens forwarded to MCP / HTTP tools, never logged |
@@ -31,6 +36,26 @@ Each layer is described with the same five fields:
 | 8 | [Telemetry & observability](layers/L8-telemetry.md) | Traces and metrics for every run | OpenTelemetry + GenAI semantic conventions | `Sink` | OTel Collector + Langfuse + Jaeger | - | `agent.layer` on every span; metrics for tokens, cost, denials, guardrail actions |
 | 9 | [Evaluation & improvement](layers/L9-eval.md) | Measure quality, find the layer a failure belongs to | none (promptfoo is the de facto tool) | `Evaluator` | promptfoo | `Evaluator` + dataset / result JSONL | Replay of stored runs, per-layer signals, diagnose agent, improvement loop |
 | 10 | [Interfaces & channels](layers/L10-interface.md) | How people, apps and other agents talk to an agent | OpenAI-compatible chat API, MCP server, A2A, AG-UI | Channel adapters | LibreChat (MIT) | Channel adapter + conformance | - |
+
+### Adapter forms
+
+For layers without a standard (L3 knowledge, L6 guardrails, L9 evaluation) the platform owns a language-neutral
+contract (JSON Schema + HTTP, see [contracts.md](contracts.md)). Every adapter can exist in two forms:
+
+- **(a) In-process binding** inside a runtime. Fastest; written in the runtime's language (an optimisation).
+- **(b) HTTP service** in the platform that implements the HTTP contract. Works with any runtime. Planned folder:
+  `services/<layer>-<adapter>/`.
+
+```mermaid
+flowchart LR
+  rA[Runtime A] -->|HTTP contract| svc[HTTP adapter service<br/>services/layer-adapter]
+  rB[Runtime B] -->|HTTP contract| svc
+  svc --> be[(Backend)]
+  rA -.->|in-process binding| be
+```
+
+Write the HTTP service first when the adapter should work everywhere; add an in-process binding for a runtime only
+where the extra hop matters.
 
 ### Knowledge is not only RAG
 

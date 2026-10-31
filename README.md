@@ -1,8 +1,12 @@
 # agent-layers
 
 An open-source, runtime-agnostic agent platform with eleven layers, L0 to L10. L0-L9 cover what runs; L10 is the
-interface. Every layer is a thin contract with a free reference implementation you can replace. The reference agent
-runtime is [reinloop](https://github.com/aantenore/reinloop).
+interface. Every layer is a thin contract with a free reference implementation you can replace.
+
+agent-layers is the container: the layer contracts, the reference services and the tests. It is not tied to one agent
+runtime. L2 defines a runtime contract, and [reinloop](https://github.com/aantenore/reinloop) is the first binding of
+it (the reference runtime). Other runtimes, such as LangGraph, Pydantic AI, the OpenAI Agents SDK or Google ADK, are
+candidates for the same slot.
 
 The canonical overview, with the five-field description of every layer, the request flow, cross-cutting concerns and
 the lifecycle, is [docs/stack.md](docs/stack.md).
@@ -17,8 +21,8 @@ Every layer is described with the same five fields:
 2. **Standard.** The open standard it speaks, where one exists.
 3. **Extension point.** The code you write to plug in something new. A tool, for example, can be any JS function.
 4. **Reference implementation.** Free, open source, swappable.
-5. **Adapter SDK + conformance.** Where no standard exists, reinloop exports a TypeScript interface plus a conformance
-   check, so any technology can be adapted.
+5. **Adapter SDK + conformance.** Where no standard exists, the platform defines a language-neutral contract (JSON
+   Schema + HTTP) and a conformance check; reinloop binds it as a TypeScript interface. Any technology can be adapted.
 
 Each layer is tested live against its reference implementation, not against mocks.
 
@@ -28,7 +32,7 @@ Each layer is tested live against its reference implementation, not against mock
 |---|---|---|---|---|---|
 | 0 | [Infrastructure & delivery](docs/layers/L0-infra.md) | OCI, Compose Spec, Kubernetes API / Helm, OpenTofu (HCL), Vault-compatible secrets API | Deploy target adapter (`compose` or `k8s`); OpenTofu modules per cloud | Docker Compose, Traefik (ingress), OpenBao (secrets), OpenTofu; Argo CD for GitOps | Deploy-target contract |
 | 1 | [Models](docs/layers/L1-llm.md) | OpenAI Chat Completions, Anthropic Messages | `Provider` | Ollama + `qwen3:4b` | Provider conformance check |
-| 2 | [Agent runtime](docs/layers/L2-harness.md) | Markdown agent files, Agent Skills, MCP server exposure, CloudEvents triggers | Middleware, patterns, `RunStore` | reinloop | - |
+| 2 | [Agent runtime](docs/layers/L2-harness.md) | Markdown agent files, Agent Skills, MCP server exposure, CloudEvents triggers | Middleware, patterns, `RunStore` | reinloop (first runtime binding; swappable) | Runtime contract |
 | 3 | [Knowledge & memory](docs/layers/L3-knowledge.md) | Per source: SQL, SPARQL + RDF / OWL / SKOS, GQL / Cypher, files + git, Agent Skills; MCP for transport only. None for documents and memory | `KnowledgeSource` | Qdrant + mcp-server-qdrant; Markdown wiki folder; Apache Jena Fuseki and MCP Toolbox for Databases next; Docling for ingestion | `KnowledgeSource` + conformance |
 | 4 | [Tools](docs/layers/L4-tools.md) | MCP; OpenAPI 3 | `defineTool` (any JS function) | MCP reference servers; declarative HTTP tools + OpenAPI import | - |
 | 5 | [Identity & access](docs/layers/L5-identity.md) | OIDC/OAuth 2, RFC 8693 token exchange (on behalf of a user), client credentials (own identity), OpenID AuthZEN | `IdentityVerifier`, `CredentialProvider`, `Authorizer` | Keycloak + OPA | Authorizer adapters (`opa`, `authzen`) |
@@ -188,6 +192,8 @@ the model you ship. `LLM_MODEL` can point to any model Ollama serves.
 contracts/    JSON Schemas for the data shapes crossing layer boundaries
 docs/         stack.md (overview), contracts.md, lifecycle.md, cross-cutting/ and one doc per layer
 layers/lN-*/  compose file, config, tests and reference wiring for each layer
+runtimes/     planned: runtimes/<name>/ holds only config and binding for a runtime (see docs/stack.md)
+services/     planned: services/<layer>-<adapter>/ holds HTTP adapter services (see docs/stack.md)
 lib/          shared helpers for tests (reinloop loader, readiness polling)
 ```
 

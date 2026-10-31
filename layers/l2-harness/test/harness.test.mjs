@@ -7,7 +7,7 @@ import { reinloop } from '../../../lib/reinloop.mjs';
 try { process.loadEnvFile(resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env')); } catch { /* .env is optional */ }
 
 const baseUrl = (process.env.LLM_BASE_URL ?? 'http://localhost:11434/v1').replace(/\/$/, '');
-const model = process.env.LLM_MODEL ?? 'qwen2.5:3b';
+const model = process.env.LLM_MODEL ?? 'qwen3:4b';
 const agentsDir = resolve(dirname(fileURLToPath(import.meta.url)), '../agents');
 
 /** Returns undefined when the model is served, otherwise the reason to skip. */
