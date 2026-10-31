@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import type { Readable, Writable } from 'node:stream';
-import { defineAdapter, PORT_VERSIONS, type ChannelHandle, type ChannelHost, type ChannelPort } from '@agent-layers/core';
+import { defineAdapter, PORT_VERSIONS, stopReasonOf, type ChannelHandle, type ChannelHost, type ChannelPort, type RunResult } from '@agent-layers/core';
 
 export interface TerminalChannelOptions {
   /** Agent to talk to at start (default: the first agent of the host). */
@@ -17,7 +17,18 @@ export interface TerminalStreams {
   output?: Writable;
 }
 
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+/** Error text is not shown: only the stop code of the error. */
+const errorLine = (err: unknown) => `[error] ${stopReasonOf(err).code}`;
+
+/**
+ * A run that did not complete, from its status and `reason.code` (and `reason.by`); the reason's detail is internal and
+ * not shown. A waiting run also prints what the agent said so far: it is what the person is asked.
+ */
+function incomplete(result: RunResult): string[] {
+  const { code, by } = result.reason ?? {};
+  const head = `[${result.status}]${code ? ` ${code}` : ''}${by ? ` (${by})` : ''}`;
+  return result.status === 'waiting' && result.output ? [head, result.output] : [head];
+}
 
 /** Channel that serves the stack's agents on a terminal: one line in, one answer out, in order. */
 export function createTerminalChannel(options: TerminalChannelOptions = {}, streams: TerminalStreams = {}, name = 'terminal-channel'): ChannelPort & Required<Pick<ChannelPort, 'serve'>> {
@@ -55,9 +66,9 @@ export function createTerminalChannel(options: TerminalChannelOptions = {}, stre
           try {
             const result = await host.run(agent!, line, { sessionId, signal: abort.signal });
             if (result.status === 'completed') print(result.output);
-            else print(`[${result.status}] ${result.reason ?? result.output}`.trimEnd());
+            else for (const line of incomplete(result)) print(line);
           } catch (err) {
-            if (!stopping) print(`[error] ${message(err)}`);
+            if (!stopping) print(errorLine(err));
           }
         }
         return true;
@@ -75,7 +86,7 @@ export function createTerminalChannel(options: TerminalChannelOptions = {}, stre
         rl.close();
       }
 
-      const done = loop().catch((err: unknown) => { rl.close(); print(`[error] ${message(err)}`); });
+      const done = loop().catch((err: unknown) => { rl.close(); print(errorLine(err)); });
       return {
         done,
         async close() {

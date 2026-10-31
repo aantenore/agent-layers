@@ -49,22 +49,38 @@ test('one session id per serve, passed on every run', async () => {
   assert.equal(typeof ids[0], 'string');
 });
 
-test('stopped and failed runs are printed with their reason', async () => {
-  const t = setup(async (_a, input) => (input === 'x'
-    ? result({ status: 'stopped', reason: 'guardrail:pii:input' })
-    : result({ status: 'failed', reason: 'model unavailable' })));
+test('stopped, failed and waiting runs are shown from reason.code and reason.by, never from text', async () => {
+  const runs: Record<string, RunResult> = {
+    guard: result({ status: 'stopped', output: 'partial', reason: { code: 'guard_block', layer: 'guardrail', by: 'pii', stage: 'input', detail: 'card number 4111 1111 1111 1111' } }),
+    aborted: result({ status: 'stopped', reason: { code: 'aborted' } }),
+    broken: result({ status: 'failed', reason: { code: 'error', detail: 'postgres://user:hunter2@db' } }),
+    approval: result({ status: 'waiting', output: 'Approve the refund?', reason: { code: 'needs_input', layer: 'identity', by: 'approvals', detail: 'ap-1' } }),
+    login: result({ status: 'waiting', reason: { code: 'needs_auth' } }),
+    bare: result({ status: 'failed' }),
+  };
+  const t = setup(async (_a, input) => runs[String(input)]!);
   const handle = await t.serve();
-  t.input.end('x\ny\n');
+  t.input.end(`${Object.keys(runs).join('\n')}\n`);
   await handle.done;
-  assert.deepEqual(t.lines().slice(1), ['[stopped] guardrail:pii:input', '[failed] model unavailable']);
+  assert.deepEqual(t.lines().slice(1), [
+    '[stopped] guard_block (pii)',
+    '[stopped] aborted',
+    '[failed] error',
+    '[waiting] needs_input (approvals)',
+    'Approve the refund?',
+    '[waiting] needs_auth',
+    '[failed]',
+  ]);
+  assert.ok(!t.text().includes('hunter2') && !t.text().includes('4111') && !t.text().includes('partial'), 'details and partial output of stopped runs stay hidden');
 });
 
-test('a host error is printed and the loop keeps going', async () => {
-  const t = setup(async (_a, input) => { if (input === 'bad') throw new Error('boom'); return result({ output: 'fine' }); });
+test('a host error is printed as its stop code and the loop keeps going', async () => {
+  const t = setup(async (_a, input) => { if (input === 'bad') throw new Error('boom: secret-token'); return result({ output: 'fine' }); });
   const handle = await t.serve();
   t.input.end('bad\ngood\n');
   await handle.done;
-  assert.deepEqual(t.lines().slice(1), ['[error] boom', 'fine']);
+  assert.deepEqual(t.lines().slice(1), ['[error] error', 'fine']);
+  assert.ok(!t.text().includes('secret-token'));
 });
 
 test('/exit ends the session without running later lines', async () => {
