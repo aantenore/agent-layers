@@ -100,3 +100,9 @@ Each layer page has a **Where it sits** diagram: its ports, what calls it and wh
 | Diagram | Where | Shows |
 |---|---|---|
 | Threat map | [security.md](cross-cutting/security.md#threat-map) | Which layer mitigates which threat |
+
+### Decisions
+
+| Diagram | Where | Shows |
+|---|---|---|
+| The language at the centre | [0001-sdk-language.md](decisions/0001-sdk-language.md#the-language-at-the-centre) | The SDK's shapes in the middle, adapters translating standards at the edges, mappings from the stack config |
