@@ -3,7 +3,7 @@ import { createOidcCredentials, type OidcCredentialsOptions } from './credential
 import { createOidcIdentity, type OidcIdentityOptions } from './identity.ts';
 import { JWS_ALGORITHMS } from './jwt.ts';
 
-export { createOidcIdentity, defaultKind, rolesOf, scopesOf, DEFAULT_ALGORITHMS } from './identity.ts';
+export { agentKind, clientOf, createOidcIdentity, rolesOf, scopesOf, DEFAULT_ALGORITHMS, type AgentClients } from './identity.ts';
 export type { OidcIdentityHooks, OidcIdentityOptions, OidcIdentityPort } from './identity.ts';
 export { createOidcCredentials, ACCESS_TOKEN_TYPE, TOKEN_EXCHANGE_GRANT } from './credentials.ts';
 export type { OidcCredentialsHooks, OidcCredentialsOptions, OidcCredentialPort } from './credentials.ts';
@@ -39,7 +39,10 @@ export const identityAdapter = defineAdapter<'IdentityPort', OidcIdentityOptions
       jwksMaxAgeMs: ms,
       timeoutMs: { type: 'integer', minimum: 1 },
       allowHttp: { type: 'boolean' },
+      agentClients: strings,
+      agentSubjects: { type: 'object', additionalProperties: { type: 'string', minLength: 1 } },
       roleClients: strings,
+      namespaceClientRoles: { type: 'boolean' },
     },
     required: ['issuer'],
     additionalProperties: false,

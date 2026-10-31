@@ -18,9 +18,13 @@ OPA, and this adapter's live test (`test/live.test.ts`) runs against it.
   keys must have at least 2048 bits, EC curves must match the algorithm. Tokens with a `crit` header are refused.
 - `iss` must equal `issuer`; `aud` must contain one of `audience`; `exp` is required; `nbf` and `iat` are checked, all
   with `clockSkewSec`.
-- `kind` is `agent` for client-credentials tokens (`sub` equals `client_id` / `azp`, no `sub`, or the Keycloak
-  service-account user of `azp`), otherwise `user`. Roles come from `realm_access`, `resource_access` and `roles`;
-  scopes from `scope` and `scp`. `claims` holds the verified payload.
+- `kind` is `agent` only for a client-credentials token of a client listed in `agentClients` (its `azp`, or
+  `client_id`): no `sub`, or `sub` equal to that client's entry in `agentSubjects` (when none is set, to the client id,
+  as in RFC 9068). Everything else is `user`; without `agentClients` no token is ever `agent`. Usernames never count.
+  A token without `sub` that is not an allow-listed agent is refused.
+- Roles: `realm_access.roles`, the issuer-set `roles` claim, and `resource_access` roles of the `roleClients` only
+  (default: the `audience` values), named `<client>:<role>` unless `namespaceClientRoles` is false. Scopes come from
+  `scope` and `scp`. `claims` holds the verified payload.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
@@ -36,7 +40,10 @@ OPA, and this adapter's live test (`test/live.test.ts`) runs against it.
 | `jwksMaxAgeMs` | integer | `600000` | Key set cache lifetime |
 | `timeoutMs` | integer | `5000` | Discovery and JWKS request timeout |
 | `allowHttp` | boolean | `false` | Plain HTTP outside loopback hosts |
-| `roleClients` | string[] | all | Clients whose `resource_access` roles count |
+| `agentClients` | string[] | none | Clients whose client-credentials tokens are the agent |
+| `agentSubjects` | {client: sub} | none | Service-account `sub` per agent client (Keycloak: the service-account user id) |
+| `roleClients` | string[] | `audience` | Clients whose `resource_access` roles count; other clients are never read |
+| `namespaceClientRoles` | boolean | `true` | Client roles as `<client>:<role>` |
 
 ## CredentialPort: outbound tokens
 
@@ -69,12 +76,24 @@ HTTPS is required except on loopback hosts (`localhost`, `*.localhost`, `127.0.0
 URLs with embedded credentials are refused, redirects are never followed, and every response is capped at 1 MB.
 Errors never contain tokens or the client secret; provider error descriptions are scrubbed of token-like strings.
 
+### Migrating rules and policies
+
+Client roles are now namespaced: a policy rule or an OPA policy that matched a client role `editor` must match
+`<client>:editor` (or set `namespaceClientRoles: false` and list the client in `roleClients`). Realm roles are
+unchanged. Rules on `kind: agent` need `agentClients` (and, for Keycloak, `agentSubjects`).
+
 ## Config
 
 ```json
 {
   "layers": {
-    "identity": { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER}", "audience": "${env:OIDC_CLIENT_ID}" } },
+    "identity": {
+      "adapter": "oidc",
+      "options": {
+        "issuer": "${env:OIDC_ISSUER}", "audience": "${env:OIDC_CLIENT_ID}",
+        "agentClients": ["agent-runtime"], "agentSubjects": { "agent-runtime": "${env:AGENT_SERVICE_ACCOUNT_ID}" }
+      }
+    },
     "credentials": {
       "adapter": "oidc",
       "options": { "issuer": "${env:OIDC_ISSUER}", "clientId": "${env:OIDC_CLIENT_ID}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
@@ -92,6 +111,8 @@ docker compose -f reference/identity/compose.yml --env-file .env.example down -v
 ```
 
 The realm `agents` has the confidential client `agent-runtime` (service account and standard token exchange on, an
-audience mapper for `tools-api`) and the test users `alice` (`analyst`) and `bob` (`viewer`). For on-behalf-of,
+audience mapper for `tools-api`) and the test users `alice` (`analyst`) and `bob` (`viewer`). Configure
+`agentClients: ["agent-runtime"]` and its service-account user id as `agentSubjects["agent-runtime"]` (admin API:
+`GET /admin/realms/agents/clients/{id}/service-account-user`; the live test reads it there). For on-behalf-of,
 inbound user tokens must carry the agent's client in `aud` (Keycloak: an audience mapper on the front-end client) and
 the agent's client needs token exchange enabled.

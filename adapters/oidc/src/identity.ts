@@ -27,13 +27,23 @@ export interface OidcIdentityOptions {
   timeoutMs?: number;
   /** Accept plain-HTTP issuer and JWKS URLs on non-loopback hosts (default false). */
   allowHttp?: boolean;
-  /** Clients whose `resource_access` roles are included (default: all). */
+  /**
+   * Clients whose tokens may be the agent's own identity (client credentials). Without it no token is ever `agent`.
+   * A token is `agent` only when its `azp` (or `client_id`) is listed and it has no `sub`, or its `sub` is the client
+   * itself (RFC 9068) or, when set in `agentSubjects`, that client's service-account subject.
+   */
+  agentClients?: string[];
+  /** Client → `sub` of its service account (Keycloak: the service-account user id). Replaces the `sub == client` rule. */
+  agentSubjects?: Record<string, string>;
+  /** Clients whose `resource_access` roles are included (default: the `audience` values). Other clients are never read. */
   roleClients?: string[];
+  /** Client roles as `<client>:<role>`, so they cannot collide with realm roles (default true). */
+  namespaceClientRoles?: boolean;
 }
 
 /** Code-only extensions: not part of the JSON options. */
 export interface OidcIdentityHooks {
-  /** Derives `Identity.kind` from the verified claims (default `defaultKind`). */
+  /** Derives `Identity.kind` from the verified claims (default `agentKind` with `agentClients` / `agentSubjects`). */
   kind?: (claims: Record<string, unknown>) => 'user' | 'agent';
   fetch?: FetchLike;
   /** Clock in milliseconds (tests). */
@@ -48,30 +58,47 @@ const invalid = (why: string) => new OidcError('invalid_token', why);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : typeof v === 'string' ? [v] : []);
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
-/**
- * A client-credentials token is the agent's own identity: the subject is the client itself (RFC 9068: `sub` equals
- * `client_id` / `azp`, or there is no `sub`) or the Keycloak service-account user of `azp`. Everything else is a user.
- */
-export function defaultKind(claims: Record<string, unknown>): 'user' | 'agent' {
-  const { sub, client_id, azp, preferred_username } = claims;
-  if (sub === undefined) return 'agent';
-  if (typeof sub === 'string' && (sub === client_id || sub === azp)) return 'agent';
-  // Keycloak names the service-account user of client X `service-account-x`; the token's `azp` must be that client.
-  if (typeof preferred_username === 'string' && typeof azp === 'string' && preferred_username.toLowerCase() === `service-account-${azp}`.toLowerCase()) return 'agent';
-  return 'user';
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+
+/** The client a token was issued to: `azp`, else `client_id`; none when both are set and differ. */
+export function clientOf(claims: Record<string, unknown>): string | undefined {
+  const azp = str(claims.azp);
+  const clientId = str(claims.client_id);
+  if (azp && clientId && azp !== clientId) return undefined;
+  return azp ?? clientId;
 }
 
-/** Roles from Keycloak-style `realm_access` / `resource_access` and a plain `roles` claim, deduplicated. */
-export function rolesOf(claims: Record<string, unknown>, roleClients?: readonly string[]): string[] {
+export interface AgentClients { agentClients?: readonly string[]; agentSubjects?: Readonly<Record<string, string>> }
+
+/**
+ * `agent` only for a client-credentials token of an allow-listed client: no `sub`, or `sub` equal to the client's
+ * configured service-account subject (or, when none is configured, to the client id, as in RFC 9068). Names chosen by
+ * users (`preferred_username` and the like) never count. Everything else is `user`.
+ */
+export function agentKind(claims: Record<string, unknown>, cfg: AgentClients = {}): 'user' | 'agent' {
+  const client = clientOf(claims);
+  if (!client || !cfg.agentClients?.includes(client)) return 'user';
+  const { sub } = claims;
+  if (sub === undefined) return 'agent';
+  const expected = cfg.agentSubjects && Object.hasOwn(cfg.agentSubjects, client) ? cfg.agentSubjects[client] : undefined;
+  return sub === (expected ?? client) ? 'agent' : 'user';
+}
+
+/**
+ * Roles: `realm_access.roles`, the issuer-set `roles` claim, and `resource_access` roles of the listed clients only,
+ * as `<client>:<role>` unless `namespace` is false. Deduplicated.
+ */
+export function rolesOf(claims: Record<string, unknown>, clients: readonly string[] = [], namespace = true): string[] {
   const out = new Set(strings((claims.realm_access as { roles?: unknown } | undefined)?.roles));
+  for (const r of strings(claims.roles)) out.add(r);
   const resources = claims.resource_access;
   if (resources && typeof resources === 'object' && !Array.isArray(resources)) {
-    for (const [client, access] of Object.entries(resources as Record<string, { roles?: unknown } | null>)) {
-      if (roleClients && !roleClients.includes(client)) continue;
-      for (const r of strings(access?.roles)) out.add(r);
+    for (const client of clients) {
+      if (!Object.hasOwn(resources, client)) continue;
+      const access = (resources as Record<string, { roles?: unknown } | null>)[client];
+      for (const r of strings(access?.roles)) out.add(namespace ? `${client}:${r}` : r);
     }
   }
-  for (const r of strings(claims.roles)) out.add(r);
   return [...out];
 }
 
@@ -106,7 +133,10 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
   const timeoutMs = opts.timeoutMs ?? 5000;
   const fetchImpl: FetchLike = hooks.fetch ?? fetch;
   const now = hooks.now ?? Date.now;
-  const kindOf = hooks.kind ?? defaultKind;
+  const agents: AgentClients = { ...(opts.agentClients ? { agentClients: [...opts.agentClients] } : {}), ...(opts.agentSubjects ? { agentSubjects: { ...opts.agentSubjects } } : {}) };
+  const kindOf = hooks.kind ?? ((c: Record<string, unknown>) => agentKind(c, agents));
+  const roleClients = opts.roleClients ? [...opts.roleClients] : audiences;
+  const namespaceRoles = opts.namespaceClientRoles ?? true;
 
   let keys: Jwk[] | undefined;
   let fetchedAt = 0;
@@ -181,11 +211,10 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
 
       const kind = kindOf(c);
       if (kind !== 'user' && kind !== 'agent') throw invalid('token kind cannot be determined');
-      const subject = typeof c.sub === 'string' && c.sub
-        ? c.sub
-        : kind === 'agent' ? [c.client_id, c.azp].find((v): v is string => typeof v === 'string' && !!v) : undefined;
+      // A token without `sub` names no one unless it is an allow-listed agent client.
+      const subject = c.sub !== undefined ? str(c.sub) : kind === 'agent' ? clientOf(c) : undefined;
       if (!subject) throw invalid('token has no subject');
-      const identity: Identity = { subject, kind, roles: rolesOf(c, opts.roleClients), scopes: scopesOf(c), claims: c, token: credential };
+      const identity: Identity = { subject, kind, roles: rolesOf(c, roleClients, namespaceRoles), scopes: scopesOf(c), claims: c, token: credential };
       return identity;
     },
   };

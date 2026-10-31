@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { createOidcIdentity, defaultKind, MAX_RESPONSE_BYTES, type OidcIdentityOptions } from '../src/index.ts';
+import { agentKind, createOidcIdentity, MAX_RESPONSE_BYTES, type OidcIdentityOptions } from '../src/index.ts';
 import { b64, ecKey, edKey, hmacJwt, idp, json, nowSec, rsaKey, server, signJwt } from './helpers.ts';
 
 const rs = rsaKey('rs-1');
@@ -32,11 +32,12 @@ describe('verify', () => {
     const id = await port().verify(token);
     assert.equal(id.subject, 'u-alice');
     assert.equal(id.kind, 'user');
-    assert.deepEqual(id.roles, ['analyst', 'editor', 'x']);
+    assert.deepEqual(id.roles, ['analyst'], 'realm roles; client roles only of the audience by default');
     assert.deepEqual(id.scopes, ['openid', 'profile', 'tools.read']);
     assert.equal(id.claims?.preferred_username, 'alice');
     assert.equal(id.token, token);
-    assert.deepEqual((await port({ roleClients: ['api'] }).verify(token)).roles, ['analyst', 'editor']);
+    assert.deepEqual((await port({ roleClients: ['api'] }).verify(token)).roles, ['analyst', 'api:editor']);
+    assert.deepEqual((await port({ roleClients: ['api'], namespaceClientRoles: false }).verify(token)).roles, ['analyst', 'editor']);
   });
 
   test('accepts ES256, and EdDSA / PS256 only when allowed', async () => {
@@ -92,6 +93,7 @@ describe('verify', () => {
       [{ nbf: 'soon' }, /not yet valid/],
       [{ iat: nowSec() + 300 }, /future/],
       [{ sub: undefined, azp: undefined }, /subject/],
+      [{ sub: '' }, /subject/],
       [{ sub: 42 }, /subject/],
     ];
     for (const [over, pattern] of cases) {
@@ -125,13 +127,40 @@ describe('verify', () => {
     await refused(port({ types: ['at+jwt'] }).verify(idToken), idToken, /type/);
   });
 
-  test('client-credentials tokens are the agent; spoofed service-account names are not', async () => {
-    const agent = await port().verify(signJwt(rs, claims({ sub: 'sa-uuid', azp: 'agent-runtime', preferred_username: 'service-account-agent-runtime', realm_access: {} })));
-    assert.equal(agent.kind, 'agent');
-    assert.equal((await port().verify(signJwt(rs, claims({ sub: undefined, client_id: 'svc' })))).subject, 'svc');
-    assert.equal(defaultKind({ sub: 'svc', client_id: 'svc' }), 'agent');
-    assert.equal(defaultKind({ sub: 'u', azp: 'web', preferred_username: 'service-account-agent-runtime' }), 'user');
-    assert.equal(defaultKind({ sub: 'u', azp: 'agent-runtime', preferred_username: 'alice' }), 'user');
+  test('client roles never collide with realm roles and are read only for the listed clients', async () => {
+    const token = signJwt(rs, claims({ realm_access: { roles: ['viewer'] }, resource_access: { 'agent-runtime': { roles: ['admin'] }, evil: { roles: ['admin'] }, __proto__: { roles: ['admin'] } } }));
+    assert.deepEqual((await port().verify(token)).roles, ['viewer', 'agent-runtime:admin']);
+    assert.deepEqual((await port({ roleClients: [] }).verify(token)).roles, ['viewer']);
+    assert.deepEqual((await port({ allowAnyAudience: true, audience: undefined }).verify(token)).roles, ['viewer'], 'no audience, no client roles');
+    assert.deepEqual((await port({ roleClients: ['toString', 'constructor'] }).verify(token)).roles, ['viewer']);
+  });
+
+  test('agent only for allow-listed clients with a client-credentials subject', async () => {
+    const sa = claims({ sub: 'sa-uuid', azp: 'agent-runtime', preferred_username: 'service-account-agent-runtime', realm_access: {} });
+    assert.equal((await port().verify(signJwt(rs, sa))).kind, 'user', 'no allow-list: never agent');
+    assert.equal((await port({ agentClients: ['agent-runtime'] }).verify(signJwt(rs, sa))).kind, 'user', 'sub is neither the client nor its configured subject');
+    const agent = await port({ agentClients: ['agent-runtime'], agentSubjects: { 'agent-runtime': 'sa-uuid' } }).verify(signJwt(rs, sa));
+    assert.deepEqual([agent.kind, agent.subject], ['agent', 'sa-uuid']);
+    const rfc9068 = await port({ agentClients: ['svc'] }).verify(signJwt(rs, claims({ sub: 'svc', client_id: 'svc', azp: undefined })));
+    assert.deepEqual([rfc9068.kind, rfc9068.subject], ['agent', 'svc']);
+    const noSub = await port({ agentClients: ['svc'] }).verify(signJwt(rs, claims({ sub: undefined, azp: undefined, client_id: 'svc' })));
+    assert.deepEqual([noSub.kind, noSub.subject], ['agent', 'svc']);
+
+    // A token exchanged by the agent client on behalf of a user carries azp = agent client but the user's sub.
+    const exchanged = await port({ agentClients: ['agent-runtime'], agentSubjects: { 'agent-runtime': 'sa-uuid' } }).verify(signJwt(rs, claims({ azp: 'agent-runtime' })));
+    assert.equal(exchanged.kind, 'user');
+    // Usernames are user-chosen: they never make an agent.
+    const spoof = claims({ sub: 'u-mallory', azp: 'agent-runtime', preferred_username: 'service-account-agent-runtime' });
+    assert.equal((await port({ agentClients: ['agent-runtime'] }).verify(signJwt(rs, spoof))).kind, 'user');
+    assert.equal(agentKind({ sub: 'web', azp: 'web' }, { agentClients: ['svc'] }), 'user', 'client not allow-listed');
+    assert.equal(agentKind({ sub: 'svc', azp: 'svc', client_id: 'other' }, { agentClients: ['svc', 'other'] }), 'user', 'azp and client_id disagree');
+    assert.equal(agentKind({ sub: 'svc', azp: 'svc' }, { agentClients: ['svc'], agentSubjects: { svc: 'sa-1' } }), 'user', 'configured subject replaces sub == client');
+
+    // Without sub and without an allow-listed client the token names no one.
+    for (const opts of [{}, { agentClients: ['other'] }]) {
+      const token = signJwt(rs, claims({ sub: undefined, azp: 'svc' }));
+      await refused(port(opts).verify(token), token, /no subject/);
+    }
   });
 
   test('refuses weak or mismatched keys', async () => {

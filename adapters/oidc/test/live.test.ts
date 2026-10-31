@@ -34,13 +34,36 @@ async function passwordToken(user: keyof typeof USERS): Promise<string> {
   return ((await res.json()) as { access_token: string }).access_token;
 }
 
-const inbound = () => createOidcIdentity({ issuer, audience: clientId });
-const downstream = () => createOidcIdentity({ issuer, audience: toolsAudience });
+/**
+ * Keycloak's client-credentials tokens carry the service-account user id as `sub`. The realm import does not fix that
+ * id, so it is read once through the admin API (test-only admin password from .env.example).
+ */
+async function serviceAccountId(client: string): Promise<string> {
+  const base = issuer.slice(0, issuer.indexOf('/realms/'));
+  const realm = issuer.slice(issuer.indexOf('/realms/') + 8);
+  const admin = await fetch(`${base}/realms/master/protocol/openid-connect/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'password', client_id: 'admin-cli', username: 'admin', password: env.KEYCLOAK_ADMIN_PASSWORD ?? 'change-me' }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  assert.equal(admin.status, 200, 'admin token');
+  const headers = { authorization: `Bearer ${((await admin.json()) as { access_token: string }).access_token}` };
+  const get = async (path: string) => (await fetch(`${base}/admin/realms/${realm}${path}`, { headers, signal: AbortSignal.timeout(10_000) })).json() as Promise<any>;
+  const [found] = await get(`/clients?clientId=${encodeURIComponent(client)}`);
+  return (await get(`/clients/${found.id}/service-account-user`)).id;
+}
+
+let agentSubjects: Record<string, string> = {};
+const agentOptions = () => ({ agentClients: [clientId], agentSubjects });
+const inbound = () => createOidcIdentity({ issuer, audience: clientId, ...agentOptions() });
+const downstream = () => createOidcIdentity({ issuer, audience: toolsAudience, ...agentOptions() });
 
 describe('reference/identity (Keycloak + OPA)', { skip }, () => {
   let alice: Identity;
   let bob: Identity;
   before(async () => {
+    agentSubjects = { [clientId]: await serviceAccountId(clientId) };
     alice = await inbound().verify(await passwordToken('alice'));
     bob = await inbound().verify(await passwordToken('bob'));
   });
@@ -68,9 +91,12 @@ describe('reference/identity (Keycloak + OPA)', { skip }, () => {
   });
 
   test('gets the agent its own token with client_credentials; passes CredentialPort conformance', async () => {
-    const self = await downstream().verify(await createOidcCredentials({ issuer, clientId, clientSecret, mode: 'self' }).token(toolsAudience));
+    const token = await createOidcCredentials({ issuer, clientId, clientSecret, mode: 'self' }).token(toolsAudience);
+    const self = await downstream().verify(token);
     assert.equal(self.kind, 'agent');
+    assert.equal(self.subject, agentSubjects[clientId]);
     assert.equal(self.claims?.azp, clientId);
+    assert.equal((await createOidcIdentity({ issuer, audience: toolsAudience }).verify(token)).kind, 'user', 'without agentClients never agent');
     const report = await checkAdapter(credentialAdapter, { options: { issuer, clientId, clientSecret, mode: 'self' }, fixtures: { audience: toolsAudience } });
     assert.deepEqual(report.failures, []);
   });
@@ -96,7 +122,7 @@ describe('reference/identity (Keycloak + OPA)', { skip }, () => {
     });
     const config = resolveProfile({
       layers: {
-        identity: { adapter: 'oidc', options: { issuer, audience: clientId } },
+        identity: { adapter: 'oidc', options: { issuer, audience: clientId, ...agentOptions() } },
         credentials: { adapter: 'oidc', options: { issuer, clientId, clientSecret, mode: 'on-behalf-of' } },
         authorization: { adapter: 'opa', options: { url: opaUrl } },
         model: { adapter: 'mock-model', options: { rules: [{ match: 'save', tool: 'save_note', args: { text: 'hello' } }] } },
