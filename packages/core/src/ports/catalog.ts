@@ -61,7 +61,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   CredentialPort: { port: 'CredentialPort', layer: 'identity', version: '0.1.0', description: 'Outbound tokens, on behalf of a user or as the agent' },
   AuthorizationPort: { port: 'AuthorizationPort', layer: 'identity', version: '0.2.0', description: 'Decide whether an action is allowed' },
   ApprovalPort: { port: 'ApprovalPort', layer: 'identity', version: '0.2.0', description: 'Human approval for actions the policy marks ask' },
-  GuardPort: { port: 'GuardPort', layer: 'guardrail', version: '0.1.0', description: 'Allow, block or redact text at four stages' },
+  GuardPort: { port: 'GuardPort', layer: 'guardrail', version: '0.1.1', description: 'Allow, block or redact text at four stages' },
   CachePort: { port: 'CachePort', layer: 'cache', version: '0.1.0', description: 'Key/value cache for model responses; usable by any layer' },
   RouterPort: { port: 'RouterPort', layer: 'cache', version: '0.1.0', description: 'Pick the model for a request' },
   TelemetryPort: { port: 'TelemetryPort', layer: 'telemetry', version: '0.1.0', description: 'Spans, events and metrics tagged with agent.layer' },

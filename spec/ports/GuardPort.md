@@ -1,6 +1,6 @@
 # GuardPort
 
-Layer: `guardrail` (L7 Guardrails) · Version: 0.1.0 · Conformance: `checkGuard`
+Layer: `guardrail` (L7 Guardrails) · Version: 0.1.1 · Conformance: `checkGuard`
 
 ## Purpose
 
@@ -38,7 +38,7 @@ No other fields are allowed.
 
 - Where each stage runs: `input` on new user content before the model call; `output` on the model's text after the call (including cached responses); `tool_args` before a tool runs; `tool_result` before the result goes back to the model.
 - Order: guards of a stage run in configuration order. Each sees the text as redacted by the previous one. The first `block` ends the chain.
-- Fail closed: a guard that rejects or crashes counts as a block with the reason `guard failed`. A `redact` verdict without `text` also counts as a block.
+- Fail closed: a guard that rejects or crashes counts as a block with the fixed reason `guard error`, never the error's message (it can echo the inspected text or a backend's credentials). A `redact` verdict without `text` also counts as a block.
 - Effects of a block depend on the stage. At `input` and `output` the model call fails with a guardrail error and the run ends with a `guardrail:<guard>:<stage>` reason. At `tool_args` the tool is not called and the model gets an error result. At `tool_result` the result is withheld and replaced by an error result.
 - A redaction of `tool_args` must still be a valid JSON object, otherwise the call is blocked.
 - Streaming output is buffered when an output guard exists, so no unchecked text is released.
@@ -68,5 +68,6 @@ No other fields are allowed.
 ## Version history
 
 - 0.1.0 — initial
+- 0.1.1 — the reason of a block caused by a failing guard is the fixed text `guard error`
 
 Example adapters: `regex-guard` (maps regular expressions).

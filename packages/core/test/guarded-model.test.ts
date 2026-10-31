@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assembleChunks, GuardrailBlocked, guardedModel, type CachePort, type ChatChunk } from '../src/index.ts';
+import { assembleChunks, GuardrailBlocked, guardedModel, runGuards, type CachePort, type ChatChunk, type GuardPort } from '../src/index.ts';
 import { ctx, fakeGuard, fakeModel, recorder, reply } from './helpers.ts';
 
 function memoryCache(log: string[]): CachePort {
@@ -93,4 +93,17 @@ test('every step is a span tagged with its layer; usage becomes metrics', async 
   const spans = records.filter((r) => r.type === 'span').map((r) => `${r.name}@${r.layer}`);
   assert.deepEqual(spans, ['guard.check@guardrail', 'cache.lookup@cache', 'router.select@cache', 'chat@llm', 'guard.check@guardrail']);
   assert.ok(records.some((r) => r.type === 'metric' && r.name === 'gen_ai.client.token.usage' && r.value === 3));
+});
+
+test('a guard that throws blocks with the fixed reason "guard error", never the thrown message', async () => {
+  const { model, requests } = fakeModel();
+  const { records, telemetry } = recorder();
+  const boom: GuardPort = { name: 'flaky', async check() { throw new Error('backend said: token sk-live-123 rejected for "my secret"'); } };
+  const m = guardedModel(model, { guards: [boom], telemetry });
+  await assert.rejects(m.chat({ model: 'x', messages: [{ role: 'user', content: 'my secret' }] }, ctx()), (e: unknown) =>
+    e instanceof GuardrailBlocked && e.reason === 'guard error' && e.message === 'guardrail:flaky:input');
+  assert.equal(requests.length, 0);
+  assert.ok(!JSON.stringify(records).includes('sk-live-123'), 'the thrown message never reaches telemetry');
+  const out = await runGuards([boom], 'tool_args', '{}', ctx(), telemetry, 'util__x');
+  assert.deepEqual(out, { action: 'block', text: '{}', guard: 'flaky', reason: 'guard error' });
 });

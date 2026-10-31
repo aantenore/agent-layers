@@ -11,6 +11,9 @@ export interface GuardOutcome {
   reason?: string;
 }
 
+/** Reason of the block when a guard throws or rejects. Never the error's own message. */
+export const GUARD_ERROR = 'guard error';
+
 export const guardName = (g: GuardPort, i: number) => g.name ?? `guard-${i}`;
 
 export function guardsFor(guards: readonly GuardPort[], stage: GuardStage): GuardPort[] {
@@ -19,7 +22,7 @@ export function guardsFor(guards: readonly GuardPort[], stage: GuardStage): Guar
 
 /**
  * Runs the guards of one stage in order. Each guard sees the text as redacted by the previous one;
- * the first block stops the chain. A guard that throws counts as a block (fail closed).
+ * the first block stops the chain. A guard that throws counts as a block (fail closed) with the reason `guard error`.
  */
 export async function runGuards(
   guards: readonly GuardPort[], stage: GuardStage, text: string, ctx: CallContext, telemetry: TelemetryPort, tool?: string,
@@ -31,7 +34,8 @@ export async function runGuards(
     const verdict = await telemetry.span('guard.check', { 'agent.layer': 'guardrail', 'guard.name': name, 'guard.stage': stage, ...(tool ? { 'gen_ai.tool.name': tool } : {}) }, async (span) => {
       const subject = publicIdentity(ctx.identity);
       const v = await g.check({ stage, text: current, agent: ctx.agent, runId: ctx.runId, ...(tool ? { tool } : {}), ...(subject ? { subject } : {}) }, ctx.signal ? { signal: ctx.signal } : {})
-        .catch((err: unknown) => ({ action: 'block' as const, reason: `guard failed: ${err instanceof Error ? err.message : String(err)}` }));
+        // The thrown text can echo the inspected content or a backend's credentials: the reason is fixed.
+        .catch(() => ({ action: 'block' as const, reason: GUARD_ERROR }));
       span.setAttributes({ 'guard.action': v.action });
       return v;
     });
