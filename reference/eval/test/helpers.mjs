@@ -8,7 +8,6 @@ try { process.loadEnvFile(resolve(rootDir, '.env')); } catch { /* .env is option
 
 export const baseUrl = (process.env.LLM_BASE_URL ?? 'http://localhost:11434/v1').replace(/\/$/, '');
 export const model = process.env.LLM_MODEL ?? 'qwen3:4b';
-export const env = { ...process.env, REINLOOP_MODEL: `ollama/${model}`, OLLAMA_BASE_URL: baseUrl };
 
 /** Returns undefined when the model is served, otherwise the reason to skip. */
 export async function llmSkipReason() {
@@ -21,11 +20,4 @@ export async function llmSkipReason() {
     return `Ollama not reachable at ${baseUrl}; start it with "ollama serve"`;
   }
   if (!ids.includes(model)) return `model "${model}" is not available at ${baseUrl}; run "ollama pull ${model}"`;
-}
-
-/** Returns a reason when this reinloop has no evaluation support (older install or REINLOOP_SRC unset). */
-export function evalSkipReason(reinloop) {
-  if (typeof reinloop.layerSignals !== 'function' || typeof reinloop.evaluate !== 'function') {
-    return 'this reinloop has no evaluation API; set REINLOOP_SRC to a newer checkout';
-  }
 }

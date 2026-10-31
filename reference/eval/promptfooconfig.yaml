@@ -4,8 +4,8 @@
 description: agent-layers eval smoke
 
 providers:
-  - id: file://reinloop-provider.mjs
-    label: reinloop-smoke
+  - id: file://agent-provider.mjs
+    label: smoke
     config:
       agent: smoke
 
@@ -16,6 +16,6 @@ tests: file://promptfoo-tests.mjs
 
 defaultTest:
   assert:
-    # The provider puts per-layer health in metadata (see reinloop `layerSignals`). Fails a test whose harness or llm layer is unhealthy.
+    # The provider puts per-layer health in metadata (see the `layer-signals` adapter). Fails a test whose harness or llm layer is unhealthy.
     - type: javascript
       value: "(context.providerResponse?.metadata?.layers?.harness ?? 1) > 0 && (context.providerResponse?.metadata?.layers?.llm ?? 1) > 0"

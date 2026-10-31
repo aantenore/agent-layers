@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { dirname, resolve } from 'node:path';
 import { before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { reinloop } from '../../../lib/reinloop.mjs';
+import { compose, resolveProfile } from '@agent-layers/core';
+import { checkAdapter } from '@agent-layers/conformance';
+import { serveStack } from '@agent-layers/gateway';
+import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
+import { adapter as functions, functionTools } from '@agent-layers/adapter-functions';
+import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
+import { channelAdapter } from '@agent-layers/adapter-openai-compatible';
+import { createOidcCredentials, createOidcIdentity, credentialAdapter, identityAdapter } from '@agent-layers/adapter-oidc';
 import { reachable } from '../../../lib/wait.mjs';
 
 try { process.loadEnvFile(resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env')); } catch { /* .env is optional */ }
@@ -17,8 +24,6 @@ const agentSubject = process.env.OIDC_AGENT_SUBJECT ?? '2f6d2c1e-7a4b-4c1d-9e3f-
 
 // Test-only users and passwords from realm/agents-realm.json; the `agents-test` client exists only for these tests.
 const USERS = { alice: 'alice-test-only', bob: 'bob-test-only' };
-
-const { oidcVerifier, oidcCredentials, createRuntime, serve, checkIdentityVerifier } = reinloop;
 
 async function skipReason() {
   if (!(await reachable(`${issuer}/.well-known/openid-configuration`))) return `Keycloak not reachable at ${issuer} (make up LAYER=identity)`;
@@ -40,9 +45,11 @@ async function userToken(username) {
 }
 
 // User tokens from the test client carry aud agent-runtime (audience mapper): the runtime is their audience.
-const inbound = () => oidcVerifier({ issuer, audience: clientId });
+const inboundOptions = { issuer, audience: clientId };
+const inbound = () => createOidcIdentity(inboundOptions);
 // agent-runtime tokens are `agent` only when their `sub` is its service account (exchanged tokens keep the user's sub).
-const downstream = () => oidcVerifier({ issuer, audience: toolsAudience, agentClients: [clientId], agentSubjects: { [clientId]: agentSubject } });
+const downstream = () => createOidcIdentity({ issuer, audience: toolsAudience, keepClaims: true, agentClients: [clientId], agentSubjects: { [clientId]: agentSubject } });
+const claimsOf = (caller) => caller.ext?.['oidc.claims'];
 
 describe('l5 identity (Keycloak + OPA)', { skip }, () => {
   let alice;
@@ -54,35 +61,40 @@ describe('l5 identity (Keycloak + OPA)', { skip }, () => {
 
   it('verifies a Keycloak user token into an Identity', async () => {
     assert.equal(alice.kind, 'user');
-    assert.equal(alice.claims.preferred_username, 'alice');
+    assert.equal(alice.name, 'alice');
     assert.ok(alice.roles.includes('analyst'));
     assert.ok(bob.roles.includes('viewer') && !bob.roles.includes('analyst'));
-    assert.deepEqual(await checkIdentityVerifier(inbound(), { validToken: alice.token, expect: { kind: 'user', roles: ['analyst'] } }), []);
-    await assert.rejects(downstream().verify(alice.token), /audience/);
+    await assert.rejects(downstream().verify(alice.credential), /audience/);
+    const report = await checkAdapter(identityAdapter, { options: inboundOptions, fixtures: { valid: alice.credential, expectId: alice.id } });
+    assert.deepEqual(report.failures, []);
   });
 
   it('exchanges the user token on behalf of alice for the tools-api audience (RFC 8693)', async () => {
-    const creds = oidcCredentials({ issuer, clientId, clientSecret, mode: 'on-behalf-of' })(alice);
-    const token = await creds.token(toolsAudience);
+    const creds = createOidcCredentials({ issuer, clientId, clientSecret, mode: 'on-behalf-of' });
+    const token = await creds.token(toolsAudience, { caller: alice });
     const exchanged = await downstream().verify(token);
-    assert.equal(exchanged.subject, alice.subject);
+    assert.equal(exchanged.id, alice.id);
     assert.equal(exchanged.kind, 'user');
-    assert.equal(exchanged.claims.azp, clientId);
-    assert.ok([exchanged.claims.aud].flat().includes(toolsAudience));
-    assert.equal(await creds.token(toolsAudience), token, 'cached');
+    assert.equal(claimsOf(exchanged).azp, clientId);
+    assert.ok([claimsOf(exchanged).aud].flat().includes(toolsAudience));
+    assert.equal(await creds.token(toolsAudience, { caller: alice }), token, 'cached');
+    assert.notEqual(await creds.token(toolsAudience, { caller: bob }), token, 'per caller');
   });
 
   it('gets the agent its own token with client_credentials (kind agent)', async () => {
-    const creds = oidcCredentials({ issuer, clientId, clientSecret, mode: 'self' })();
-    const self = await downstream().verify(await creds.token(toolsAudience));
+    const options = { issuer, clientId, clientSecret, mode: 'self' };
+    const self = await downstream().verify(await createOidcCredentials(options).token(toolsAudience));
     assert.equal(self.kind, 'agent');
-    assert.equal(self.claims.azp, clientId);
+    assert.equal(self.id, agentSubject);
+    assert.equal(claimsOf(self).azp, clientId);
+    const report = await checkAdapter(credentialAdapter, { options, fixtures: { audience: toolsAudience } });
+    assert.deepEqual(report.failures, []);
   });
 
   it('OPA decides on AccessQuestions in SDK names: alice writes, bob reads only, exec and anonymous denied', async () => {
     // The question the `opa` adapter sends (adapters/opa): caller and target in SDK names, never a credential.
     const question = (identity, risk) => ({
-      caller: identity ? { id: identity.subject, kind: identity.kind, roles: identity.roles ?? [], scopes: identity.scopes ?? [] } : { kind: 'anonymous', id: 'anonymous', roles: [], scopes: [] },
+      caller: identity ? { id: identity.id, kind: identity.kind, roles: identity.roles ?? [], scopes: identity.scopes ?? [] } : { kind: 'anonymous', id: 'anonymous', roles: [], scopes: [] },
       action: 'call',
       target: { kind: 'tool', id: `notes__${risk}`, layer: 'tool', risk, agent: 'notes' },
     });
@@ -101,26 +113,34 @@ describe('l5 identity (Keycloak + OPA)', { skip }, () => {
     assert.deepEqual(await decide(undefined, 'read'), { allow: false, reason: 'anonymous anonymous may not call read tools' });
   });
 
-  it('serve answers 401 without a token and runs as the caller with one', async () => {
-    const rt = await createRuntime({
-      providers: { mock: { type: 'mock', responses: [{ text: 'hello' }], loop: true } },
-      models: { m: { provider: 'mock', model: 'mock-1' } },
-      agents: { echo: { model: 'm', description: 'Echo' } },
-      identity: { verifier: { issuer, audience: clientId } },
+  it('the gateway answers 401 without a token and the stack runs as the caller with one', async () => {
+    // The tool reports the caller of the run it is called in.
+    const whoami = { name: 'whoami', description: 'Names the caller of the run.', params: { type: 'object', properties: {} }, risk: 'read', run: (_args, ctx) => ctx.caller?.id ?? 'anonymous' };
+    const config = resolveProfile({
+      layers: {
+        identity: { adapter: 'oidc', options: inboundOptions },
+        model: { adapter: 'mock-model', options: { rules: [{ match: 'who', tool: 'whoami', args: {} }] } },
+        runtime: { adapter: 'basic-runtime', options: { maxTurns: 3 } },
+        tools: { id: { adapter: 'functions' } },
+        channels: [{ adapter: 'openai-compatible', options: { models: {}, agents: ['echo'] } }],
+      },
+      agents: { echo: { instructions: 'Name the caller.', model: 'mock', tools: ['id__*'] } },
     });
-    const served = await serve(rt, { port: 0 });
+    const tools = { ...functions, create: () => functionTools([whoami], 'id') };
+    const stack = await compose(config, { adapters: [identityAdapter, mockModel, basicRuntime, tools, channelAdapter] });
+    const gw = await serveStack(stack, { port: 0 });
     try {
-      const url = `${served.url}/v1/agents/echo/runs`;
-      const none = await fetch(url, { method: 'POST', body: '{"input":"hi"}' });
+      const url = `${gw.url}/v1/chat/completions`;
+      const body = JSON.stringify({ model: 'agent:echo', messages: [{ role: 'user', content: 'who am I' }] });
+      const none = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
       assert.equal(none.status, 401);
       assert.match(none.headers.get('www-authenticate'), /^Bearer/);
-      const ok = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${alice.token}` }, body: '{"input":"hi"}' });
+      const ok = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${alice.credential}` }, body });
       assert.equal(ok.status, 200);
-      const events = await rt.store.load((await ok.json()).runId);
-      assert.equal(events.find((e) => e.type === 'run_start').data.subject, alice.subject);
+      assert.equal((await ok.json()).choices[0].message.content, alice.id);
     } finally {
-      await served.close();
-      await rt.close();
+      await gw.close();
+      await stack.close();
     }
   });
 });

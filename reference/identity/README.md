@@ -27,7 +27,7 @@ credentials it carries to downstream APIs. Ports: [IdentityPort](../../spec/port
 | `realm/agents-realm.json` | Realm `agents` (imported at start) |
 | `policies/agents.rego` | `data.agents.allow` (boolean) and `data.agents.decision` (`{allow, reason}`) over an `AccessQuestion` in SDK names (`input.caller`, `input.target`) |
 | `policies/agents_test.rego` | Policy unit tests (`opa test`) |
-| `test/identity.test.mjs` | Live tests against Keycloak (through reinloop) and OPA (Data API, SDK names) |
+| `test/identity.test.mjs` | Live tests against Keycloak (through the `oidc` adapter and a composed stack) and OPA (Data API, SDK names) |
 
 Realm `agents`:
 
@@ -51,30 +51,31 @@ Policy (`agents.rego`), over `input.caller.kind`, `input.caller.roles` and `inpu
 | agent (authenticated client credentials) | allow | deny | deny |
 | anonymous (`kind: "anonymous"`) or any other kind, unauthenticated runs included | deny | deny | deny |
 
-## Extension points (reinloop)
+## Adapters
 
-| Interface | Built in | Register more |
+| Port | Adapters | Notes |
 |---|---|---|
-| `IdentityVerifier.verify(token)` → `Identity` | `oidcVerifier` | `registry.verifiers` |
-| `CredentialFactory(identity)` → `CredentialProvider.token(audience, { scopes })` | `oidcCredentials` (`on-behalf-of`, `self`) | `registry.credentials` |
-| `Authorizer.evaluate(AccessQuestion)` → `{ decision, reason? }` | `opaAuthorizer`, `authzenAuthorizer` | `registry.authorizers` (Cedar, OpenFGA, Cerbos...) |
+| `IdentityPort.verify(credential)` → `Caller` | `oidc` (`identityAdapter`, `createOidcIdentity`) | `static-identity` for development |
+| `CredentialPort.token(audience, { caller })` | `oidc` (`credentialAdapter`, `createOidcCredentials`; modes `on-behalf-of`, `self`) | |
+| `AuthorizationPort.evaluate(AccessQuestion)` → decision | `opa`, `authzen`, `rules-authorization` | Cedar, OpenFGA, Cerbos... as your own adapter |
 
-reinloop's `opaAuthorizer` sends the SDK's `AccessQuestion` (`caller`, `action`, `target`), the same input the `opa`
-adapter sends, so `agents.rego` decides both alike. A run without a caller is the anonymous caller; the credential
-is never sent; `args` only with `includeArgs`.
+The `opa` adapter sends the SDK's `AccessQuestion` (`caller`, `action`, `target`), the same input `test/identity.test.mjs`
+sends to the Data API, so `agents.rego` decides both alike. A run without a caller is the anonymous caller; the
+credential is never sent; `args` only with `includeArgs`.
 
-Local policy rules run first and take `when: { roles, scopes, kind }` (roles and scopes any-of). A local `deny` is
-final; for `allow`/`ask` the PDP is consulted; a PDP `deny` denies (reason `pdp: ...`); a PDP failure applies
-`onError` (default `deny`). Full reference: reinloop `docs/layers/identity.md`.
+Local `policy` rules run first and take `when: { roles, scopes, kind, authenticated }` (roles and scopes any-of). A
+local `deny` is final; for `allow`/`ask` the decision point is consulted; its `deny` denies, and a failing decision
+point denies (fail closed). Full reference: [docs/layers/identity.md](../../docs/layers/identity.md).
 
 ```json
 {
-  "identity": {
-    "verifier":    { "issuer": "${env:OIDC_ISSUER}", "audience": "${env:OIDC_CLIENT_ID}" },
-    "credentials": { "issuer": "${env:OIDC_ISSUER}", "clientId": "${env:OIDC_CLIENT_ID}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
+  "layers": {
+    "identity":      { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER}", "audience": "${env:OIDC_CLIENT_ID}" } },
+    "credentials":   { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER}", "clientId": "${env:OIDC_CLIENT_ID}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" } },
+    "authorization": { "adapter": "opa", "options": { "url": "${env:OPA_URL}" } },
+    "tools": { "api": { "adapter": "mcp", "options": { "url": "http://localhost:8090/mcp", "auth": { "audience": "${env:TOOLS_AUDIENCE}" } } } }
   },
-  "policy": { "risk": { "write": "allow" }, "pdp": { "type": "opa", "url": "${env:OPA_URL}" } },
-  "mcpServers": { "tools": { "url": "http://localhost:8090/mcp", "auth": { "audience": "${env:TOOLS_AUDIENCE}" } } }
+  "policy": [{ "effect": "allow", "risk": ["write"], "when": { "authenticated": true } }]
 }
 ```
 
@@ -82,17 +83,18 @@ final; for `allow`/`ask` the PDP is consulted; a PDP `deny` denies (reason `pdp:
 
 - **Another OpenID provider** (Auth0, Okta, Entra ID, Zitadel, Authentik, Dex...): set `OIDC_ISSUER`; anything with
   discovery and a JWKS works for verification. On-behalf-of needs RFC 8693 support at the token endpoint; otherwise use
-  `self` mode or a custom `CredentialFactory`. If the provider marks agent tokens differently, pass a `kind` function.
-- **Another PDP**: any AuthZEN endpoint via `{ "type": "authzen", "url": ... }`; OPA-compatible servers via `opa` with a
-  `path`; anything else as a plugin `Authorizer`, checked with `checkAuthorizer`.
-- **Adapter SDK**: `checkIdentityVerifier`, `checkCredentialProvider`, `checkAuthorizer` (reinloop
-  `src/conformance/identity.ts`) return a list of failures, no test framework needed.
+  `self` mode or your own `CredentialPort`. If the provider marks agent tokens differently, pass a `kind` function
+  to `createOidcIdentity`.
+- **Another PDP**: any AuthZEN endpoint via the `authzen` adapter (`url`); OPA-compatible servers via `opa` with a
+  `path`; anything else as your own `AuthorizationPort` adapter.
+- **Adapter SDK**: `checkAdapter` from `@agent-layers/conformance` runs the suite of a port against an adapter and
+  returns a report with the list of failures, no test framework needed.
 
 ## Run and test
 
 ```bash
 make up LAYER=identity            # waits for both healthchecks (Keycloak takes ~20-40 s)
-REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=identity
+make test LAYER=identity
 docker compose -f reference/identity/compose.yml exec opa /opa test /policies -v
 make down LAYER=identity
 ```
@@ -104,8 +106,9 @@ The live tests skip with a message when Keycloak or OPA is unreachable. They che
 Identity with role `analyst`; the on-behalf-of exchange yields a token with `aud` `tools-api`, alice's `sub` and `azp`
 `agent-runtime`; `client_credentials` gives kind `agent`; OPA, asked with `AccessQuestion`s in SDK names as the `opa`
 adapter sends them, allows alice and denies bob on a write tool, denies exec to both and denies the anonymous caller;
-`reinloop serve` answers 401 without a token and runs as alice with hers. The adapter-level live test (oidc, opa,
-token exchange through a composed stack) is [adapters/oidc/test/live.test.ts](../../adapters/oidc/test/live.test.ts).
+a composed stack served by `@agent-layers/gateway` (`openai-compatible` channel) answers 401 without a token and
+runs as alice with hers; `checkAdapter` passes for the `oidc` identity and credential adapters. The adapter-level live
+test (oidc, opa, token exchange through a composed stack) is [adapters/oidc/test/live.test.ts](../../adapters/oidc/test/live.test.ts).
 
 ## Threat notes
 
@@ -113,7 +116,7 @@ token exchange through a composed stack) is [adapters/oidc/test/live.test.ts](..
   failed check only.
 - Only asymmetric algorithms are accepted (`RS256`, `ES256` by default; never `none` or `HS*`); the key type is bound
   to the algorithm; `iss`, `aud`, `exp`, `nbf`, `iat` are checked with 60 s skew.
-- Set the verifier `audience`: without it any token of the issuer is accepted.
+- Set the identity adapter's `audience`: without it (and without `allowAnyAudience`) the adapter refuses to start.
 - Unknown-`kid` JWKS refetches are rate limited (30 s), so forged `kid`s cannot hammer the IdP.
 - Exchanged tokens are cached per caller token and never outlive it; on-behalf-of without a caller token fails
   instead of falling back to the agent identity.

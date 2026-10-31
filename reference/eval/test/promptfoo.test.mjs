@@ -4,8 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { reinloop } from '../../../lib/reinloop.mjs';
-import { env, evalSkipReason, layerDir, llmSkipReason, rootDir } from './helpers.mjs';
+import { baseUrl, layerDir, llmSkipReason, model, rootDir } from './helpers.mjs';
 
 // Pinned: the provider API and the output format are checked against this exact version.
 const PROMPTFOO = 'promptfoo@0.125.1';
@@ -28,13 +27,16 @@ async function promptfooSkipReason(e) {
   return probe.code === 0 ? undefined : `${PROMPTFOO} is not available through npx (network?): ${probe.out.trim().split('\n').pop()}`;
 }
 
-test('eval: promptfoo runs the smoke dataset through the reinloop provider', { timeout: 900_000 }, async (t) => {
-  const why = evalSkipReason(reinloop) ?? (await llmSkipReason());
+test('eval: promptfoo runs the smoke dataset through the agent provider', { timeout: 900_000 }, async (t) => {
+  const why = await llmSkipReason();
   if (why) return t.skip(`SKIPPED: ${why}`);
 
   const dir = await mkdtemp(join(tmpdir(), 'eval-pf-'));
   const e = {
-    ...env,
+    ...process.env,
+    LLM_BASE_URL: baseUrl,
+    LLM_MODEL: model,
+    EVAL_DATASET: join(layerDir, 'datasets/smoke.jsonl'),
     PROMPTFOO_CONFIG_DIR: join(dir, 'config'),
     PROMPTFOO_DISABLE_TELEMETRY: '1',
     PROMPTFOO_DISABLE_UPDATE: '1',

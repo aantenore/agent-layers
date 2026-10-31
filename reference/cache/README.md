@@ -10,9 +10,9 @@ Response cache and model routing. Layer page: [docs/layers/cache.md](../../docs/
 ## Standard and extension points
 
 - Standard: an OpenAI-compatible gateway. Any gateway that speaks Chat Completions replaces LiteLLM.
-- Extension points (reinloop): `CacheStore` for the response cache, `ModelRouter` for in-process routing.
+- Extension points: `CachePort` for the response cache, `RouterPort` for in-process routing.
 - Reference: [LiteLLM](https://github.com/BerriAI/litellm) proxy (MIT) with [Valkey](https://valkey.io) (BSD-3-Clause)
-  as the Redis-protocol cache. In process: reinloop `memory` / `file` response caches and `ruleRouter`.
+  as the Redis-protocol cache. In process: the `memory-cache` adapter and the `rule-router` / `static-router` adapters.
 
 ## Contract
 
@@ -45,22 +45,24 @@ make up LAYER=cache      # LiteLLM needs about a minute to become healthy
 make down LAYER=cache    # Valkey keeps no data on disk
 ```
 
-Use it from reinloop as an OpenAI-compatible provider:
+Use the gateway as the model of a stack with the `openai-compatible` adapter:
 
 ```json
 {
-  "providers": { "gateway": { "type": "openai-compatible", "baseUrl": "${env:GATEWAY_URL}", "apiKey": "${env:GATEWAY_KEY}" } },
-  "models": { "main": { "provider": "gateway", "model": "default" } },
-  "agents": { "assistant": { "model": "main" } }
+  "layers": {
+    "model": { "adapter": "openai-compatible", "options": { "baseUrl": "${env:GATEWAY_URL}", "apiKey": "${env:GATEWAY_KEY}" } }
+  },
+  "agents": { "assistant": { "model": "default" } }
 }
 ```
 
-In-process routing with a rule router (works with models from different providers):
+In-process routing with the `rule-router` adapter (works with models from different providers):
 
 ```json
 {
-  "routers": { "by-size": { "type": "rule", "rules": [{ "when": { "minEstTokens": 6000 }, "model": "large" }], "default": "main" } },
-  "agents": { "assistant": { "model": "main", "router": "by-size" } }
+  "layers": {
+    "router": { "adapter": "rule-router", "options": { "rules": [{ "when": { "minEstTokens": 6000 }, "model": "large" }], "default": "main" } }
+  }
 }
 ```
 
@@ -68,17 +70,16 @@ In-process routing with a rule router (works with models from different provider
 
 - Gateway: any OpenAI-compatible gateway on `GATEWAY_URL` (Portkey, Helicone, OpenRouter, a custom proxy).
 - Cache store: another Redis-protocol server (Redis, KeyDB) in place of Valkey, or the in-process stores.
-- Router: implement `ModelRouter` or use `ruleRouter`; or use gateway model groups and fallbacks.
+- Router: implement `RouterPort` or use `rule-router`; or use gateway model groups and fallbacks.
 
 ## Test
 
 ```bash
 make test LAYER=cache
-# against a local reinloop checkout
-REINLOOP_SRC=/path/to/reinloop/src/index.ts make test LAYER=cache
 ```
 
-It needs the stack above and the host Ollama, and skips with a message otherwise. It checks that a reinloop agent
-completes through the gateway, that an identical second request is a cache hit, that `fallback-test` is answered by
-its fallback, and that `ruleRouter` picks the expected model (read from the `model_request` / `model_response`
-events). Requests are not repeated beyond that.
+It needs the stack above and the host Ollama, and skips with a message otherwise. It composes stacks with
+`compose(resolveProfile(config), { adapters })` and checks that an agent completes through the gateway (`openai-compatible`
+model, `basic-runtime`), that an identical second request is a cache hit, that `fallback-test` is answered by its
+fallback, and that the `rule-router` adapter picks the expected model (read from the router telemetry span and the
+`model.reply` events). Requests are not repeated beyond that.

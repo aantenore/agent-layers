@@ -2,14 +2,18 @@ import assert from 'node:assert/strict';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { reinloop } from '../../../lib/reinloop.mjs';
+import { ATTR, compose, recordingTelemetry, resolveProfile, SPAN } from '@agent-layers/core';
+import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
+import { adapter as functions, functionTools } from '@agent-layers/adapter-functions';
+import { adapter as openaiCompatible } from '@agent-layers/adapter-openai-compatible';
+import { adapter as ruleRouter } from '@agent-layers/adapter-rule-router';
 
 try { process.loadEnvFile(resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env')); } catch { /* .env is optional */ }
 
 const gatewayUrl = (process.env.GATEWAY_URL ?? 'http://localhost:4000/v1').replace(/\/$/, '');
 const gatewayKey = process.env.GATEWAY_KEY ?? 'sk-local-change-me';
 const llmUrl = (process.env.LLM_BASE_URL ?? 'http://localhost:11434/v1').replace(/\/$/, '');
-const params = { maxTokens: 1024, temperature: 0 };
+const settings = { maxOutputTokens: 1024, temperature: 0 };
 const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** Returns undefined when the gateway and the model behind it answer, otherwise the reason to skip. */
@@ -34,23 +38,41 @@ async function complete(model, content) {
   const res = await fetch(`${gatewayUrl}/chat/completions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${gatewayKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content }], max_tokens: params.maxTokens, temperature: 0 }),
+    body: JSON.stringify({ model, messages: [{ role: 'user', content }], max_tokens: settings.maxOutputTokens, temperature: 0 }),
     signal: AbortSignal.timeout(200_000),
   });
   assert.equal(res.status, 200, `gateway answered HTTP ${res.status} for ${model}`);
   return { headers: res.headers, body: await res.json() };
 }
 
-const gateway = () => reinloop.openaiCompatible({ name: 'gateway', baseUrl: gatewayUrl, apiKey: gatewayKey });
-const modelRef = (model) => ({ provider: gateway(), model, params });
+/** A stack whose model is the gateway; `layers` adds slots (a router), `tools` adds a tool source named `noop`. */
+async function gatewayStack({ layers = {}, agents, tools = [], telemetry = [] }) {
+  const config = resolveProfile({
+    layers: {
+      model: { adapter: 'openai-compatible', options: { baseUrl: gatewayUrl, apiKey: gatewayKey } },
+      runtime: { adapter: 'basic-runtime', options: { maxTurns: 1 } },
+      ...(tools.length ? { tools: { noop: { adapter: 'functions' } } } : {}),
+      ...layers,
+    },
+    agents: Object.fromEntries(Object.entries(agents).map(([name, a]) => [name, { instructions: 'Answer in one short sentence.', settings, ...a }])),
+  });
+  const noop = { ...functions, create: () => functionTools(tools, 'noop') };
+  return compose(config, { adapters: [openaiCompatible, basicRuntime, ruleRouter, noop], telemetry });
+}
 
-test('cache: a reinloop agent completes through the gateway', { timeout: 240_000 }, async (t) => {
+const modelsReplied = (result) => result.events.filter((e) => e.type === 'model.reply').map((e) => e.model);
+
+test('cache: an agent completes through the gateway', { timeout: 240_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
-  const agent = reinloop.agent({ model: modelRef('default'), instructions: 'Answer in one short sentence.' });
-  const result = await agent.run(`Name one primary color. (${nonce}-agent)`);
-  assert.equal(result.status, 'completed', `status ${result.status}: ${result.reason ?? ''}`);
-  assert.ok(result.output.trim().length > 0, 'empty output');
+  const stack = await gatewayStack({ agents: { plain: { model: 'default' } } });
+  try {
+    const result = await (await stack.agent('plain')).run(`Name one primary color. (${nonce}-agent)`);
+    assert.equal(result.status, 'completed', `status ${result.status}: ${result.reason?.code ?? ''}`);
+    assert.ok(result.output.trim().length > 0, 'empty output');
+  } finally {
+    await stack.close();
+  }
 });
 
 test('cache: an identical second request is served from the Valkey cache', { timeout: 240_000 }, async (t) => {
@@ -71,31 +93,34 @@ test('cache: the fallback group is answered by its fallback', { timeout: 240_000
   const { headers, body } = await complete('fallback-test', `Name one animal. (${nonce}-fallback)`);
   assert.equal(headers.get('x-litellm-attempted-fallbacks'), '1');
   assert.ok(body.choices?.length > 0, 'no choices in the fallback answer');
-  const agent = reinloop.agent({ model: modelRef('fallback-test'), instructions: 'Answer in one short sentence.' });
-  const result = await agent.run(`Name one color. (${nonce}-fallback-agent)`);
-  assert.equal(result.status, 'completed', `status ${result.status}: ${result.reason ?? ''}`);
+  const stack = await gatewayStack({ agents: { fallback: { model: 'fallback-test' } } });
+  try {
+    const result = await (await stack.agent('fallback')).run(`Name one color. (${nonce}-fallback-agent)`);
+    assert.equal(result.status, 'completed', `status ${result.status}: ${result.reason?.code ?? ''}`);
+  } finally {
+    await stack.close();
+  }
 });
 
-test('cache: ruleRouter picks the model per request, visible in the events', { timeout: 240_000 }, async (t) => {
+test('cache: the rule-router adapter picks the model per request, visible in telemetry and events', { timeout: 240_000 }, async (t) => {
   const reason = await skipReason();
   if (reason) return t.skip(`SKIPPED: ${reason}`);
-  const router = reinloop.ruleRouter({ rules: [{ when: { hasTools: true }, model: 'fallback-test' }], default: 'default' });
-  const resolve = (spec) => modelRef(spec);
-  const noop = reinloop.defineTool({ name: 'noop', description: 'Does nothing.', risk: 'read', schema: { type: 'object', properties: {} }, run: () => 'ok' });
-
-  const modelsOf = async (tools, prompt) => {
-    const sink = reinloop.collectSink();
-    const base = { name: 'routed', model: modelRef('default'), tools, budget: { maxTurns: 1 } };
-    const routed = reinloop.withRouter(base, { router, resolve });
-    await reinloop.run(routed, prompt, { sinks: [sink] });
-    const pick = (type) => sink.events.filter((e) => e.type === type).map((e) => e.data.model);
-    return { requested: pick('model_request'), answered: pick('model_response') };
-  };
-
-  const plain = await modelsOf([], `Say hi. (${nonce}-route-a)`);
-  assert.deepEqual(plain.requested, ['default']);
-  assert.deepEqual(plain.answered, ['default']);
-  const withTools = await modelsOf([noop], `Say hi. (${nonce}-route-b)`);
-  assert.deepEqual(withTools.requested, ['fallback-test']);
-  assert.deepEqual(withTools.answered, ['fallback-test']);
+  const records = [];
+  const stack = await gatewayStack({
+    layers: { router: { adapter: 'rule-router', options: { rules: [{ when: { hasTools: true }, model: 'fallback-test' }], default: 'default' } } },
+    tools: [{ name: 'noop', description: 'Does nothing.', risk: 'read', params: { type: 'object', properties: {} }, run: () => 'ok' }],
+    agents: { plain: { model: 'default' }, tooled: { model: 'default', tools: ['noop__*'] } },
+    telemetry: [recordingTelemetry((r) => records.push(r))],
+  });
+  try {
+    const routed = () => records.filter((r) => r.type === 'span' && r.name === SPAN.routerSelect).map((r) => r.attrs[ATTR.routerModel]);
+    const plain = await (await stack.agent('plain')).run(`Say hi. (${nonce}-route-a)`);
+    assert.deepEqual(routed(), ['default']);
+    assert.deepEqual(modelsReplied(plain), ['default']);
+    const tooled = await (await stack.agent('tooled')).run(`Say hi. (${nonce}-route-b)`);
+    assert.deepEqual(routed(), ['default', 'fallback-test']);
+    assert.deepEqual(modelsReplied(tooled), ['fallback-test']);
+  } finally {
+    await stack.close();
+  }
 });
