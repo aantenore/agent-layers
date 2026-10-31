@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { anySignal, defineAdapter, defineLimits, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal, type KnowledgePort, type LimitValue, type Passage } from '@agent-layers/core';
+import {
+  anySignal, createMappings, defineAdapter, defineLimits, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal, type Attrs, type KnowledgePort, type LimitValue,
+  type Mappings, type MappingRule, type Passage,
+} from '@agent-layers/core';
 import { interpolate } from './env.ts';
 import { headerSecrets, redact, secretForms } from './redact.ts';
 
@@ -9,8 +12,8 @@ export interface HttpKnowledgeOptions {
   url: string;
   /** Static headers, for example an API key. `${env:NAME}` is resolved when the source is built. */
   headers?: Record<string, string>;
-  /** Send the caller's raw token (`identity.token`) as `Authorization: Bearer`, so the service can apply its own access rules. */
-  forwardIdentityToken?: boolean;
+  /** Send the caller's credential (`caller.credential`) as `Authorization: Bearer`, so the service can apply its own access rules. */
+  forwardCallerCredential?: boolean;
   /** Time limit per request (default 10000). */
   timeoutMs?: LimitValue;
   /** Passages requested when the query has no `k` (default 4). */
@@ -31,24 +34,47 @@ export const LIMITS = defineLimits({
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const hashId = (text: string): string => createHash('sha1').update(text).digest('hex').slice(0, 12);
+const isAttr = (v: unknown): v is Attrs[string] =>
+  typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v)) || (Array.isArray(v) && v.every((x) => typeof x === 'string'));
 
-/** Keeps the Passage fields; an item without text is dropped, a missing id is derived from the text. */
-function toPassage(raw: unknown, source: string): Passage | undefined {
+/** Ext key for item metadata that is not a plain attribute (nested objects, mixed lists). */
+const EXT_METADATA = 'http-knowledge.metadata';
+
+/** Default `in` rule: the service's own `source` of an item is kept as an attribute (the passage source is the instance). */
+export const DEFAULT_IN_RULES: readonly MappingRule[] = [{ from: '/source', to: '/attrs/source' }];
+
+/**
+ * Wire item → Passage. An item without text is dropped, a missing id is derived from the text. `attrs` (or the older
+ * `metadata`) become `attrs`; values that are not plain attributes go to `ext["http-knowledge.metadata"]`. The `in`
+ * mapping rules then run over the raw item.
+ */
+function toPassage(raw: unknown, source: string, mappings: Mappings): Passage | undefined {
   if (!isRecord(raw) || typeof raw.text !== 'string' || !raw.text.trim()) return undefined;
   const id = typeof raw.id === 'string' || typeof raw.id === 'number' ? String(raw.id) : hashId(raw.text);
-  return {
+  const meta = isRecord(raw.attrs) ? raw.attrs : isRecord(raw.metadata) ? raw.metadata : undefined;
+  const attrs: Attrs = {};
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(meta ?? {})) {
+    if (isAttr(v)) attrs[k] = v;
+    else if (v !== undefined) rest[k] = v;
+  }
+  return mappings.in(raw, {
     id,
     text: raw.text,
-    source: typeof raw.source === 'string' ? raw.source : source,
-    ...(typeof raw.score === 'number' ? { score: raw.score } : {}),
-    ...(isRecord(raw.metadata) ? { metadata: raw.metadata } : {}),
-  };
+    source,
+    ...(typeof raw.title === 'string' ? { title: raw.title } : {}),
+    ...(typeof raw.url === 'string' ? { url: raw.url } : {}),
+    ...(typeof raw.score === 'number' && Number.isFinite(raw.score) ? { score: raw.score } : {}),
+    ...(Object.keys(attrs).length ? { attrs } : {}),
+    ...(Object.keys(rest).length ? { ext: { [EXT_METADATA]: rest } } : {}),
+  } as Passage);
 }
 
 /** Factory: usable directly from code, without the registry. */
 export function createHttpKnowledge(
   options: HttpKnowledgeOptions,
-  { name, env = process.env }: { name?: string; env?: Record<string, string | undefined> } = {},
+  { name, env = process.env, mappings = createMappings(name ?? 'http-knowledge', { in: DEFAULT_IN_RULES }) }:
+  { name?: string; env?: Record<string, string | undefined>; mappings?: Mappings } = {},
 ): KnowledgePort {
   const url = interpolate(options.url, env, 'url');
   if (!/^https?:\/\//i.test(url)) throw new Error('http-knowledge: url must be absolute http(s)');
@@ -63,19 +89,20 @@ export function createHttpKnowledge(
       const k = q.k ?? limitValue(LIMITS.k, options.k);
       const sent: Record<string, string> = {
         ...headers,
-        ...(options.forwardIdentityToken && q.identity?.token ? { authorization: `Bearer ${q.identity.token}` } : {}),
+        ...(options.forwardCallerCredential && q.caller?.credential ? { authorization: `Bearer ${q.caller.credential}` } : {}),
       };
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json', ...sent },
-        body: JSON.stringify({ query: q.query, k, ...(q.filter ? { filter: q.filter } : {}) }),
+        // The wire keeps its own field names: `query` is the language's `KnowledgeQuery.text`.
+        body: JSON.stringify({ query: q.text, k, ...(q.filter ? { filter: q.filter } : {}) }),
         signal: anySignal(q.signal, timeoutSignal(timeoutMs)),
       });
       // The error body may echo the credentials; mask the whole body before cutting it.
       if (!res.ok) throw new Error(`knowledge HTTP ${res.status}: ${redact(await res.text().catch(() => ''), secretForms(headerSecrets(sent), minSecretChars)).slice(0, errorBodyChars)}`);
       const body: unknown = await res.json().catch(() => undefined);
       if (!isRecord(body) || !Array.isArray(body.passages)) throw new Error('knowledge HTTP: response has no "passages" array');
-      return body.passages.flatMap((p) => toPassage(p, source) ?? []).slice(0, Math.max(0, k));
+      return body.passages.flatMap((p) => toPassage(p, source, mappings) ?? []).slice(0, Math.max(0, k));
     },
   };
 }
@@ -95,7 +122,7 @@ export const adapter = defineAdapter<'KnowledgePort', HttpKnowledgeOptions>({
     properties: {
       url: { type: 'string', minLength: 1 },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
-      forwardIdentityToken: { type: 'boolean' },
+      forwardCallerCredential: { type: 'boolean' },
       ...limitProperties(LIMITS, {
         timeoutMs: 'Time limit per query', k: 'Passages requested when the query has no k',
         errorBodyChars: 'Characters of an error body kept in the error message', minSecretChars: 'Shortest header value masked in error bodies',
@@ -105,7 +132,9 @@ export const adapter = defineAdapter<'KnowledgePort', HttpKnowledgeOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
-  create: (options, ctx) => createHttpKnowledge(options, { name: ctx.name, env: ctx.env }),
+  ext: { produces: [EXT_METADATA] },
+  mappingDefaults: { in: { shape: 'Passage', rules: DEFAULT_IN_RULES } },
+  create: (options, ctx) => createHttpKnowledge(options, { name: ctx.name, env: ctx.env, mappings: ctx.mappings }),
 });
 
 export const adapters = [adapter];

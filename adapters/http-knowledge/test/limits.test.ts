@@ -10,8 +10,8 @@ test('errorBodyChars and k take effect when set', async () => {
   const svc = await startKnowledgeService((body) => (body.query === 'fail' ? { status: 500, text: 'x'.repeat(50) } : { json: { passages: [] } }));
   try {
     const source = createHttpKnowledge({ url: svc.url, errorBodyChars: 10, k: 7 });
-    await assert.rejects(source.search({ query: 'fail' }), (err: Error) => err.message === `knowledge HTTP 500: ${'x'.repeat(10)}`);
-    await source.search({ query: 'q' });
+    await assert.rejects(source.search({ text: 'fail' }), (err: Error) => err.message === `knowledge HTTP 500: ${'x'.repeat(10)}`);
+    await source.search({ text: 'q' });
     assert.equal(svc.requests[1]!.body.k, 7);
   } finally {
     await svc.close();
