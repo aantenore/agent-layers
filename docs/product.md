@@ -62,13 +62,13 @@ flowchart TB
   end
   subgraph pilot["pilot: shared environment"]
     pllm["L1 llm<br/>local model via openai-compatible"]:::model
-    pknow["L4 knowledge<br/>qdrant (planned)"]:::agent
+    pknow["L4 knowledge<br/>mcp to Qdrant"]:::agent
     ptel["L9 telemetry<br/>otlp"]:::insight
   end
   subgraph prod["production: company systems"]
     xllm["L1 llm<br/>model gateway URL"]:::model
-    xcache["L2 cache<br/>valkey (planned)"]:::model
-    xharn["L3 harness<br/>reinloop, postgres-state (planned)"]:::agent
+    xcache["L2 cache<br/>in the model gateway"]:::model
+    xharn["L3 harness<br/>reinloop, sqlite-state"]:::agent
     xid["L6 identity<br/>oidc, opa"]:::control
     xgrd["L7 guardrail<br/>presidio, llm-guard"]:::control
     xint["L8 interface<br/>a2a"]:::experience
