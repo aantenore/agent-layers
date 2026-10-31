@@ -4,6 +4,8 @@ An agent in production needs eleven layers. agent-layers names them, gives each 
 for them from a config. The core is technology neutral: every technology choice below is an adapter or a reference
 setup, and each can be swapped by changing one line of config. The design is in [architecture.md](architecture.md).
 
+![The agent-layers stack: eleven layers in six planes, one question per layer](assets/stack-overview.svg)
+
 ## Layers by plane
 
 | Plane | L | Layer (id) | The question it answers | Ports | Reference adapters |
@@ -25,6 +27,50 @@ for reading only. Reference setups (compose files and live tests) live in `refer
 
 Boundary rules: read-only context retrieval is `knowledge`, anything with side effects is `tool`; who may do what is
 `identity`, whether the content is acceptable is `guardrail`.
+
+## Planes at a glance
+
+The experience plane starts runs, the control plane governs them, the agent plane does the work, the model plane
+answers, the insight plane watches, and the foundation runs everything.
+
+```mermaid
+flowchart TB
+  subgraph exp["Experience plane"]
+    interface["L8 interface"]:::experience
+  end
+  subgraph ctl["Control plane"]
+    identity["L6 identity"]:::control
+    guardrail["L7 guardrail"]:::control
+  end
+  subgraph agt["Agent plane"]
+    harness["L3 harness"]:::agent
+    knowledge["L4 knowledge"]:::agent
+    tool["L5 tool"]:::agent
+  end
+  subgraph mdl["Model plane"]
+    cache["L2 cache"]:::model
+    llm["L1 llm"]:::model
+  end
+  subgraph ins["Insight plane"]
+    telemetry["L9 telemetry"]:::insight
+    eval["L10 eval"]:::insight
+  end
+  subgraph fnd["Foundation: runs and delivers everything"]
+    infra["L0 infra"]:::foundation
+  end
+  exp -->|"starts a run"| agt
+  ctl -.->|"who may do what, is it acceptable"| agt
+  agt -->|"model calls"| mdl
+  agt -.->|"spans, events, metrics"| ins
+  ins -.->|"fixes"| agt
+  mdl ~~~ fnd
+  classDef foundation fill:#d9dde3,stroke:#57606a,color:#1f2328
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+```
 
 ## Request flow
 
@@ -51,12 +97,68 @@ flowchart TB
   subgraph infra[infra: deploy, secrets]
     interface
   end
+  class client external
+  class interface experience
+  class idv,ida,guardrail control
+  class harness,knowledge,tool agent
+  class cache,llm model
+  class telemetry,eval insight
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
 ```
 
 A channel or trigger starts a run. Identity verifies the caller; the runtime runs the agent loop. Guardrails check
 input, output and tool traffic; knowledge is retrieved with the caller's identity; tools are authorized and called
 with credentials issued for the caller. Model calls go through routing and caching to the model. Every step is
 traced with its layer, telemetry feeds evaluation, and evaluation sends fixes back. Infrastructure runs underneath.
+
+## Ports and adapters
+
+The core defines the ports. An adapter maps either an open standard or one technology's native API onto a port, and
+the stack config picks one per port.
+
+```mermaid
+flowchart LR
+  config["Stack config<br/>one adapter per port, per profile"]:::external
+  subgraph std["Standard adapters: map an open standard"]
+    openai["openai-compatible<br/>OpenAI Chat Completions"]:::external
+    mcp["mcp<br/>Model Context Protocol"]:::external
+    oidc["oidc<br/>OIDC, OAuth 2, RFC 8693"]:::external
+    otlp["otlp<br/>OpenTelemetry GenAI"]:::external
+  end
+  subgraph core["Core: ports"]
+    model["ModelPort"]:::model
+    tools["ToolPort"]:::agent
+    know["KnowledgePort"]:::agent
+    ident["IdentityPort"]:::control
+    authz["AuthorizationPort"]:::control
+    guard["GuardPort"]:::control
+    tel["TelemetryPort"]:::insight
+  end
+  subgraph nat["Native adapters: map one technology's API"]
+    md["markdown-knowledge<br/>Markdown files"]:::external
+    presidio["presidio<br/>Microsoft Presidio"]:::external
+    opa["opa<br/>Open Policy Agent"]:::external
+  end
+  config -.-> core
+  openai --- model
+  mcp --- tools
+  mcp --- know
+  oidc --- ident
+  otlp --- tel
+  know --- md
+  guard --- presidio
+  authz --- opa
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
 
 ## Knowledge is not only RAG
 

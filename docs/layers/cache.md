@@ -14,10 +14,45 @@ quotas. The agent sees an ordinary [llm](llm.md) endpoint.
 | [RouterPort](../../spec/ports/RouterPort.md) | `select` picks the model for a request |
 | [CachePort](../../spec/ports/CachePort.md) | `get` / `set` / `delete` with a TTL; usable by any layer (tool results, embeddings, retrieval) |
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  harness["L3 harness<br/>model calls"]:::agent --> cachep
+  other["L4 knowledge, L5 tool<br/>optional use"]:::agent -.-> cachep
+  subgraph sg["L2 cache"]
+    cachep["CachePort<br/>get, set, delete with TTL"]:::model
+    router["RouterPort<br/>select the model"]:::model
+  end
+  harness --> router
+  cachep --> store["memory-cache<br/>valkey (planned)"]:::external
+  router --> llm["L1 llm<br/>via a gateway: quotas, fallback"]:::model
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 An OpenAI-compatible gateway is the standard way to provide routing, fallback and quotas outside the process. Cache
 stores that speak the Redis protocol are interchangeable.
+
+## Decision flow
+
+A hit skips the router and the model. Quotas and fallback live in the gateway behind the model.
+
+```mermaid
+flowchart TB
+  req["Chat request<br/>already input-guarded"]:::external --> lookup{"CachePort.get<br/>hit?"}:::model
+  lookup -->|"hit"| out["Output guards, then the answer"]:::control
+  lookup -->|"miss"| select["RouterPort.select<br/>pick the model id"]:::model
+  select --> model["ModelPort.chat<br/>gateway: quotas, fallback group"]:::model
+  model --> store["CachePort.set<br/>raw response, TTL"]:::model
+  store --> out
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
 
 ## Boundaries
 

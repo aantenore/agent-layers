@@ -5,13 +5,17 @@ How an agent moves from idea to production and back. Each phase maps to the laye
 
 ```mermaid
 flowchart LR
-  design[Design<br/>harness + eval] --> build[Build<br/>llm to guardrail]
-  build --> test[Test<br/>eval]
-  test --> release[Release<br/>infra]
-  release --> operate[Operate<br/>telemetry]
-  operate --> improve[Improve<br/>eval]
-  improve -->|fixes| design
-  improve -.->|tune| build
+  design["1 Design<br/>harness, eval"]:::agent --> build["2 Build<br/>llm to guardrail"]:::external
+  build --> test["3 Test<br/>eval"]:::insight
+  test --> release["4 Release<br/>infra"]:::foundation
+  release --> operate["5 Operate<br/>telemetry"]:::insight
+  operate --> improve["6 Improve<br/>eval attributes failures"]:::insight
+  improve -->|"fixes, regression cases"| design
+  improve -.->|"tune"| build
+  classDef foundation fill:#d9dde3,stroke:#57606a,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
 ```
 
 ## 1. Design (harness, eval)

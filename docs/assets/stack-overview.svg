@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 724" width="960" height="724" role="img" aria-labelledby="t d" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="t">The agent-layers stack: eleven layers in six planes</title>
+  <desc id="d">Infrastructure and delivery (L0) in the Foundation plane; Models (L1) and Model access (L2) in the Model plane; Agent runtime (L3), Knowledge and memory (L4) and Tools (L5) in the Agent plane; Identity and access (L6) and Guardrails (L7) in the Control plane; Interfaces, channels and triggers (L8) in the Experience plane; Telemetry (L9) and Evaluation (L10) in the Insight plane. Each layer is shown with the question it answers.</desc>
+  <rect width="960" height="724" rx="12" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="20" y="34" font-size="20" font-weight="700" fill="#1f2328">agent-layers: eleven layers, six planes</text>
+  <text x="20" y="54" font-size="13" fill="#424a53">Each layer answers one question and has its own ports; adapters fill the ports from a stack config.</text>
+
+  <!-- Foundation -->
+  <rect x="20" y="70" width="920" height="56" rx="10" fill="#d9dde3" stroke="#57606a" stroke-width="1.5"/>
+  <text x="36" y="103" font-size="15" font-weight="700" fill="#1f2328">Foundation</text>
+  <rect x="190" y="78" width="738" height="40" rx="6" fill="#ffffff" stroke="#57606a"/>
+  <rect x="198" y="86" width="40" height="24" rx="5" fill="#57606a"/>
+  <text x="218" y="103" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L0</text>
+  <text x="250" y="96" font-size="14" font-weight="700" fill="#1f2328">Infrastructure &amp; delivery</text>
+  <text x="250" y="111" font-size="12.5" font-style="italic" fill="#424a53">Where does it run and how does it get there?</text>
+  <text x="918" y="103" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">infra</text>
+
+  <!-- Model plane -->
+  <rect x="20" y="136" width="920" height="102" rx="10" fill="#ffd8a8" stroke="#a85400" stroke-width="1.5"/>
+  <text x="36" y="192" font-size="15" font-weight="700" fill="#1f2328">Model plane</text>
+  <rect x="190" y="144" width="738" height="40" rx="6" fill="#ffffff" stroke="#a85400"/>
+  <rect x="198" y="152" width="40" height="24" rx="5" fill="#a85400"/>
+  <text x="218" y="169" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L1</text>
+  <text x="250" y="162" font-size="14" font-weight="700" fill="#1f2328">Models</text>
+  <text x="250" y="177" font-size="12.5" font-style="italic" fill="#424a53">Who thinks?</text>
+  <text x="918" y="169" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">llm</text>
+  <rect x="190" y="190" width="738" height="40" rx="6" fill="#ffffff" stroke="#a85400"/>
+  <rect x="198" y="198" width="40" height="24" rx="5" fill="#a85400"/>
+  <text x="218" y="215" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L2</text>
+  <text x="250" y="208" font-size="14" font-weight="700" fill="#1f2328">Model access (routing, fallback, quotas, cache)</text>
+  <text x="250" y="223" font-size="12.5" font-style="italic" fill="#424a53">Which model, at what cost and latency?</text>
+  <text x="918" y="215" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">cache</text>
+
+  <!-- Agent plane -->
+  <rect x="20" y="248" width="920" height="148" rx="10" fill="#a5d8ff" stroke="#1864ab" stroke-width="1.5"/>
+  <text x="36" y="327" font-size="15" font-weight="700" fill="#1f2328">Agent plane</text>
+  <rect x="190" y="256" width="738" height="40" rx="6" fill="#ffffff" stroke="#1864ab"/>
+  <rect x="198" y="264" width="40" height="24" rx="5" fill="#1864ab"/>
+  <text x="218" y="281" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L3</text>
+  <text x="250" y="274" font-size="14" font-weight="700" fill="#1f2328">Agent runtime</text>
+  <text x="250" y="289" font-size="12.5" font-style="italic" fill="#424a53">How does the agent loop run and keep state?</text>
+  <text x="918" y="281" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">harness</text>
+  <rect x="190" y="302" width="738" height="40" rx="6" fill="#ffffff" stroke="#1864ab"/>
+  <rect x="198" y="310" width="40" height="24" rx="5" fill="#1864ab"/>
+  <text x="218" y="327" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L4</text>
+  <text x="250" y="320" font-size="14" font-weight="700" fill="#1f2328">Knowledge &amp; memory</text>
+  <text x="250" y="335" font-size="12.5" font-style="italic" fill="#424a53">What does it know?</text>
+  <text x="918" y="327" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">knowledge</text>
+  <rect x="190" y="348" width="738" height="40" rx="6" fill="#ffffff" stroke="#1864ab"/>
+  <rect x="198" y="356" width="40" height="24" rx="5" fill="#1864ab"/>
+  <text x="218" y="373" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L5</text>
+  <text x="250" y="366" font-size="14" font-weight="700" fill="#1f2328">Tools</text>
+  <text x="250" y="381" font-size="12.5" font-style="italic" fill="#424a53">What can it do?</text>
+  <text x="918" y="373" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">tool</text>
+
+  <!-- Control plane -->
+  <rect x="20" y="406" width="920" height="102" rx="10" fill="#ffc9c9" stroke="#b42318" stroke-width="1.5"/>
+  <text x="36" y="462" font-size="15" font-weight="700" fill="#1f2328">Control plane</text>
+  <rect x="190" y="414" width="738" height="40" rx="6" fill="#ffffff" stroke="#b42318"/>
+  <rect x="198" y="422" width="40" height="24" rx="5" fill="#b42318"/>
+  <text x="218" y="439" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L6</text>
+  <text x="250" y="432" font-size="14" font-weight="700" fill="#1f2328">Identity &amp; access</text>
+  <text x="250" y="447" font-size="12.5" font-style="italic" fill="#424a53">Who is it, on whose behalf, and what is allowed?</text>
+  <text x="918" y="439" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">identity</text>
+  <rect x="190" y="460" width="738" height="40" rx="6" fill="#ffffff" stroke="#b42318"/>
+  <rect x="198" y="468" width="40" height="24" rx="5" fill="#b42318"/>
+  <text x="218" y="485" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L7</text>
+  <text x="250" y="478" font-size="14" font-weight="700" fill="#1f2328">Guardrails</text>
+  <text x="250" y="493" font-size="12.5" font-style="italic" fill="#424a53">Is this content acceptable?</text>
+  <text x="918" y="485" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">guardrail</text>
+
+  <!-- Experience plane -->
+  <rect x="20" y="518" width="920" height="56" rx="10" fill="#b2f2bb" stroke="#2a7a38" stroke-width="1.5"/>
+  <text x="36" y="551" font-size="15" font-weight="700" fill="#1f2328">Experience plane</text>
+  <rect x="190" y="526" width="738" height="40" rx="6" fill="#ffffff" stroke="#2a7a38"/>
+  <rect x="198" y="534" width="40" height="24" rx="5" fill="#2a7a38"/>
+  <text x="218" y="551" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L8</text>
+  <text x="250" y="544" font-size="14" font-weight="700" fill="#1f2328">Interfaces, channels &amp; triggers</text>
+  <text x="250" y="559" font-size="12.5" font-style="italic" fill="#424a53">Who talks to it and what starts it?</text>
+  <text x="918" y="551" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">interface</text>
+
+  <!-- Insight plane -->
+  <rect x="20" y="584" width="920" height="102" rx="10" fill="#d0bfff" stroke="#5f3dc4" stroke-width="1.5"/>
+  <text x="36" y="640" font-size="15" font-weight="700" fill="#1f2328">Insight plane</text>
+  <rect x="190" y="592" width="738" height="40" rx="6" fill="#ffffff" stroke="#5f3dc4"/>
+  <rect x="198" y="600" width="40" height="24" rx="5" fill="#5f3dc4"/>
+  <text x="218" y="617" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L9</text>
+  <text x="250" y="610" font-size="14" font-weight="700" fill="#1f2328">Telemetry &amp; observability</text>
+  <text x="250" y="625" font-size="12.5" font-style="italic" fill="#424a53">What happened?</text>
+  <text x="918" y="617" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">telemetry</text>
+  <rect x="190" y="638" width="738" height="40" rx="6" fill="#ffffff" stroke="#5f3dc4"/>
+  <rect x="198" y="646" width="40" height="24" rx="5" fill="#5f3dc4"/>
+  <text x="218" y="663" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L10</text>
+  <text x="250" y="656" font-size="14" font-weight="700" fill="#1f2328">Evaluation &amp; improvement</text>
+  <text x="250" y="671" font-size="12.5" font-style="italic" fill="#424a53">Was it good, and if not, which layer failed?</text>
+  <text x="918" y="663" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">eval</text>
+
+  <text x="20" y="708" font-size="12" fill="#424a53">Layer numbers are for reading only; the ids on the right are the stable identifiers.</text>
+</svg>

@@ -17,10 +17,61 @@ Stages: `input`, `output`, `tool_args`, `tool_result`. Data shapes: [guard-reque
 [guard-verdict.json](../../spec/schemas/guard-verdict.json). `GuardInput.subject` is the caller's identity without its
 token (an object, not a string).
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  gm["guardedModel<br/>stages input, output"]:::model --> gp
+  gt["governedTools<br/>stages tool_args, tool_result"]:::agent --> gp
+  subgraph sg["L7 guardrail"]
+    gp["GuardPort<br/>check"]:::control
+  end
+  gp --> engines["regex-guard, presidio,<br/>llm-guard, http-guard"]:::external
+  gp -.->|"guard.check span, actions"| telemetry["L9 telemetry"]:::insight
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 None. The contract is defined by this repository; any service that accepts a `GuardInput` as a JSON `POST` and answers
 with a `GuardVerdict` can be a guard, in any language.
+
+## Where guards run
+
+Four stages cover the model and the tool traffic. The verdict decides what happens next.
+
+```mermaid
+flowchart LR
+  user(["User message"]):::external --> gin["guard: input"]:::control
+  gin --> model["L1 llm"]:::model
+  model -->|"tool call"| gargs["guard: tool_args"]:::control
+  gargs --> tool["L5 tool"]:::agent
+  tool --> gres["guard: tool_result"]:::control
+  gres --> model
+  model --> gout["guard: output"]:::control
+  gout --> answer(["Answer"]):::external
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
+```mermaid
+flowchart LR
+  verdict{"GuardVerdict"}:::control
+  verdict -->|"allow"| pass["text continues"]:::external
+  verdict -->|"redact"| red["text replaced,<br/>next guard sees the new text"]:::external
+  verdict -->|"block"| blk{"stage"}:::control
+  blk -->|"input, output"| stop["run stopped<br/>guardrail:guard:stage"]:::external
+  blk -->|"tool_args"| den["call denied"]:::external
+  blk -->|"tool_result"| wh["result withheld"]:::external
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
 
 ## Boundaries
 

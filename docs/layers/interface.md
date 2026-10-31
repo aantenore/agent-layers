@@ -17,6 +17,25 @@ starts runs from events and schedules. Neither adds agent logic.
 
 Data shape: [trigger.json](../../spec/schemas/trigger.json).
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  people["People, apps, IDEs, agents"]:::external -->|"chat API, MCP, A2A"| chan
+  events["Events, schedules"]:::external --> trig
+  subgraph sg["L8 interface"]
+    chan["ChannelPort<br/>serve: agents, run, stream, verify"]:::experience
+    trig["TriggerPort<br/>start a handler"]:::experience
+  end
+  chan -->|"verify"| identity["L6 identity"]:::control
+  chan -->|"run, stream"| harness["L3 harness"]:::agent
+  trig --> harness
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 | Audience | Standard |

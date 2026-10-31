@@ -20,6 +20,26 @@ telemetry are already applied to its model and tool calls.
 
 Data shapes: [agent-spec.json](../../spec/schemas/agent-spec.json), [run-result.json](../../spec/schemas/run-result.json).
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  interface["L8 interface<br/>channel, trigger"]:::experience --> runtime
+  eval["L10 eval<br/>replay runs"]:::insight --> runtime
+  subgraph sg["L3 harness"]
+    runtime["RuntimePort<br/>bind, run"]:::agent
+    state["StatePort<br/>append, read, list, delete"]:::agent
+  end
+  runtime --> state
+  runtime -->|"stack.modelFor"| cache["L2 cache"]:::model
+  runtime -->|"stack.toolsFor"| tool["L5 tool"]:::agent
+  runtime -.->|"invoke_agent span"| telemetry["L9 telemetry"]:::insight
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+```
+
 ## Standards
 
 - Markdown agent files with the common subagent front matter (`name`, `description`, `tools`, `model`).

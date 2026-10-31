@@ -16,10 +16,52 @@ Measure quality continuously and find which layer a failure belongs to, so fixes
 Data shapes: [eval-case.json](../../spec/schemas/eval-case.json), [eval-result.json](../../spec/schemas/eval-result.json),
 [feedback.json](../../spec/schemas/feedback.json).
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  cli["agent-layers test, eval"]:::external --> ev
+  users["Users<br/>ratings, comments"]:::external --> fb
+  subgraph sg["L10 eval"]
+    ev["EvaluatorPort<br/>score"]:::insight
+    fb["FeedbackPort<br/>submit, list"]:::insight
+  end
+  ev -->|"replay the case"| harness["L3 harness"]:::agent
+  ev -->|"judge"| llm["L1 llm"]:::model
+  ev -->|"run events"| telemetry["L9 telemetry"]:::insight
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 None. The data formats (dataset and result JSON Lines) are defined by this repository, so any runner that reads
 `EvalCase` and writes the result format works.
+
+## Improvement loop
+
+Each failure is attributed to one layer, fixed there, and kept as a regression case.
+
+```mermaid
+flowchart LR
+  run["Run: dataset case<br/>or production trace"]:::external --> score["EvaluatorPort.score<br/>scores per layer"]:::insight
+  score --> diag{"Failed?<br/>which layer"}:::insight
+  diag -->|"harness"| h["L3 harness<br/>prompt, budget"]:::agent
+  diag -->|"knowledge"| k["L4 knowledge<br/>retrieval tuning"]:::agent
+  diag -->|"tool"| t["L5 tool<br/>clearer description"]:::agent
+  diag -->|"identity, guardrail"| c["L6, L7<br/>policy or guard rule"]:::control
+  h --> reg["Failing case joins the dataset<br/>as a regression test"]:::insight
+  k --> reg
+  t --> reg
+  c --> reg
+  reg --> run
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
 
 ## Boundaries
 

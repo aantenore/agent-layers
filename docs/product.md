@@ -40,6 +40,49 @@ which layer failed.
 5. Promote one layer at a time to the company's systems by editing a profile; `agent-layers diff` shows what moves.
 6. `agent-layers deploy --profile production`.
 
+```mermaid
+flowchart LR
+  init["init<br/>project with all<br/>eleven layers"]:::external --> dev["dev<br/>talk to the agent,<br/>one trace line per layer"]:::external
+  dev --> check["check<br/>config, adapters,<br/>readiness, conformance"]:::external
+  check --> test["test<br/>conformance, live tests,<br/>smoke dataset"]:::external
+  test --> eval["eval<br/>score the dataset,<br/>attribute to layers"]:::external
+  eval --> deploy["deploy<br/>--profile production<br/>(diff shows what moves)"]:::external
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
+## Profile ladder
+
+Profiles extend each other and list only what differs. Adapters marked planned are named in the example config but
+not installed yet.
+
+```mermaid
+flowchart TB
+  subgraph proto["prototype: runs offline, zero-dependency adapters"]
+    base["All eleven layers<br/>mock-model, memory-cache, basic-runtime,<br/>markdown-knowledge, regex-guard, console-telemetry"]:::external
+  end
+  subgraph pilot["pilot: shared environment"]
+    pllm["L1 llm<br/>local model via openai-compatible"]:::model
+    pknow["L4 knowledge<br/>qdrant (planned)"]:::agent
+    ptel["L9 telemetry<br/>otlp"]:::insight
+  end
+  subgraph prod["production: company systems"]
+    xllm["L1 llm<br/>model gateway URL"]:::model
+    xcache["L2 cache<br/>valkey (planned)"]:::model
+    xharn["L3 harness<br/>reinloop, postgres-state (planned)"]:::agent
+    xid["L6 identity<br/>oidc, opa"]:::control
+    xgrd["L7 guardrail<br/>presidio, llm-guard"]:::control
+    xint["L8 interface<br/>a2a"]:::experience
+  end
+  proto -->|"edit the profile, agent-layers diff"| pilot
+  pilot -->|"agent-layers check --profile production"| prod
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Non-goals
 
 - Not an agent runtime: it binds runtimes; the loop belongs to them.

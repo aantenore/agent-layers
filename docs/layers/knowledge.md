@@ -18,6 +18,27 @@ runtime decides how to present them.
 
 Data shapes: [passage.json](../../spec/schemas/passage.json), [knowledge-document.json](../../spec/schemas/knowledge-document.json).
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  harness["L3 harness<br/>search before the model call"]:::agent --> kp
+  agent["Agent<br/>remember, recall"]:::agent --> mp
+  ingest["Ingestion job"]:::external --> ip
+  subgraph sg["L4 knowledge"]
+    kp["KnowledgePort<br/>search"]:::agent
+    mp["MemoryPort<br/>remember, recall, forget"]:::agent
+    ip["IngestionPort<br/>ingest, delete"]:::agent
+  end
+  kp --> src["Sources<br/>Markdown files, MCP servers,<br/>HTTP search services"]:::external
+  mp --> mem["Memory backend"]:::external
+  ip --> idx["Index of the backend"]:::external
+  kp -.->|"knowledge.search span"| telemetry["L9 telemetry"]:::insight
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 There is no single standard, because the sources differ:
@@ -39,6 +60,40 @@ what a search returns: every MCP server answers in its own shape. So the layer h
 
 Adapters translate each backend into `Passage`. The uniform result is what lets [telemetry](telemetry.md) trace and
 [eval](eval.md) score retrieval the same way for every backend.
+
+## Transport and result
+
+Backends differ and so does their transport. The result is always a `Passage`.
+
+```mermaid
+flowchart LR
+  subgraph backends["Backends, each with its own query language"]
+    vdb["Vector database"]:::external
+    sql["SQL, SPARQL"]:::external
+    md["Markdown files"]:::external
+  end
+  subgraph adapters["Adapters: transport is MCP, HTTP or a function"]
+    mcp["mcp"]:::agent
+    http["http-knowledge"]:::agent
+    mdk["markdown-knowledge"]:::agent
+  end
+  port["KnowledgePort.search"]:::agent
+  passage["Passage<br/>id, text, source, score, metadata"]:::agent
+  vdb --> mcp
+  vdb --> http
+  sql -->|"planned"| mcp
+  md --> mdk
+  mcp --> port
+  http --> port
+  mdk --> port
+  port --> passage
+  passage --> harness["L3 harness<br/>injected as untrusted data"]:::agent
+  passage -.->|"traced"| telemetry["L9 telemetry"]:::insight
+  passage -.->|"scored"| eval["L10 eval"]:::insight
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
 
 ## Boundaries
 

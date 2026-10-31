@@ -16,6 +16,28 @@ Nothing in the upper layers depends on a specific cloud or orchestrator. The dep
 
 Data shape: [service-spec.json](../../spec/schemas/service-spec.json).
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  cli["agent-layers deploy"]:::external
+  svc["Service specs of every layer<br/>image, env, secretRefs, ports, health"]:::external
+  subgraph sg["L0 infra"]
+    deploy["DeployPort<br/>plan, up, down"]:::foundation
+    secret["SecretPort<br/>get by reference"]:::foundation
+  end
+  compose["compose-deploy<br/>Compose Specification"]:::external
+  k8s["kubernetes (planned)<br/>Helm, Kubernetes API"]:::external
+  bao["openbao (planned)<br/>Vault-compatible store"]:::external
+  cli --> deploy
+  svc --> deploy
+  deploy -->|"endpoints"| compose
+  deploy -.-> k8s
+  secret -.-> bao
+  classDef foundation fill:#d9dde3,stroke:#57606a,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 - OCI images and the Compose Specification for running services.
@@ -41,6 +63,31 @@ Output: the public endpoints, one per service that is meant to be reached.
 
 Each layer keeps its own `reference/<id>/compose.yml` as the source of truth for that list. Targets read or mirror it;
 they do not redefine it.
+
+## Deploy targets
+
+Services are described once; the target decides how they run.
+
+```mermaid
+flowchart LR
+  cfg["Stack config<br/>deploy slot, profile"]:::external
+  specs["Service specs<br/>image, env, secretRefs, ports, health"]:::external
+  deploy["DeployPort<br/>plan, up, down"]:::foundation
+  subgraph targets["Targets"]
+    compose["compose<br/>Compose files, Traefik ingress"]:::foundation
+    k8s["k8s<br/>Helm umbrella chart,<br/>synced by Argo CD"]:::foundation
+  end
+  tofu["OpenTofu<br/>docker-host, k8s-cluster modules"]:::foundation
+  bao["OpenBao<br/>secret store"]:::external
+  cfg --> deploy
+  specs --> deploy
+  deploy --> compose
+  deploy -.->|"kubernetes adapter planned,<br/>reference via make"| k8s
+  tofu -->|"provisions the host or cluster"| targets
+  bao -.->|"injects secretRefs"| targets
+  classDef foundation fill:#d9dde3,stroke:#57606a,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
 
 ## Boundaries
 

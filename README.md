@@ -1,5 +1,7 @@
 # agent-layers
 
+![The agent-layers stack: eleven layers in six planes, one question per layer](docs/assets/stack-overview.svg)
+
 agent-layers composes the eleven layers an agent needs, from a laptop prototype to production: infrastructure,
 models, model access, runtime, knowledge, tools, identity, guardrails, interfaces, telemetry and evaluation.
 
@@ -10,6 +12,7 @@ an adapter too, so it can be replaced like anything else.
 - **Why it exists and how it compares:** [docs/product.md](docs/product.md)
 - **How it works:** [docs/architecture.md](docs/architecture.md)
 - **The layers on one page:** [docs/stack.md](docs/stack.md)
+- **Every diagram, and the colour conventions:** [docs/diagrams.md](docs/diagrams.md)
 - **Start a project, write an adapter, go to production:** [docs/guide.md](docs/guide.md)
 - **Adapters, status and maturity:** [docs/adapters.md](docs/adapters.md)
 - **The language-neutral spec:** [spec/](spec/README.md)
@@ -37,6 +40,45 @@ never a core change.
 | Insight | L10 | Evaluation & improvement (`eval`) | Was it good, and if not, which layer failed? |
 
 Ports per layer, reference adapters and the request flow are in [docs/stack.md](docs/stack.md).
+
+## Request through the stack
+
+A channel starts a run, identity verifies the caller, the runtime loops over knowledge and tools, and model calls pass
+the guards, the cache and the router before they reach the model. Every step is traced and scored.
+
+```mermaid
+flowchart TB
+  caller(["Person, app, agent, event"]):::external
+  interface["L8 interface<br/>channels, triggers"]:::experience
+  identity["L6 identity<br/>verify the caller"]:::control
+  subgraph run["One run"]
+    harness["L3 harness<br/>agent loop"]:::agent
+    knowledge["L4 knowledge"]:::agent
+    tool["L5 tool"]:::agent
+    guardrail["L7 guardrail<br/>input, output, tool traffic"]:::control
+    cache["L2 cache<br/>route, cache"]:::model
+    llm["L1 llm<br/>the model"]:::model
+  end
+  telemetry["L9 telemetry<br/>spans tagged agent.layer"]:::insight
+  eval["L10 eval<br/>score, attribute to a layer"]:::insight
+  infra["L0 infra<br/>deploy, secrets, ingress"]:::foundation
+  caller --> interface --> identity --> harness
+  harness <--> knowledge
+  harness <--> tool
+  identity -.->|"authorize, token for the caller"| tool
+  harness -->|"model call"| guardrail --> cache --> llm
+  run -.-> telemetry
+  telemetry --> eval
+  eval -.->|"fixes, regression cases"| harness
+  llm ~~~ infra
+  classDef foundation fill:#d9dde3,stroke:#57606a,color:#1f2328
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
 
 ## Quickstart
 

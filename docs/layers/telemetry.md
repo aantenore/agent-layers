@@ -13,9 +13,56 @@ also the input of [eval](eval.md).
 |---|---|
 | [TelemetryPort](../../spec/ports/TelemetryPort.md) | `span`, `event` and `metric` calls, each tagged with `agent.layer`; several adapters can run at once |
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  layers["Every layer<br/>spans, events, metrics<br/>tagged agent.layer"]:::external --> tp
+  subgraph sg["L9 telemetry"]
+    tp["TelemetryPort<br/>span, event, metric, flush"]:::insight
+  end
+  tp --> local["console, JSONL files"]:::external
+  tp --> otlp["OTLP collector"]:::external --> backends["Jaeger, Langfuse,<br/>any OTLP backend"]:::external
+  tp -.->|"run events, signals"| eval["L10 eval"]:::insight
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 OpenTelemetry OTLP with the GenAI semantic conventions.
+
+## Span tree
+
+One run, as the stack records it. Every span carries `agent.layer`.
+
+```mermaid
+flowchart TB
+  run["invoke_agent<br/>agent.layer=harness"]:::agent
+  gin["guard.check, input<br/>agent.layer=guardrail"]:::control
+  lookup["cache.lookup<br/>agent.layer=cache"]:::model
+  route["router.select<br/>agent.layer=cache"]:::model
+  chat["chat<br/>agent.layer=llm"]:::model
+  ks["knowledge.search<br/>agent.layer=knowledge"]:::agent
+  gout["guard.check, output<br/>agent.layer=guardrail"]:::control
+  tool["execute_tool<br/>agent.layer=tool"]:::agent
+  auth["authorize<br/>agent.layer=identity"]:::control
+  gargs["guard.check, tool_args<br/>agent.layer=guardrail"]:::control
+  gres["guard.check, tool_result<br/>agent.layer=guardrail"]:::control
+  run --> gin
+  run --> lookup
+  run --> route
+  run --> chat
+  run --> gout
+  run --> tool
+  chat --> ks
+  tool --> auth
+  tool --> gargs
+  tool --> gres
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+```
 
 ## Boundaries
 

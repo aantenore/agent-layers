@@ -14,6 +14,23 @@ Generate completions, including tool calls and streamed output. This is the only
 
 Data shapes: [chat-request.json](../../spec/schemas/chat-request.json), [chat-response.json](../../spec/schemas/chat-response.json).
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  harness["L3 harness"]:::agent -->|"model calls"| cache["L2 cache<br/>guards, cache, router"]:::model
+  subgraph sg["L1 llm"]
+    model["ModelPort<br/>chat, stream"]:::model
+  end
+  cache --> model
+  model --> server["Model server<br/>Ollama, vLLM, gateway, hosted API"]:::external
+  model -.->|"token usage"| telemetry["L9 telemetry"]:::insight
+  classDef model fill:#ffd8a8,stroke:#a85400,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 - OpenAI Chat Completions, the de facto wire format.

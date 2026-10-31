@@ -19,12 +19,74 @@ user or as its own identity.
 Data shapes: [identity.json](../../spec/schemas/identity.json), [access-request.json](../../spec/schemas/access-request.json),
 [access-decision.json](../../spec/schemas/access-decision.json), [approval.json](../../spec/schemas/approval.json).
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  interface["L8 interface<br/>inbound credential"]:::experience --> idp
+  gov["governedTools<br/>L5 tool calls"]:::agent --> authz
+  gov --> appr
+  gov --> cred
+  subgraph sg["L6 identity"]
+    idp["IdentityPort<br/>verify"]:::control
+    cred["CredentialPort<br/>token"]:::control
+    authz["AuthorizationPort<br/>evaluate"]:::control
+    appr["ApprovalPort<br/>request, wait"]:::control
+  end
+  idp --> oidc["Identity provider<br/>OIDC, token exchange"]:::external
+  cred --> oidc
+  authz --> pdp["Rules, OPA, AuthZEN"]:::external
+  appr --> human["Human approver"]:::external
+  sg -.->|"audit events"| telemetry["L9 telemetry"]:::insight
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef experience fill:#b2f2bb,stroke:#2a7a38,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 - OIDC / OAuth 2: JWT access tokens verified through discovery and JWKS.
 - RFC 8693 token exchange: on-behalf-of.
 - Client credentials: the agent's own identity.
 - OpenID AuthZEN for authorization requests.
+
+## On-behalf-of flow
+
+A user calls, the agent acts with that user's rights. Tools receive a token scoped to them, never the caller's inbound token.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Caller
+  participant I as interface (L8)
+  participant ID as identity (L6)
+  participant H as harness (L3)
+  participant X as IdP / PDP
+  participant T as tool (L5)
+  C->>I: request with caller token
+  I->>ID: IdentityPort.verify(token)
+  ID->>X: validate (JWKS)
+  X-->>ID: valid
+  ID-->>I: Identity (subject, roles, scopes)
+  Note over I,ID: no valid credential: rejected as unauthenticated, anonymous only if enabled
+  I->>H: run with the identity
+  H->>H: model asks for a tool, local policy: allow, ask (approval) or deny
+  H->>ID: AuthorizationPort.evaluate(subject, tool, risk)
+  ID->>X: rules first, then decision point
+  X-->>ID: decision
+  alt anonymous, denied or decision point down
+    ID-->>H: deny (fail closed)
+    H-->>H: error result "Denied: reason", no token requested
+  else allowed
+    H->>ID: CredentialPort.token(audience, scopes)
+    ID->>X: RFC 8693 token exchange
+    X-->>ID: short-lived, audience-scoped token
+    H->>T: callTool with the user-scoped token
+    T-->>H: result
+  end
+```
 
 ## Boundaries
 

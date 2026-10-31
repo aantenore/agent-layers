@@ -15,6 +15,23 @@ they are also where [identity](identity.md) and [guardrail](guardrail.md) apply.
 
 Data shapes: [tool-spec.json](../../spec/schemas/tool-spec.json), [tool-outcome.json](../../spec/schemas/tool-outcome.json).
 
+### Where it sits
+
+```mermaid
+flowchart LR
+  harness["L3 harness"]:::agent --> gov["governedTools<br/>policy, approval, authorize,<br/>bound credentials"]:::agent
+  gov --> tp
+  subgraph sg["L5 tool"]
+    tp["ToolPort<br/>listTools, callTool"]:::agent
+  end
+  gov --> identity["L6 identity"]:::control
+  gov --> guardrail["L7 guardrail<br/>tool_args, tool_result"]:::control
+  tp --> back["MCP servers, OpenAPI and HTTP APIs,<br/>JavaScript functions"]:::external
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Standards
 
 - MCP (stdio and streamable HTTP).

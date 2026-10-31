@@ -18,6 +18,41 @@ Assume the model can be manipulated by any text it reads, and that tools and the
 | Denial of wallet | A loop burns the budget | Per-run budgets, gateway quotas, alerts; see [cost](cost.md) | [harness](../layers/harness.md), [cache](../layers/cache.md), [telemetry](../layers/telemetry.md) |
 | Supply chain | A tool server or model is replaced | Pin images and model tags, review MCP servers before use, only open-source licensed references | [infra](../layers/infra.md), [tool](../layers/tool.md) |
 
+## Threat map
+
+Each threat is stopped where a layer already has a hook; several threats need more than one layer.
+
+```mermaid
+flowchart LR
+  inj(["Prompt injection"]):::external
+  tok(["Token theft"]):::external
+  ssrf(["Path traversal, SSRF"]):::external
+  sec(["Secret leakage"]):::external
+  code(["Code execution"]):::external
+  knowledge["L4 knowledge<br/>retrieved text marked untrusted"]:::agent
+  guardrail["L7 guardrail<br/>guards on input, tool_result, output"]:::control
+  harness["L3 harness<br/>approval for high-risk tools"]:::agent
+  identity["L6 identity<br/>short-lived, audience-scoped tokens"]:::control
+  telemetry["L9 telemetry<br/>secret-looking keys masked"]:::insight
+  tool["L5 tool<br/>sandbox, egress allow-list"]:::agent
+  infra["L0 infra<br/>network policy, secret store"]:::foundation
+  inj --> knowledge
+  inj --> guardrail
+  inj --> harness
+  tok --> identity
+  tok --> telemetry
+  ssrf --> tool
+  ssrf --> infra
+  sec --> infra
+  sec --> telemetry
+  code --> tool
+  classDef foundation fill:#d9dde3,stroke:#57606a,color:#1f2328
+  classDef agent fill:#a5d8ff,stroke:#1864ab,color:#1f2328
+  classDef control fill:#ffc9c9,stroke:#b42318,color:#1f2328
+  classDef insight fill:#d0bfff,stroke:#5f3dc4,color:#1f2328
+  classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
+```
+
 ## Rules
 
 1. **Untrusted by default.** Anything that comes from a document, web page, tool result or user is data, never
