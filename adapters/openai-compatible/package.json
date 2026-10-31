@@ -1,7 +1,7 @@
 {
   "name": "@agent-layers/adapter-openai-compatible",
   "version": "0.1.0",
-  "description": "Model adapter for any OpenAI Chat Completions compatible endpoint (Ollama, vLLM, LM Studio, hosted APIs)",
+  "description": "OpenAI Chat Completions: any compatible endpoint as the model port, and the stack served as a compatible API",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -26,8 +26,13 @@
     "@agent-layers/core": "^0.1.0"
   },
   "devDependencies": {
+    "@agent-layers/adapter-basic-runtime": "0.1.0",
+    "@agent-layers/adapter-mock-model": "0.1.0",
+    "@agent-layers/adapter-regex-guard": "0.1.0",
+    "@agent-layers/adapter-static-identity": "0.1.0",
     "@agent-layers/conformance": "0.1.0",
     "@agent-layers/core": "0.1.0",
+    "@agent-layers/gateway": "0.1.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

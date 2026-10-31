@@ -1,5 +1,8 @@
 import { defineAdapter, PORT_VERSIONS, type CallContext, type ChatChunk, type ChatRequest, type ChatResponse, type ModelPort } from '@agent-layers/core';
+import { createOpenAICompatibleChannel, type OpenAICompatibleChannelOptions } from './inbound.ts';
 import { sseData } from './sse.ts';
+
+export { createOpenAICompatibleChannel, parseChatBody, type OpenAICompatibleChannelOptions } from './inbound.ts';
 import { requestBody, toChunk, toResponse } from './wire.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
@@ -95,4 +98,27 @@ export const adapter = defineAdapter<'ModelPort', OpenAICompatibleOptions>({
   create: (options, ctx) => createOpenAICompatibleModel(options, ctx.name),
 });
 
-export const adapters = [adapter];
+/** Inbound: the stack served as an OpenAI Chat Completions API (model aliases and `agent:<name>`), mounted by the gateway. */
+export const channelAdapter = defineAdapter<'ChannelPort', OpenAICompatibleChannelOptions>({
+  layer: 'interface',
+  port: 'ChannelPort',
+  name: 'openai-compatible',
+  direction: 'inbound',
+  maps: { standard: 'OpenAI Chat Completions' },
+  portVersion: PORT_VERSIONS.ChannelPort,
+  tiers: ['prototype', 'production'],
+  description: 'Serves /v1/chat/completions and /v1/models: model aliases through the governed model, agent:<name> through the runtime.',
+  optionsSchema: {
+    type: 'object',
+    properties: {
+      basePath: { type: 'string', pattern: '^/' },
+      models: { type: 'object', additionalProperties: { type: 'string', minLength: 1 } },
+      agents: { anyOf: [{ type: 'boolean' }, { type: 'array', items: { type: 'string', minLength: 1 } }] },
+      ownedBy: { type: 'string', minLength: 1 },
+    },
+    additionalProperties: false,
+  },
+  create: (options, ctx) => createOpenAICompatibleChannel(options, ctx.name),
+});
+
+export const adapters = [adapter, channelAdapter];
