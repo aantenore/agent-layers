@@ -16,7 +16,7 @@ const opaUrl = process.env.OPA_URL ?? 'http://localhost:8181';
 // Test-only users and passwords from realm/agents-realm.json; the `agents-test` client exists only for these tests.
 const USERS = { alice: 'alice-test-only', bob: 'bob-test-only' };
 
-const { oidcVerifier, oidcCredentials, opaAuthorizer, mockProvider, defineTool, collectSink, run, createRuntime, serve, checkIdentityVerifier, checkAuthorizer, accessRequest } = reinloop;
+const { oidcVerifier, oidcCredentials, createRuntime, serve, checkIdentityVerifier } = reinloop;
 
 async function skipReason() {
   if (!(await reachable(`${issuer}/.well-known/openid-configuration`))) return `Keycloak not reachable at ${issuer} (make up LAYER=identity)`;
@@ -40,8 +40,6 @@ async function userToken(username) {
 // User tokens from the test client carry aud agent-runtime (audience mapper): the runtime is their audience.
 const inbound = () => oidcVerifier({ issuer, audience: clientId });
 const downstream = () => oidcVerifier({ issuer, audience: toolsAudience });
-
-const tool = (name, risk) => defineTool({ name, description: name, risk, schema: { type: 'object', properties: {} }, run: () => `${name} done` });
 
 describe('l5 identity (Keycloak + OPA)', { skip }, () => {
   let alice;
@@ -78,30 +76,26 @@ describe('l5 identity (Keycloak + OPA)', { skip }, () => {
     assert.equal(self.claims.azp, clientId);
   });
 
-  it('OPA allows alice and denies bob on a write tool through a reinloop run', async () => {
-    const authorizer = opaAuthorizer({ url: opaUrl, path: 'agents/decision' });
-    const outcome = async (identity) => {
-      const sink = collectSink();
-      const agent = {
-        name: 'notes',
-        model: { provider: mockProvider([{ toolCalls: [{ name: 'save_note', args: {} }, { name: 'run_shell', args: {} }] }, { text: 'done' }]), model: 'mock' },
-        tools: [tool('save_note', 'write'), tool('run_shell', 'exec')],
-        policy: { risk: { write: 'allow', exec: 'allow' }, pdp: { authorizer } },
-      };
-      const res = await run(agent, 'save a note', { identity, sinks: [sink] });
-      assert.equal(res.status, 'completed');
-      assert.ok(!JSON.stringify(sink.events).includes(identity.token), 'no token in events');
-      return Object.fromEntries(sink.events.filter((e) => e.type === 'tool_decision').map((e) => [e.data.name, e.data]));
+  it('OPA decides on AccessQuestions in SDK names: alice writes, bob reads only, exec and anonymous denied', async () => {
+    // The question the `opa` adapter sends (adapters/opa): caller and target in SDK names, never a credential.
+    const question = (identity, risk) => ({
+      caller: identity ? { id: identity.subject, kind: identity.kind, roles: identity.roles ?? [], scopes: identity.scopes ?? [] } : { kind: 'anonymous', id: 'anonymous', roles: [], scopes: [] },
+      action: 'call',
+      target: { kind: 'tool', id: `notes__${risk}`, layer: 'tool', risk, agent: 'notes' },
+    });
+    const decide = async (identity, risk) => {
+      const res = await fetch(`${opaUrl}/v1/data/agents/decision`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ input: question(identity, risk) }), signal: AbortSignal.timeout(5000),
+      });
+      assert.equal(res.status, 200);
+      return (await res.json()).result;
     };
-    const a = await outcome(alice);
-    assert.equal(a.save_note.allowed, true);
-    assert.deepEqual([a.run_shell.allowed, a.run_shell.reason], [false, 'pdp: exec tools are denied to everyone']);
-    const b = await outcome(bob);
-    assert.equal(b.save_note.allowed, false);
-    assert.match(b.save_note.reason, /^pdp: user .* may not call write tools$/);
-
-    const req = (id) => accessRequest({ type: 'tool_call', id: 'c', name: 'save_note', args: {} }, tool('save_note', 'write'), 'notes', id);
-    assert.deepEqual(await checkAuthorizer(opaAuthorizer({ url: opaUrl }), { allowCase: req(alice), denyCase: req(bob) }), []);
+    assert.deepEqual(await decide(alice, 'write'), { allow: true, reason: 'allowed' });
+    assert.deepEqual(await decide(alice, 'exec'), { allow: false, reason: 'exec tools are denied to everyone' });
+    assert.equal((await decide(bob, 'read')).allow, true);
+    assert.match((await decide(bob, 'write')).reason, /^user .* may not call write tools$/);
+    assert.equal((await decide(bob, 'write')).allow, false);
+    assert.deepEqual(await decide(undefined, 'read'), { allow: false, reason: 'anonymous anonymous may not call read tools' });
   });
 
   it('serve answers 401 without a token and runs as the caller with one', async () => {

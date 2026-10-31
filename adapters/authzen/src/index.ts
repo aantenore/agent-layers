@@ -1,8 +1,8 @@
-import { defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type AuthorizationPort, type LimitValue } from '@agent-layers/core';
+import { defineAdapter, limitProperties, limitValue, noMappings, PORT_VERSIONS, type AuthorizationPort, type LimitValue, type Mappings } from '@agent-layers/core';
 import { LIMITS } from './limits.ts';
-import { PdpError, pdpRequest, postJson, reasonText, secureUrl, type FetchLike } from './pdp.ts';
+import { authzenRequest, PdpError, postJson, publicQuestion, reasonText, secureUrl, type FetchLike } from './pdp.ts';
 
-export { PdpError, pdpRequest, reasonText, type FetchLike } from './pdp.ts';
+export { authzenRequest, PdpError, publicQuestion, reasonText, type AuthzenRequest, type FetchLike } from './pdp.ts';
 export { LIMITS } from './limits.ts';
 
 export interface AuthzenOptions {
@@ -26,12 +26,23 @@ export interface AuthzenOptions {
 
 export const EVALUATION_PATH = '/access/v1/evaluation';
 
+/** Decision `context` keys other than the reasons, kept for the stack. */
+export const CONTEXT_KEY = 'authzen.context';
+const REASON_KEYS = new Set(['reason', 'reason_user', 'reason_admin']);
+
+export interface AuthzenHooks {
+  fetch?: FetchLike;
+  /** Boundary mappings (`out` rules on the AccessQuestion, applied to the AuthZEN request). Default: none. */
+  mappings?: Mappings;
+}
+
 /**
- * AuthorizationPort over the OpenID AuthZEN Authorization API 1.0 access evaluation endpoint. Answers that are not a
- * boolean `decision` reject, which the stack treats as a deny. Only `reason` / `reason_user` reach the decision;
- * `reason_admin` stays with the PDP.
+ * AuthorizationPort over the OpenID AuthZEN Authorization API 1.0 access evaluation endpoint. The question is sent in
+ * AuthZEN names (`subject`, `action`, `resource`, `context.args`), then through the `out` mappings. Answers that are
+ * not a boolean `decision` and mapping errors reject, which the stack treats as a deny. `reason` / `reason_user`
+ * become the decision's reason, the other `context` keys `ext["authzen.context"]`; `reason_admin` stays with the PDP.
  */
-export function createAuthzen(options: AuthzenOptions, hooks: { fetch?: FetchLike } = {}, name = 'authzen'): AuthorizationPort {
+export function createAuthzen(options: AuthzenOptions, hooks: AuthzenHooks = {}, name = 'authzen'): AuthorizationPort {
   if (!options?.url) throw new PdpError('authzen: "url" is required');
   const base = secureUrl(options.url, 'authzen url', options.allowHttp);
   const path = options.path ?? EVALUATION_PATH;
@@ -41,17 +52,21 @@ export function createAuthzen(options: AuthzenOptions, hooks: { fetch?: FetchLik
   const timeoutMs = limitValue(LIMITS.timeoutMs, options.timeoutMs);
   const maxResponseBytes = limitValue(LIMITS.maxResponseBytes, options.maxResponseBytes);
   const maxReasonChars = limitValue(LIMITS.maxReasonChars, options.maxReasonChars);
+  const mappings = hooks.mappings ?? noMappings(name);
   return {
     name,
     native: () => ({ endpoint }),
-    async evaluate(req, opts) {
-      const body = await postJson(fetchImpl, endpoint, pdpRequest(req, options.includeArgs === true), {
+    async evaluate(q, opts) {
+      const question = publicQuestion(q, options.includeArgs === true);
+      const wire = mappings.out(question, authzenRequest(question));
+      const body = await postJson(fetchImpl, endpoint, wire, {
         ...(options.headers ? { headers: options.headers } : {}), timeoutMs, maxResponseBytes, what: 'AuthZEN', ...(opts?.signal ? { signal: opts.signal } : {}),
       });
       if (typeof body.decision !== 'boolean') throw new PdpError('AuthZEN: the response has no boolean "decision"');
-      const ctx = body.context && typeof body.context === 'object' ? (body.context as Record<string, unknown>) : {};
+      const ctx = body.context && typeof body.context === 'object' && !Array.isArray(body.context) ? (body.context as Record<string, unknown>) : {};
       const reason = reasonText(ctx.reason, maxReasonChars) ?? reasonText(ctx.reason_user, maxReasonChars);
-      return { decision: body.decision, ...(reason ? { context: { reason } } : {}) };
+      const rest = Object.fromEntries(Object.entries(ctx).filter(([k]) => !REASON_KEYS.has(k)));
+      return { allowed: body.decision, ...(reason ? { reason } : {}), ...(Object.keys(rest).length ? { ext: { [CONTEXT_KEY]: rest } } : {}) };
     },
   };
 }
@@ -79,7 +94,9 @@ export const adapter = defineAdapter<'AuthorizationPort', AuthzenOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
-  create: (options, ctx) => createAuthzen(options, {}, ctx.name),
+  ext: { produces: [CONTEXT_KEY] },
+  mappingDefaults: { out: { shape: 'AccessQuestion' } },
+  create: (options, ctx) => createAuthzen(options, { mappings: ctx.mappings }, ctx.name),
 });
 
 export const adapters = [adapter];

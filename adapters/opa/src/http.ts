@@ -1,6 +1,6 @@
-import { anySignal, timeoutSignal, type AccessRequest } from '@agent-layers/core';
+import { ANONYMOUS, anySignal, timeoutSignal, type AccessQuestion, type PublicCaller } from '@agent-layers/core';
 
-/** Failure to reach or understand the policy decision point. The stack turns it into a deny. */
+/** Failure to reach or understand OPA. The stack turns it into a deny. */
 export class PdpError extends Error {
   override name = 'PdpError';
 }
@@ -80,21 +80,31 @@ export async function postJson(fetchImpl: FetchLike, url: string, payload: unkno
   return body as Record<string, unknown>;
 }
 
-const ANONYMOUS: AccessRequest['subject'] = { type: 'anonymous', id: 'anonymous', properties: { roles: [], scopes: [], authenticated: false } };
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 /**
- * The request as sent to the PDP. Only an authenticated subject of type exactly `user` or `agent` is passed on (with
- * `authenticated: true`); anything else becomes the anonymous subject, so a policy cannot mistake it for the agent.
- * Tool arguments are sent only with `includeArgs`.
+ * The question as it may leave the stack. Only a caller of kind exactly `user` or `agent` with a non-empty id is kept
+ * (roles and scopes as string lists, never a credential); anything else becomes the explicit anonymous caller, so a
+ * policy cannot mistake it for the agent. Tool arguments are kept only with `includeArgs`.
  */
-export function pdpRequest(req: AccessRequest, includeArgs: boolean): AccessRequest {
-  const s = req.subject;
-  const props = s?.properties ?? {};
-  const authenticated = (s?.type === 'user' || s?.type === 'agent') && typeof s.id === 'string' && s.id !== '' && props.authenticated !== false;
-  const subject = authenticated ? { type: s.type, id: s.id, properties: { ...props, authenticated: true } } : structuredClone(ANONYMOUS);
-  const { args: _args, ...context } = req.context ?? {};
-  const ctx = includeArgs && req.context && 'args' in req.context ? { ...context, args: req.context.args } : context;
-  return { subject, action: req.action, resource: req.resource, ...(Object.keys(ctx).length ? { context: ctx } : {}) };
+export function publicQuestion(q: AccessQuestion, includeArgs: boolean): AccessQuestion {
+  const c = (isObject(q?.caller) ? q.caller : {}) as Partial<PublicCaller> & Record<string, unknown>;
+  const known = (c.kind === 'user' || c.kind === 'agent') && typeof c.id === 'string' && c.id !== '';
+  const caller: AccessQuestion['caller'] = known
+    ? {
+      id: c.id!, kind: c.kind!, roles: strings(c.roles), scopes: strings(c.scopes),
+      ...(typeof c.name === 'string' ? { name: c.name } : {}),
+      ...(isObject(c.ext) ? { ext: structuredClone(c.ext) } : {}),
+    }
+    : { ...ANONYMOUS, roles: [], scopes: [] };
+  return {
+    caller,
+    action: q.action,
+    target: structuredClone(q.target),
+    ...(includeArgs && q.args !== undefined ? { args: structuredClone(q.args) } : {}),
+    ...(isObject(q.ext) ? { ext: structuredClone(q.ext) } : {}),
+  };
 }
 
 /** A reason string from a PDP value (a string, or the first string of a localised `{lang: text}` object), cut to `maxChars`. */

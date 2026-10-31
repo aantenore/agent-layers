@@ -1,17 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { AdapterRegistry, noopTelemetry } from '@agent-layers/core';
+import { sampleQuestion } from '@agent-layers/conformance';
 import { adapter, createOpa } from '../src/index.ts';
 import { pdp, send } from './helpers.ts';
 
 const ctx = { name: 'opa', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
-const request = { subject: { type: 'agent', id: 'a', properties: { authenticated: true } }, action: { name: 'call' }, resource: { type: 'tool', id: 'notes__save' } };
+const request = sampleQuestion({ kind: 'agent' });
 
 test('maxReasonChars and maxResponseBytes take effect', async () => {
   const s = await pdp((_b, _h, res) => send(res, 200, { result: { allow: true, reason: 'abcdefghij' } }));
   try {
-    assert.deepEqual((await createOpa({ url: s.url, maxReasonChars: 4 }).evaluate(request)).context, { reason: 'abcd' });
-    assert.equal((await createOpa({ url: s.url }).evaluate(request)).context?.reason, 'abcdefghij');
+    assert.equal((await createOpa({ url: s.url, maxReasonChars: 4 }).evaluate(request)).reason, 'abcd');
+    assert.equal((await createOpa({ url: s.url }).evaluate(request)).reason, 'abcdefghij');
     await assert.rejects(createOpa({ url: s.url, maxResponseBytes: 10 }).evaluate(request), /too large/);
     await createOpa({ url: s.url, maxResponseBytes: 'unbounded' }).evaluate(request);
   } finally {

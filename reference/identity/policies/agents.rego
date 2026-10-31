@@ -1,9 +1,10 @@
-# Tool-call authorization for agents. Input: an AccessRequest (see spec/schemas/access-request.json).
+# Tool-call authorization for agents. Input: an AccessQuestion in SDK names (see spec/schemas/access-question.json):
+# input.caller {kind, id, roles, scopes}, input.action, input.target {kind, id, layer, risk, agent, attrs}.
 #
 #   data.agents.decision  { allow, reason }, the decision the `opa` adapter reads (default path agents/decision)
 #   data.agents.allow     boolean, the same decision without a reason
 #
-# Only authenticated subjects are allowed: an anonymous or unauthenticated request is always denied.
+# Only authenticated callers are allowed: the anonymous caller (or a caller of any other kind) is always denied.
 package agents
 
 default allow := false
@@ -14,15 +15,18 @@ user_risks := {
 	"analyst": {"read", "write"},
 }
 
-authenticated if input.subject.properties.authenticated == true
+kind := object.get(input, ["caller", "kind"], "anonymous")
 
-risk := object.get(input, ["resource", "properties", "risk"], null)
+# A verified user or agent; the `opa` adapter sends every other caller as the explicit anonymous caller.
+authenticated if kind in {"user", "agent"}
 
-roles := object.get(input, ["subject", "properties", "roles"], [])
+risk := object.get(input, ["target", "risk"], null)
+
+roles := object.get(input, ["caller", "roles"], [])
 
 allow if {
 	authenticated
-	input.subject.type == "user"
+	kind == "user"
 	some role in roles
 	risk in user_risks[role]
 }
@@ -30,7 +34,7 @@ allow if {
 # The agent's own (authenticated, client-credentials) identity: read tools only.
 allow if {
 	authenticated
-	input.subject.type == "agent"
+	kind == "agent"
 	risk == "read"
 }
 
@@ -38,6 +42,6 @@ reason := "allowed" if {
 	allow
 } else := "exec tools are denied to everyone" if {
 	risk == "exec"
-} else := sprintf("%s %s may not call %v tools", [input.subject.type, input.subject.id, risk])
+} else := sprintf("%s %s may not call %v tools", [kind, object.get(input, ["caller", "id"], "anonymous"), risk])
 
 decision := {"allow": allow, "reason": reason}

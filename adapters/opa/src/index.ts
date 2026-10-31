@@ -1,8 +1,8 @@
-import { defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type AuthorizationPort, type LimitValue } from '@agent-layers/core';
+import { defineAdapter, limitProperties, limitValue, noMappings, PORT_VERSIONS, type AuthorizationPort, type LimitValue, type Mappings } from '@agent-layers/core';
 import { LIMITS } from './limits.ts';
-import { PdpError, pdpRequest, postJson, reasonText, secureUrl, type FetchLike } from './pdp.ts';
+import { PdpError, postJson, publicQuestion, reasonText, secureUrl, type FetchLike } from './http.ts';
 
-export { PdpError, pdpRequest, reasonText, type FetchLike } from './pdp.ts';
+export { PdpError, publicQuestion, reasonText, type FetchLike } from './http.ts';
 export { LIMITS } from './limits.ts';
 
 export interface OpaOptions {
@@ -12,7 +12,7 @@ export interface OpaOptions {
   path?: string;
   /** Extra request headers, e.g. `authorization` for an OPA started with `--authentication=token`. */
   headers?: Record<string, string>;
-  /** Send the tool-call arguments in `input.context.args` (default false: arguments stay inside the stack). */
+  /** Send the tool-call arguments in `input.args` (default false: arguments stay inside the stack). */
   includeArgs?: boolean;
   /** Request timeout (default 5 s). */
   timeoutMs?: LimitValue;
@@ -27,12 +27,19 @@ export interface OpaOptions {
 export const DEFAULT_PATH = 'agents/decision';
 const PATH = /^[A-Za-z_][\w-]*(\/[A-Za-z_][\w-]*)*$/;
 
+export interface OpaHooks {
+  fetch?: FetchLike;
+  /** Boundary mappings (`out` rules on the AccessQuestion, applied to the input). Default: none. */
+  mappings?: Mappings;
+}
+
 /**
- * AuthorizationPort over OPA's Data API: `POST <url>/v1/data/<path>` with `{ input: AccessRequest }`. The rule must
- * evaluate to a boolean or to `{ allow: boolean, reason?: string }`; anything else, an undefined rule included, rejects,
+ * AuthorizationPort over OPA's Data API: `POST <url>/v1/data/<path>` with `{ input: AccessQuestion }` in language
+ * names (`input.caller.roles`, `input.target.risk`), after the `out` mappings. The rule must evaluate to a boolean or
+ * to `{ allow: boolean, reason?: string }`; anything else, an undefined rule and a failing mapping included, rejects,
  * which the stack treats as a deny.
  */
-export function createOpa(options: OpaOptions, hooks: { fetch?: FetchLike } = {}, name = 'opa'): AuthorizationPort {
+export function createOpa(options: OpaOptions, hooks: OpaHooks = {}, name = 'opa'): AuthorizationPort {
   if (!options?.url) throw new PdpError('opa: "url" is required');
   const base = secureUrl(options.url, 'opa url', options.allowHttp);
   const path = (options.path ?? DEFAULT_PATH).replace(/^\/+|\/+$/g, '');
@@ -43,19 +50,22 @@ export function createOpa(options: OpaOptions, hooks: { fetch?: FetchLike } = {}
   const timeoutMs = limitValue(LIMITS.timeoutMs, options.timeoutMs);
   const maxResponseBytes = limitValue(LIMITS.maxResponseBytes, options.maxResponseBytes);
   const maxReasonChars = limitValue(LIMITS.maxReasonChars, options.maxReasonChars);
+  const mappings = hooks.mappings ?? noMappings(name);
   return {
     name,
     native: () => ({ endpoint, rule }),
-    async evaluate(req, opts) {
-      const body = await postJson(fetchImpl, endpoint, { input: pdpRequest(req, options.includeArgs === true) }, {
+    async evaluate(q, opts) {
+      const question = publicQuestion(q, options.includeArgs === true);
+      const input = mappings.out(question, question);
+      const body = await postJson(fetchImpl, endpoint, { input }, {
         ...(options.headers ? { headers: options.headers } : {}), timeoutMs, maxResponseBytes, what: 'OPA', ...(opts?.signal ? { signal: opts.signal } : {}),
       });
       const result = body.result;
-      if (typeof result === 'boolean') return { decision: result };
+      if (typeof result === 'boolean') return { allowed: result };
       if (result && typeof result === 'object' && !Array.isArray(result) && typeof (result as { allow?: unknown }).allow === 'boolean') {
         const r = result as { allow: boolean; reason?: unknown };
         const reason = reasonText(r.reason, maxReasonChars);
-        return { decision: r.allow, ...(reason ? { context: { reason } } : {}) };
+        return { allowed: r.allow, ...(reason ? { reason } : {}) };
       }
       throw new PdpError(`OPA: ${rule} is ${result === undefined ? 'undefined' : 'not a boolean decision'}`);
     },
@@ -85,7 +95,9 @@ export const adapter = defineAdapter<'AuthorizationPort', OpaOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
-  create: (options, ctx) => createOpa(options, {}, ctx.name),
+  ext: { produces: [] },
+  mappingDefaults: { out: { shape: 'AccessQuestion' } },
+  create: (options, ctx) => createOpa(options, { mappings: ctx.mappings }, ctx.name),
 });
 
 export const adapters = [adapter];

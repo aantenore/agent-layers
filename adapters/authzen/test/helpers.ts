@@ -1,13 +1,13 @@
 import { createServer, type IncomingHttpHeaders, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { AccessRequest } from '@agent-layers/core';
+import type { AccessQuestion } from '@agent-layers/core';
 
-/** The reference policy (reference/identity/policies/agents.rego), in code: viewer reads, analyst writes, the authenticated agent reads. */
-export function referencePolicy(req: AccessRequest): { allow: boolean; reason: string } {
+/** The reference policy, over the AuthZEN wire: viewer reads, analyst writes, the authenticated agent reads. */
+export function referencePolicy(req: any): { allow: boolean; reason: string } {
   const risk = req.resource?.properties?.risk;
   const roles = Array.isArray(req.subject?.properties?.roles) ? req.subject.properties.roles : [];
   const userRisks: Record<string, string[]> = { viewer: ['read'], analyst: ['read', 'write'] };
-  const allow = (req.subject?.type === 'user' && req.subject.properties?.authenticated === true && roles.some((r) => userRisks[r]?.includes(String(risk))))
+  const allow = (req.subject?.type === 'user' && req.subject.properties?.authenticated === true && roles.some((r: string) => userRisks[r]?.includes(String(risk))))
     || (req.subject?.type === 'agent' && req.subject.properties?.authenticated === true && risk === 'read');
   return { allow, reason: allow ? 'allowed' : `${req.subject?.type} ${req.subject?.id} may not call ${String(risk)} tools` };
 }
@@ -43,6 +43,7 @@ export async function pdp(reply: Reply) {
 export const send = (res: ServerResponse, status: number, body: unknown) =>
   res.writeHead(status, { 'content-type': 'application/json' }).end(typeof body === 'string' ? body : JSON.stringify(body));
 
-export const request = (subject: AccessRequest['subject'], risk: 'read' | 'write' | 'exec' = 'read', args: unknown = { path: '/etc/secret' }): AccessRequest => ({
-  subject, action: { name: 'call' }, resource: { type: 'tool', id: 'notes__save', properties: { risk, agent: 'notes' } }, context: { args, channel: 'http' },
+/** A question about `notes__save` for `caller` (any shape, to probe malformed callers). */
+export const question = (caller: unknown, risk: 'read' | 'write' | 'exec' = 'read', args: Record<string, unknown> = { path: '/etc/secret' }): AccessQuestion => ({
+  caller: caller as AccessQuestion['caller'], action: 'call', target: { kind: 'tool', id: 'notes__save', layer: 'tool', risk, agent: 'notes' }, args,
 });

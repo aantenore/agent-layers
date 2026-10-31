@@ -25,9 +25,9 @@ credentials it carries to downstream APIs. Ports: [IdentityPort](../../spec/port
 |---|---|
 | `compose.yml` | Keycloak on `127.0.0.1:8080`, OPA on `127.0.0.1:8181` |
 | `realm/agents-realm.json` | Realm `agents` (imported at start) |
-| `policies/agents.rego` | `data.agents.allow` (boolean) and `data.agents.decision` (`{allow, reason}`) |
+| `policies/agents.rego` | `data.agents.allow` (boolean) and `data.agents.decision` (`{allow, reason}`) over an `AccessQuestion` in SDK names (`input.caller`, `input.target`) |
 | `policies/agents_test.rego` | Policy unit tests (`opa test`) |
-| `test/identity.test.mjs` | Live tests against Keycloak and OPA through reinloop |
+| `test/identity.test.mjs` | Live tests against Keycloak (through reinloop) and OPA (Data API, SDK names) |
 
 Realm `agents`:
 
@@ -42,14 +42,14 @@ Realm `agents`:
 The passwords, the client secret default and the admin password default (`change-me`) are test values. Never reuse
 the realm file outside local development: remove `agents-test`, set real secrets and run Keycloak in production mode.
 
-Policy (`agents.rego`):
+Policy (`agents.rego`), over `input.caller.kind`, `input.caller.roles` and `input.target.risk`:
 
-| Subject | read | write | exec |
+| Caller | read | write | exec |
 |---|---|---|---|
 | user with `viewer` | allow | deny | deny |
 | user with `analyst` | allow | allow | deny |
 | agent (authenticated client credentials) | allow | deny | deny |
-| anything else, unauthenticated runs included | deny | deny | deny |
+| anonymous (`kind: "anonymous"`) or any other kind, unauthenticated runs included | deny | deny | deny |
 
 ## Extension points (reinloop)
 
@@ -58,6 +58,9 @@ Policy (`agents.rego`):
 | `IdentityVerifier.verify(token)` → `Identity` | `oidcVerifier` | `registry.verifiers` |
 | `CredentialFactory(identity)` → `CredentialProvider.token(audience, { scopes })` | `oidcCredentials` (`on-behalf-of`, `self`) | `registry.credentials` |
 | `Authorizer.evaluate(AccessRequest)` → `{ decision, reason? }` | `opaAuthorizer`, `authzenAuthorizer` | `registry.authorizers` (Cedar, OpenFGA, Cerbos...) |
+
+reinloop's `opaAuthorizer` sends its own AuthZEN-shaped `AccessRequest` (`subject`, `resource`); `agents.rego` reads
+the SDK's `AccessQuestion` (`caller`, `target`) that the `opa` adapter sends, so it denies reinloop's requests.
 
 Local policy rules run first and take `when: { roles, scopes, kind }` (roles and scopes any-of). A local `deny` is
 final; for `allow`/`ask` the PDP is consulted; a PDP `deny` denies (reason `pdp: ...`); a PDP failure applies
@@ -98,9 +101,10 @@ If host port 8080 is taken, start with `KEYCLOAK_PORT=18080` and run the tests w
 
 The live tests skip with a message when Keycloak or OPA is unreachable. They check: alice's token verifies into an
 Identity with role `analyst`; the on-behalf-of exchange yields a token with `aud` `tools-api`, alice's `sub` and `azp`
-`agent-runtime`; `client_credentials` gives kind `agent`; through a reinloop run (mock model) OPA allows alice and
-denies bob on a write tool and denies exec to both; `reinloop serve` answers 401 without a token and runs as alice
-with hers.
+`agent-runtime`; `client_credentials` gives kind `agent`; OPA, asked with `AccessQuestion`s in SDK names as the `opa`
+adapter sends them, allows alice and denies bob on a write tool, denies exec to both and denies the anonymous caller;
+`reinloop serve` answers 401 without a token and runs as alice with hers. The adapter-level live test (oidc, opa,
+token exchange through a composed stack) is [adapters/oidc/test/live.test.ts](../../adapters/oidc/test/live.test.ts).
 
 ## Threat notes
 
