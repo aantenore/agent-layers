@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AdapterRegistry, noopTelemetry, type ChatRequest } from '@agent-layers/core';
+import { AdapterRegistry, noopTelemetry, textMessage, type ModelRequest } from '@agent-layers/core';
 import { adapter, createOpenAICompatibleModel } from '../src/index.ts';
 import { startMock } from './mock.ts';
 
 const ctx = { runId: 'r', agent: 'a' };
-const req: ChatRequest = { model: 'm1', messages: [{ role: 'user', content: 'hi' }] };
+const req: ModelRequest = { model: 'm1', messages: [textMessage('user', 'hi')] };
 const adapterCtx = { name: 'llm', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
 
 test('errorBodyChars and streamEventChars cut the text kept in errors', async () => {
@@ -40,4 +40,18 @@ test('limits from ${env:...} are coerced to numbers; out-of-range values are rej
   await assert.rejects(make({ timeoutMs: 0 }), /timeoutMs/);
   await assert.rejects(make({ errorBodyChars: 'unbounded' }), /errorBodyChars/);
   await assert.rejects(make({ streamEventChars: -1 }), /streamEventChars/);
+  await make({ maxEventChars: '4096' });
+  await make({ maxEventChars: 'unbounded' });
+  await assert.rejects(make({ maxEventChars: 0 }), /maxEventChars/);
+  assert.equal(adapter.limits?.maxEventChars?.default, 1_048_576);
+});
+
+test('maxEventChars rejects a stream event longer than the cap', async () => {
+  const mock = await startMock((_s, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }).end(`data: {"choices":[{"index":0,"delta":{"content":"${'x'.repeat(200)}"}}]}\n\n`); });
+  try {
+    const model = createOpenAICompatibleModel({ baseUrl: mock.url, maxEventChars: 100 });
+    await assert.rejects(async () => { for await (const _ of model.stream!(req, ctx)) { /* drain */ } }, /maxEventChars/);
+  } finally {
+    await mock.close();
+  }
 });
