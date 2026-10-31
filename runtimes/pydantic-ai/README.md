@@ -103,10 +103,12 @@ not stored, returned or logged.
 - A `contextId` is the caller's own name for a conversation: another caller using the same `contextId` gets a separate
   conversation, and cannot read or extend yours. A run reads and writes the history in the namespace of its owner.
 - At most `MAX_TASKS` tasks and `MAX_TASKS` conversations are kept, and `MAX_TASKS // 4` of each per owner. To make
-  room for a new task, an owner at its own cap drops its own oldest finished task or least recently used idle
-  conversation; below it, a full store drops the oldest finished task or idle conversation of any owner, so idle owners
-  cannot hold capacity. Never dropped: a task that is submitted or working, and a conversation with such a task. When
-  there is nothing to drop, the new task is refused with the JSON-RPC error -32000 "Too many tasks".
+  room for a new task, an owner at its own cap, or any owner when the store is full, drops its own oldest finished task
+  or least recently used idle conversation, whatever its age. If the store is full and the owner has nothing of its
+  own to drop, it may reclaim the oldest finished task or idle conversation of another owner, but only one older than
+  `CROSS_OWNER_MIN_AGE_S` (since the task finished or the conversation was last used). With no such victim the new task
+  is refused with the JSON-RPC error -32000 "Too many tasks". Never dropped: a task that is submitted or working, and a
+  conversation with such a task.
 - A finished task is kept `FINISHED_TASK_TTL_S` seconds, and a conversation with no task in flight `IDLE_CONTEXT_TTL_S`
   seconds after its last use. Expiry is applied when the store is used, not by a timer.
 
@@ -119,6 +121,13 @@ Limits, because the agent does not verify the token (the gateway does, and has n
 - Anyone who can reach the endpoint can use any token string, including made-up ones, and fill the store with work in
   flight (up to `MAX_TASKS // 4` per token), which is refused to everyone else until it ends. That is why the agent must
   be reachable only by the gateway, as below.
+
+Tradeoff of the full-store rule. Without cross-owner reclaim, owners that are done could hold capacity until their
+data expires and starve everyone else (hoarding). With unconditional reclaim, one caller could push out another's
+recent work (cross-tenant eviction). The minimum age bounds both: recent data of other owners is safe, and old data
+cannot be held forever. Because the owner key is a hash of an unverified bearer, a caller can mint any number of
+owners, so these guarantees only hold against callers the gateway has verified. Run the agent behind the gateway
+with `A2A_GATEWAY_SECRET` set (below) so that every caller is one the gateway has authenticated.
 
 ## Reaching the agent
 
@@ -152,6 +161,7 @@ Also refused: requests with an `Origin` header (the agent is called server to se
 | `GATEWAY_MODEL` | the file's `model` | Model alias of the gateway |
 | `FINISHED_TASK_TTL_S` | `3600` | How long a finished task is kept |
 | `IDLE_CONTEXT_TTL_S` | `3600` | How long a conversation with no task in flight is kept after its last use |
+| `CROSS_OWNER_MIN_AGE_S` | `600` | How old another caller's finished task or idle conversation must be to be reclaimed when the store is full |
 | `A2A_HOST` | `127.0.0.1` | Interface to listen on; anything but loopback needs `A2A_ALLOW_REMOTE=1` |
 | `A2A_ALLOW_REMOTE` | unset | `1` allows a non-loopback `A2A_HOST` |
 | `A2A_GATEWAY_SECRET` | unset | When set, requests must carry it in `X-Agent-Layers-Gateway` (see Reaching the agent) |

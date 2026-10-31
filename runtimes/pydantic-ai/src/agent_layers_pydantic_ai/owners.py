@@ -82,9 +82,12 @@ class TaskStore(Storage[list[Any]]):
     """The worker's storage: tasks and conversations in a namespace per owner, in memory.
 
     At most `max_tasks` tasks and `max_tasks` conversations are kept, and `max_tasks // 4` of each per owner. To make
-    room for a new task, an owner at its own cap drops its own oldest finished task or least recently used idle
-    conversation; below it, a full store drops the oldest ones of any owner. Never dropped: a task submitted or working,
-    and a conversation with such a task. When there is nothing to drop the new task is refused.
+    room for a new task, the owner drops its own oldest finished task or least recently used idle conversation, whatever
+    its age, when it is at its own cap or when the store is full. Only when the store is full and the owner has nothing
+    to drop does it reclaim from other owners, and then only the oldest finished tasks and idle conversations that are
+    at least `cross_owner_min_age_s` old (since the task finished or the conversation was last used). Never dropped: a
+    task submitted or working, and a conversation with such a task. When there is nothing to drop the new task is
+    refused.
 
     Finished tasks expire after `finished_ttl_s`, and idle conversations after `idle_ttl_s` since their last use.
     Expiry is applied when the store is used (`sweep`), not by a timer.
@@ -95,12 +98,14 @@ class TaskStore(Storage[list[Any]]):
         max_tasks: int,
         finished_ttl_s: float = 3600.0,
         idle_ttl_s: float = 3600.0,
+        cross_owner_min_age_s: float = 600.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.max_tasks = max_tasks
         self.per_owner = max(1, max_tasks // 4)
         self.finished_ttl_s = finished_ttl_s
         self.idle_ttl_s = idle_ttl_s
+        self.cross_owner_min_age_s = cross_owner_min_age_s
         self.clock = clock
         self._spaces: dict[str, _Space] = {}
         self._task_owner: dict[str, str] = {}  # in creation order, across owners
@@ -208,13 +213,12 @@ class TaskStore(Storage[list[Any]]):
         own_victim: tuple[str, str] | None,
         any_victim: Callable[[], tuple[str, str] | None],
     ) -> tuple[str, str] | None:
-        """What to drop for one more: nothing below the caps, the owner's own at its cap, else the oldest of anyone."""
-        if own >= self.per_owner:
-            victim = own_victim
-        elif total >= self.max_tasks:
-            victim = any_victim()
-        else:
+        """What to drop for one more: nothing below the caps; else the owner's own, else (store full) an old one of anyone."""
+        if own < self.per_owner and total < self.max_tasks:
             return None
+        victim = own_victim
+        if victim is None and own < self.per_owner:
+            victim = any_victim()
         if victim is None:
             raise TooManyTasks()
         return victim
@@ -238,16 +242,22 @@ class TaskStore(Storage[list[Any]]):
 
     def _oldest_idle_context(self) -> tuple[str, str] | None:
         best: tuple[int, str, str] | None = None
+        now = self.clock()
         for owner, space in self._spaces.items():
             for context_id in space.idle_contexts():
                 rank = space.contexts[context_id].rank
+                if now - space.contexts[context_id].used_at < self.cross_owner_min_age_s:
+                    continue
                 if best is None or rank < best[0]:
                     best = (rank, owner, context_id)
         return (best[1], best[2]) if best else None
 
     def _oldest_finished_task(self) -> tuple[str, str] | None:
+        now = self.clock()
         for task_id, owner in self._task_owner.items():
-            if self._spaces[owner].tasks[task_id]['status']['state'] in FINAL_STATES:
+            if self._spaces[owner].tasks[task_id]['status']['state'] in FINAL_STATES and (
+                now - self._finished_at.get(task_id, now) >= self.cross_owner_min_age_s
+            ):
                 return owner, task_id
         return None
 

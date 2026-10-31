@@ -237,19 +237,29 @@ async def test_a_run_reads_and_writes_the_conversation_of_its_owner_only(server)
     assert 'ctx-other' not in spaces[a].contexts and history_a != spaces[a].contexts['ctx-w'].history
 
 
-async def test_a_full_store_makes_room_with_the_oldest_finished_work_of_anyone():
+async def test_a_full_store_reclaims_only_old_finished_work_of_other_owners():
     app, model, model_client = await start({'MAX_TASKS': '8'})
     async with app.router.lifespan_context(app):
         async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
             server = Server(client, app, model)
             store = server.storage
+            store.clock = clock = Clock()
             tasks = []
             for n in range(4):  # four owners, two finished tasks and two conversations each: the store is full
                 for m in range(2):
                     task = await server.created(f'token-{n}', context_id=f'ctx-{n}-{m}')
                     await server.wait_for(task['id'], 'completed')
                     tasks.append(task['id'])
+                    clock.now += 1
             assert len(store._task_owner) == 8 and store._context_count() == 8
+
+            # Everything is young: the newcomer is refused and nobody loses anything.
+            clock.now += 300
+            assert (await server.send('token-new', context_id='ctx-new'))['error']['code'] == TOO_MANY
+            assert set(store._task_owner) == set(tasks) and store._context_count() == 8
+
+            # Past the minimum age (600 s) the oldest finished task and idle conversation of anyone are reclaimed.
+            clock.now += 400
             newcomer = await server.created('token-new', context_id='ctx-new')
             assert set(store._task_owner) == set(tasks[1:]) | {newcomer['id']}
             assert 'ctx-0-0' not in store._spaces[digest('token-0')].contexts
@@ -259,18 +269,45 @@ async def test_a_full_store_makes_room_with_the_oldest_finished_work_of_anyone()
     await model_client.aclose()
 
 
+async def test_a_full_store_drops_the_requesters_own_finished_work_whatever_its_age():
+    app, model, model_client = await start({'MAX_TASKS': '8'})
+    async with app.router.lifespan_context(app):
+        async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
+            server = Server(client, app, model)
+            store = server.storage
+            store.clock = Clock()
+            ids = {}
+            for token, count in (('token-1', 2), ('token-2', 2), ('token-3', 2), ('token-4', 1), ('token-5', 1)):
+                for m in range(count):
+                    task = await server.created(token, context_id=f'ctx-{token}-{m}')
+                    await server.wait_for(task['id'], 'completed')
+                    ids.setdefault(token, []).append(task['id'])
+            assert len(store._task_owner) == 8
+            # token-4 is below its own cap of 2, the store is full and everything is young: only its own goes.
+            fresh = await server.created('token-4', context_id='ctx-fresh')
+            others = {i for token, found in ids.items() if token != 'token-4' for i in found}
+            assert others <= set(store._task_owner) and ids['token-4'][0] not in store._task_owner
+            assert fresh['id'] in store._task_owner
+    await model_client.aclose()
+
+
 async def test_a_store_full_of_work_in_flight_refuses_and_drops_nothing():
     app, model, model_client = await start({'MAX_TASKS': '4'}, delay=0.3)
     async with app.router.lifespan_context(app):
         async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
             server = Server(client, app, model)
+            server.storage.clock = clock = Clock()
             tasks = [await server.created(f'token-{n}', context_id=f'ctx-{n}') for n in range(4)]
+            clock.now += 10_000  # far past any age: work in flight is never reclaimed
             refused = await server.send('token-new', context_id='ctx-new')
             assert refused['error'] == {'code': TOO_MANY, 'message': 'Too many tasks'}
             assert set(server.storage._task_owner) == {t['id'] for t in tasks}
             assert server.storage._context_count() == 4
             for task in tasks:
                 await server.wait_for(task['id'], 'completed')
+            # Finished, but young: still not reclaimed. Once old enough it is.
+            assert (await server.send('token-new', context_id='ctx-new'))['error']['code'] == TOO_MANY
+            clock.now += 601
             assert 'error' not in await server.send('token-new', context_id='ctx-new')
     await model_client.aclose()
 

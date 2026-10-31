@@ -33,6 +33,8 @@ class Settings:
     """How long a finished task is kept."""
     idle_context_ttl_s: float
     """How long a conversation without a task in flight is kept after its last use."""
+    cross_owner_min_age_s: float
+    """How old another caller's finished task or idle conversation must be to be reclaimed when the store is full."""
     shutdown_grace_s: float
     model_timeout_s: float
     log_level: str
@@ -96,6 +98,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         max_tasks=_int(env, 'MAX_TASKS', 1000),
         finished_task_ttl_s=_float(env, 'FINISHED_TASK_TTL_S', 3600.0),
         idle_context_ttl_s=_float(env, 'IDLE_CONTEXT_TTL_S', 3600.0),
+        cross_owner_min_age_s=_float(env, 'CROSS_OWNER_MIN_AGE_S', 600.0),
         shutdown_grace_s=_float(env, 'SHUTDOWN_GRACE_S', 10.0),
         model_timeout_s=_float(env, 'MODEL_TIMEOUT_S', 120.0),
         log_level=env.get('LOG_LEVEL', 'info').strip().lower() or 'info',

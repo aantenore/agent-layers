@@ -92,7 +92,8 @@ async def test_without_a_secret_the_header_is_not_needed():
 def test_retention_times_default_to_an_hour_and_are_configurable():
     settings = load_settings(BASE)
     assert settings.finished_task_ttl_s == settings.idle_context_ttl_s == 3600.0
-    settings = load_settings({**BASE, 'FINISHED_TASK_TTL_S': '60', 'IDLE_CONTEXT_TTL_S': '120.5'})
-    assert (settings.finished_task_ttl_s, settings.idle_context_ttl_s) == (60.0, 120.5)
+    assert settings.cross_owner_min_age_s == 600.0
+    settings = load_settings({**BASE, 'FINISHED_TASK_TTL_S': '60', 'IDLE_CONTEXT_TTL_S': '120.5', 'CROSS_OWNER_MIN_AGE_S': '30'})
+    assert (settings.finished_task_ttl_s, settings.idle_context_ttl_s, settings.cross_owner_min_age_s) == (60.0, 120.5, 30.0)
     with pytest.raises(SettingsError, match='FINISHED_TASK_TTL_S'):
         load_settings({**BASE, 'FINISHED_TASK_TTL_S': '0'})

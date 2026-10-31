@@ -39,7 +39,9 @@ def create_app(
     """The ASGI app. `agent` and `http_client` replace the gateway-backed ones (tests)."""
     client = http_client or model_http_client(settings)
     the_agent = agent or build_agent(spec, settings, client)
-    store = TaskStore(settings.max_tasks, settings.finished_task_ttl_s, settings.idle_context_ttl_s)
+    store = TaskStore(
+        settings.max_tasks, settings.finished_task_ttl_s, settings.idle_context_ttl_s, settings.cross_owner_min_age_s
+    )
     storage = CallerStorage(store)
     broker = CallerBroker()
     worker = CallerWorker(
