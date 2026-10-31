@@ -139,6 +139,20 @@ test('model route returns one guarded choice: n > 1 is refused, logprobs and ext
   assert.doesNotMatch(JSON.stringify(chunks), /a@b\.co|other choice/);
 });
 
+test('model route: raw backend parts and media never reach the caller, only the guarded text', async () => {
+  nextReply = {
+    model: 'mock', finish: 'end',
+    message: { role: 'assistant', parts: [
+      { type: 'text', text: 'see ' }, { type: 'openai.part', part: { type: 'output_text_extra', text: 'jane@example.com' } } as never,
+      { type: 'media', mediaType: 'image/png', url: 'https://x.test/jane@example.com.png' }, { type: 'text', text: 'above' },
+    ] },
+  };
+  const body = await (await post({ model: 'fast', messages: [{ role: 'user', content: 'ping' }] })).json() as Record<string, any>;
+  assert.deepEqual(body.choices[0].message, { role: 'assistant', content: 'see above' });
+  const chunks = await frames(await post({ model: 'fast', stream: true, messages: [{ role: 'user', content: 'ping' }] }));
+  assert.doesNotMatch(JSON.stringify([body, chunks]), /jane@example\.com/);
+});
+
 test('reasoning: true returns the (guarded) reasoning on model routes', async () => {
   const withReasoning = await createOpenAICompatibleChannel({ models: { fast: 'mock' }, reasoning: true }).mount!(host);
   nextReply = { model: 'mock', finish: 'end', message: { role: 'assistant', parts: [{ type: 'reasoning', text: 'think' }, { type: 'text', text: 'pong' }] } };

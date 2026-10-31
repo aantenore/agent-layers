@@ -185,22 +185,14 @@ export function messageIn(m: unknown, resolveRole: (role: string) => string = de
 
 const callOut = (c: CallPart): Json => ({ id: c.id, type: 'function', function: { name: c.tool, arguments: c.invalid ?? JSON.stringify(c.args ?? {}) } });
 
-export interface MessageOutOptions {
-  /** Send reasoning parts (default false). */
-  reasoning?: boolean;
-  /** Restore the wire role and the extra message fields kept in ext (default true). */
-  restore?: boolean;
-}
-
 /**
  * One language message as wire messages: a `tool` message gives one wire message per result part (`ok` has no wire
  * field). Reasoning parts are sent only with `reasoning: true`, under `reasoning_content` (or `reasoning` when the part
  * came from that field).
  */
-export function messageOut(m: Message, opts: MessageOutOptions = {}): Json[] {
-  const restore = opts.restore !== false;
-  const role = (restore ? str(m.ext?.[EXT.role]) : undefined) ?? m.role;
-  const fields = restore && isRecord(m.ext?.[EXT.fields]) ? m.ext![EXT.fields] as Json : {};
+export function messageOut(m: Message, opts: { reasoning?: boolean } = {}): Json[] {
+  const role = str(m.ext?.[EXT.role]) ?? m.role;
+  const fields = isRecord(m.ext?.[EXT.fields]) ? m.ext![EXT.fields] as Json : {};
   if (m.role === 'tool') {
     return m.parts.filter((p): p is ResultPart => p.type === 'result').map((p) => ({ ...fields, role, tool_call_id: p.callId, content: p.text }));
   }
@@ -355,12 +347,22 @@ export function replyOut(reply: ModelReply, envelope: Envelope = {}, core?: (f: 
 }
 
 /**
- * A language reply as the inbound channel answers it: one choice built from the guarded message only. Nothing kept in
- * ext is re-emitted (other choices, log probabilities, extra message or response fields), since output guards never
- * read it; reasoning only with `reasoning: true`.
+ * A language reply as the inbound channel answers it: one choice built only from what the output guards read. The
+ * content is the text parts joined; tool calls pass as calls; reasoning only with `reasoning: true`. Media and raw
+ * backend parts are dropped, and nothing kept in ext is re-emitted (other choices, log probabilities, extra message
+ * or response fields).
  */
 export function replyToCaller(reply: ModelReply, envelope: Envelope, opts: { reasoning?: boolean; core?: (f: string) => string | undefined } = {}): Json {
-  const message = { ...messageOut(reply.message, { reasoning: opts.reasoning === true, restore: false })[0], role: 'assistant' };
+  const parts = reply.message.parts;
+  const texts = parts.filter((p): p is TextPart => p.type === 'text');
+  const calls = callsOf(reply.message);
+  const reasoning = opts.reasoning ? parts.filter((p): p is ReasoningPart => p.type === 'reasoning').map((p) => p.text).join('') : '';
+  const message: Json = {
+    role: 'assistant',
+    content: !texts.length && calls.length ? null : texts.map((p) => p.text).join(''),
+    ...(reasoning ? { reasoning_content: reasoning } : {}),
+    ...(calls.length ? { tool_calls: calls.map(callOut) } : {}),
+  };
   const usage = usageOut(reply.usage);
   return {
     ...(reply.id ? { id: reply.id } : {}),

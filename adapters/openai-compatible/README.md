@@ -81,9 +81,10 @@ model endpoint: `base_url = <gateway>/v1`, `api_key = <a credential the identity
     caller's own agent loop keeps working. Only known request fields cross (`temperature`, `max_tokens`,
     `max_completion_tokens`, `stop`, and the passthrough fields as `ext["openai.*"]`); a caller cannot replace the
     model or the guarded messages. Role aliases and finish values added to the stack's vocabularies are resolved here.
-    The answer is one choice built from the guarded message only: `n` other than 1 is a 400, `logprobs` and
-    `top_logprobs` are dropped, and nothing the model adapter kept in `ext` (other choices, log probabilities, extra
-    message or response fields) is returned. Reasoning is returned only with `reasoning: true`, after the output
+    The answer is one choice built only from what the output guards read: the text parts joined, plus tool calls.
+    Media and raw backend content parts are dropped. `n` other than 1 is a 400, `logprobs` and `top_logprobs` are
+    dropped, and nothing the model adapter kept in `ext` (other choices, log probabilities, extra message or response
+    fields) is returned. Reasoning is returned only with `reasoning: true`, after the output
     guards, which read reasoning parts as well as text.
   - **`agent:<name>`**: runs that agent through the runtime with the caller and the request's trace context, and
     returns its answer. The run id is in the `x-agent-run-id` header. `completed` ends with `finish_reason: "stop"`;
