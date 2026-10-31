@@ -80,6 +80,9 @@ flowchart LR
 - Whether the content is acceptable is guardrail; who may do what is [identity](identity.md).
 - `block` on `input` or `output` ends the run with status `stopped` and the structured reason `{ code: "guard_block", layer: "guardrail", by: <guard>, stage }`; on
   `tool_args` the call is denied; on `tool_result` the result is withheld. `redact` replaces the text.
+- `tool_result` guards check the result text and, separately, the canonical JSON of the structured `data` that
+  channels pass on (the MCP server returns it as structured content). A block on either withholds both; a redacted
+  `data` is parsed back, and dropped with `ext["sdk.data_dropped"]: true` when it no longer parses.
 - Guards of a stage run in configuration order; a guard that fails counts as a block (fail closed).
 - Every block and redact is emitted to [telemetry](telemetry.md) (`agent.guard.action`, `agent.guard.actions`) without the sensitive text.
 

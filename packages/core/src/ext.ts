@@ -1,7 +1,7 @@
 import type { Ext } from './ports/base.ts';
 import { isPlainObject } from './util.ts';
 
-/** Namespace reserved for keys the core writes (`sdk.raw_score`, `sdk.rank`, `sdk.approval`, `sdk.outcome`). */
+/** Namespace reserved for keys the core writes (`sdk.raw_score`, `sdk.rank`, `sdk.approval`, `sdk.outcome`, `sdk.data_dropped`). */
 export const SDK_NAMESPACE = 'sdk';
 
 /** Namespaces adapters may not use for ext keys or event types: the core's own. */

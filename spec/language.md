@@ -135,6 +135,7 @@ Core-written keys:
 | `sdk.raw_score` | `Passage` | The source's own score, before fusion. |
 | `sdk.rank` | `Passage` | Rank in its own source, starting at 1. |
 | `sdk.approval` | `ToolResult` | Approval id, set when a governed call is waiting for a person. |
+| `sdk.data_dropped` | `ToolResult` | `true` when a `tool_result` guard redacted the structured `data` into text that is no longer JSON, so `data` was dropped. |
 | `sdk.outcome` | `ToolResult` | How a governed tool call ended: `ok`, `error`, `denied`, `blocked`, `redacted` or `pending`; the same value as the `agent.tool.outcome` attribute. |
 
 The namespaces `sdk`, `agent`, `run`, `model` and `tool` are reserved for the core: adapters use none of them for `ext` keys or event types.

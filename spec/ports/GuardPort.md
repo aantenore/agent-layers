@@ -48,6 +48,7 @@ Members:
 - Fail closed: a guard that rejects or crashes counts as a block with the fixed reason `guard error`, never the error's message (it can echo the inspected text or a backend's credentials). A `redact` verdict without `text` also counts as a block.
 - Effects of a block depend on the stage. At `input` and `output` the model call fails with a guardrail error and the run ends with status `stopped` and reason `{code: "guard_block", layer: "guardrail", by: <guard>, stage}`. At `tool_args` the tool is not called and the model gets a result with `ok: false`. At `tool_result` the result is withheld and replaced by a result with `ok: false`.
 - A redaction of `tool_args` must still be a valid JSON object, otherwise the call is blocked.
+- At `tool_result` the pipeline checks the result's `text` and, as a second check, the canonical JSON of its `data` (sorted keys). A block on either withholds the whole result. A redacted `data` is parsed back into `data`; when the redacted text is no longer valid JSON, `data` is dropped and the result carries `ext["sdk.data_dropped"] = true`.
 - Streaming output is buffered when an output guard exists, so no unchecked text is released.
 - A guard sees only the public caller; the raw `credential` never reaches it.
 - `check` should be deterministic for the same input, so that cached and replayed content gets the same verdict.
