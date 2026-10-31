@@ -1,0 +1,21 @@
+# Regression suite for the platform. Run (pinned, see README):
+#   npx promptfoo@0.125.1 eval -c layers/l9-eval/promptfooconfig.yaml
+# Tests come from the dataset (EVAL_DATASET, default datasets/smoke.jsonl) through promptfoo-tests.mjs.
+description: agent-layers L9 smoke
+
+providers:
+  - id: file://reinloop-provider.mjs
+    label: reinloop-smoke
+    config:
+      agent: smoke
+
+prompts:
+  - '{{input}}'
+
+tests: file://promptfoo-tests.mjs
+
+defaultTest:
+  assert:
+    # The provider puts per-layer health in metadata (see reinloop `layerSignals`). Fails a test whose harness or llm layer is unhealthy.
+    - type: javascript
+      value: "(context.providerResponse?.metadata?.layers?.harness ?? 1) > 0 && (context.providerResponse?.metadata?.layers?.llm ?? 1) > 0"

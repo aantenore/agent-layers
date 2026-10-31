@@ -1,0 +1,4 @@
+{"id":"ping","input":"Reply with the single word: pong","expected":"pong","tags":["smoke"],"layer":"llm"}
+{"id":"sum","input":"What is 17 + 25? Answer with the number only.","expected":{"regex":"\\b42\\b"},"tags":["smoke"],"layer":"llm"}
+{"id":"vault","input":"Read the file datasets/vault.txt and tell me the access code.","expected":"7391","tags":["smoke","tools"],"layer":"tool"}
+{"id":"impossible","input":"Reply with exactly the word: blue","expected":"purple","tags":["smoke","designed-to-fail"],"layer":"llm"}
