@@ -104,9 +104,12 @@ to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge
 
 - The gateway authenticates every request (`Authorization: Bearer ...`); the MCP session belongs to that caller, and
   a session id presented by another caller is answered like an unknown one (404).
-- Methods: `initialize` (returns `Mcp-Session-Id`; protocol versions 2025-06-18, 2025-03-26, 2024-11-05), `ping`,
-  `tools/list`, `tools/call`, `notifications/cancelled` (aborts the call in flight). Other methods answer `-32601`;
-  batches are refused. `DELETE /mcp` ends a session; `GET /mcp` (server-initiated streams) is not offered (405).
+- Two eras on the same endpoint. Legacy (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05): `initialize` (returns
+  `Mcp-Session-Id`; it answers the asked revision when served, else 2025-11-25, never an error), `ping`, `tools/list`,
+  `tools/call`, `notifications/cancelled` (aborts the call in flight). Modern (2026-07-28, stateless, no session):
+  `server/discover`, `tools/list`, `tools/call`, with the version in `params._meta` and the `MCP-Protocol-Version`,
+  `Mcp-Method` and `Mcp-Name` headers (mismatch: 400 `-32020`; unknown revision: 400 `-32022` listing the served ones;
+  unknown method: 404 `-32601`). Other legacy methods answer `-32601`; batches are refused. `DELETE /mcp` ends a session; `GET /mcp` (server-initiated streams) is not offered (405).
 - Sessions expire after `sessionTtlMs` idle and after `maxSessionAgeMs` in any case. They are capped per caller and in
   total: a caller over its cap loses its own least recently used session (calls running in it are aborted); a full
   server makes room by evicting the least recently used session of the authenticated caller that holds the most.

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { matchesAny, type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type ToolPort, type ToolSpec } from '@agent-layers/core';
-import { MCP_PROTOCOL_VERSION } from './client.ts';
 
 /** Options of the inbound descriptor. */
 export interface McpServerChannelOptions {
@@ -30,8 +29,27 @@ export interface McpServerChannelOptions {
   maxSessionsPerCaller?: number;
 }
 
-const SUPPORTED_VERSIONS = [MCP_PROTOCOL_VERSION, '2025-03-26', '2024-11-05'];
+/**
+ * Protocol revisions served on the same endpoint, latest first. Modern revisions are stateless (no handshake, no session:
+ * every request carries its version in `params._meta` and in headers); legacy revisions open a session with `initialize`.
+ */
+export const MCP_SERVER_VERSIONS = {
+  modern: ['2026-07-28'],
+  legacy: ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
+} as const;
+
 const SERVER_VERSION = '0.1.0';
+const LATEST_LEGACY = MCP_SERVER_VERSIONS.legacy[0];
+const ALL_VERSIONS: readonly string[] = [...MCP_SERVER_VERSIONS.modern, ...MCP_SERVER_VERSIONS.legacy];
+const isLegacy = (v: string) => (MCP_SERVER_VERSIONS.legacy as readonly string[]).includes(v);
+const isModern = (v: unknown): v is string => typeof v === 'string' && (MCP_SERVER_VERSIONS.modern as readonly string[]).includes(v);
+
+const META_VERSION = 'io.modelcontextprotocol/protocolVersion';
+const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo';
+/** Modern methods whose `Mcp-Name` header must repeat this body parameter. */
+const NAME_PARAM: Record<string, string> = { 'tools/call': 'name', 'resources/read': 'uri', 'prompts/get': 'name' };
+const HEADER_MISMATCH = -32020;
+const UNSUPPORTED_VERSION = -32022;
 
 interface Session { owner: string; anonymous: boolean; protocol: string; created: number; seen: number; inflight: Map<string | number, AbortController> }
 interface RpcRequest { jsonrpc: '2.0'; id?: string | number | null; method: string; params?: Record<string, unknown> }
@@ -42,8 +60,18 @@ class RpcError extends Error {
 }
 
 const rpcHeaders = { 'content-type': 'application/json' };
-const jsonError = (status: number, code: number, message: string, id: RpcRequest['id'] = null) =>
-  new Response(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }), { status, headers: rpcHeaders });
+const jsonError = (status: number, code: number, message: string, id: RpcRequest['id'] = null, data?: unknown) =>
+  new Response(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message, ...(data === undefined ? {} : { data }) } }), { status, headers: rpcHeaders });
+
+/** A header value that may carry non-ASCII text as `=?base64?<utf-8 in base64>?=`; null when malformed. */
+function decodeHeaderValue(value: string | null): string | null {
+  if (value === null) return null;
+  const m = /^=\?base64\?(.*)\?=$/.exec(value);
+  if (!m) return value;
+  const bytes = Buffer.from(m[1]!, 'base64');
+  if (bytes.toString('base64') !== m[1]) return null;
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return null; }
+}
 
 /**
  * The owner a request acts for: an authenticated caller's kind and subject. Anonymous callers cannot be told apart, so an
@@ -122,7 +150,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
         runId: randomUUID(), agent: name, signal, ...(ctx.identity ? { identity: ctx.identity } : {}),
       });
 
-      async function dispatch(msg: RpcRequest, session: Session, ctx: InboundContext): Promise<unknown> {
+      async function dispatch(msg: RpcRequest, inflight: Session['inflight'], ctx: InboundContext): Promise<unknown> {
         switch (msg.method) {
           case 'ping':
             return {};
@@ -139,13 +167,13 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
             if (!known) throw new RpcError(-32602, `unknown tool: ${tool}`);
             const controller = new AbortController();
             const key = msg.id ?? randomUUID();
-            session.inflight.set(key, controller);
+            inflight.set(key, controller);
             try {
               const out = await tools.callTool(tool, args as Record<string, unknown>, callContext(ctx, AbortSignal.any([ctx.signal, controller.signal])));
               const structured = out.data && typeof out.data === 'object' && !Array.isArray(out.data) ? { structuredContent: out.data } : {};
               return { content: [{ type: 'text', text: out.content }], isError: !!out.isError, ...structured };
             } finally {
-              session.inflight.delete(key);
+              inflight.delete(key);
             }
           }
           default:
@@ -160,6 +188,47 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
         return new Response(`event: message\ndata: ${JSON.stringify(body)}\n\n`, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', ...headers } });
       }
 
+      /** Stateless request of a modern revision: no session, the version and the routing headers travel with every request. */
+      async function postModern(req: Request, m: RpcRequest, meta: Record<string, unknown> | undefined, header: string | null, ctx: InboundContext, isRequest: boolean): Promise<Response> {
+        // Notifications are accepted, nothing to answer.
+        if (!isRequest) return new Response(null, { status: 202 });
+        const id = m.id ?? null;
+        const requested = meta?.[META_VERSION];
+        if (typeof requested !== 'string') return jsonError(400, -32602, `params._meta must carry ${META_VERSION}`, id);
+        const named = NAME_PARAM[m.method];
+        const nameValue = named ? m.params?.[named] : undefined;
+        if (header !== requested) return jsonError(400, HEADER_MISMATCH, 'MCP-Protocol-Version does not match the request', id);
+        if (req.headers.get('mcp-method') !== m.method) return jsonError(400, HEADER_MISMATCH, 'Mcp-Method does not match the request', id);
+        if (typeof nameValue === 'string' && decodeHeaderValue(req.headers.get('mcp-name')) !== nameValue) return jsonError(400, HEADER_MISMATCH, 'Mcp-Name does not match the request', id);
+        if (!isModern(requested)) return jsonError(400, UNSUPPORTED_VERSION, 'Unsupported protocol version', id, { supported: ALL_VERSIONS, requested });
+
+        // Results of this revision say they are complete; the lists and the discovery answer may be cached per caller only.
+        const complete = { resultType: 'complete' };
+        const cache = { ttlMs: 0, cacheScope: 'private' };
+        try {
+          switch (m.method) {
+            case 'server/discover':
+              return reply(req, {
+                jsonrpc: '2.0', id,
+                result: {
+                  ...complete, ...cache, supportedVersions: ALL_VERSIONS, capabilities: { tools: {} },
+                  _meta: { [META_SERVER_INFO]: { name: options.serverName ?? 'agent-layers', version: SERVER_VERSION } },
+                },
+              });
+            case 'tools/list':
+              return reply(req, { jsonrpc: '2.0', id, result: { ...complete, ...cache, ...(await dispatch(m, new Map(), ctx) as object) } });
+            case 'tools/call':
+              return reply(req, { jsonrpc: '2.0', id, result: { ...complete, ...(await dispatch(m, new Map(), ctx) as object) } });
+            default:
+              return jsonError(404, -32601, `method not found: ${m.method}`, id);
+          }
+        } catch (err) {
+          // Only protocol errors carry their message; anything else could echo an upstream body.
+          const e = err instanceof RpcError ? err : new RpcError(-32603, 'internal error');
+          return reply(req, { jsonrpc: '2.0', id, error: { code: e.code, message: e.message } });
+        }
+      }
+
       async function post(req: Request, ctx: InboundContext): Promise<Response> {
         if (!/^application\/json\s*(;|$)/i.test(req.headers.get('content-type') ?? '')) return jsonError(415, -32600, 'Content-Type must be application/json');
         let msg: unknown;
@@ -169,14 +238,20 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
         const m = msg as RpcRequest & { result?: unknown; error?: unknown };
         const isRequest = typeof m.method === 'string' && m.id !== undefined && m.id !== null;
         const version = req.headers.get('mcp-protocol-version');
-        if (version && !SUPPORTED_VERSIONS.includes(version)) return jsonError(400, -32600, `unsupported protocol version ${version}`, m.id ?? null);
+        const sessionHeader = req.headers.get('mcp-session-id');
+        const meta = m.params?._meta && typeof m.params._meta === 'object' && !Array.isArray(m.params._meta) ? (m.params._meta as Record<string, unknown>) : undefined;
+        // A request without a session that names a modern version (in its envelope or its header) is served statelessly.
+        if (m.method !== 'initialize' && !sessionHeader && (meta?.[META_VERSION] !== undefined || (version !== null && isModern(version)))) {
+          return postModern(req, m, meta, version, ctx, isRequest);
+        }
 
         if (m.method === 'initialize') {
           if (!isRequest) return jsonError(400, -32600, 'initialize must be a request');
           const id = randomUUID();
           if (!makeRoom(!ctx.identity, ownerOf(ctx, id))) return jsonError(429, -32000, 'too many sessions, try again later', m.id);
           const asked = typeof m.params?.protocolVersion === 'string' ? m.params.protocolVersion : '';
-          const protocol = SUPPORTED_VERSIONS.includes(asked) ? asked : MCP_PROTOCOL_VERSION;
+          // The server answers the asked revision when it serves it, else its latest legacy one; it never refuses a handshake.
+          const protocol = isLegacy(asked) ? asked : LATEST_LEGACY;
           const now = Date.now();
           sessions.set(id, { owner: ownerOf(ctx, id), anonymous: !ctx.identity, protocol, created: now, seen: now, inflight: new Map() });
           return reply(req, {
@@ -185,7 +260,8 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
           }, { 'mcp-session-id': id });
         }
 
-        const id = req.headers.get('mcp-session-id');
+        if (version && !isLegacy(version)) return jsonError(400, -32600, `unsupported protocol version ${version}`, m.id ?? null);
+        const id = sessionHeader;
         if (!id) return jsonError(400, -32600, 'missing Mcp-Session-Id: initialize first', m.id ?? null);
         const session = sessions.get(id);
         // A session of another caller looks exactly like an unknown one.
@@ -205,7 +281,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
           return new Response(null, { status: 202 });
         }
         try {
-          return reply(req, { jsonrpc: '2.0', id: m.id, result: await dispatch(m, session, ctx) });
+          return reply(req, { jsonrpc: '2.0', id: m.id, result: await dispatch(m, session.inflight, ctx) });
         } catch (err) {
           // Only protocol errors carry their message; anything else could echo an upstream body.
           const e = err instanceof RpcError ? err : new RpcError(-32603, 'internal error');
