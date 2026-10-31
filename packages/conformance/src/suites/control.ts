@@ -24,7 +24,7 @@ export async function checkCredentials(port: CredentialPort, f: { audience?: str
 }
 
 export const sampleAccess = (over: { tool?: string; risk?: 'read' | 'write' | 'exec'; roles?: string[]; kind?: 'user' | 'agent' } = {}): AccessRequest => ({
-  subject: { type: over.kind ?? 'user', id: 'conformance-user', properties: { roles: over.roles ?? [], scopes: [] } },
+  subject: { type: over.kind ?? 'user', id: 'conformance-user', properties: { roles: over.roles ?? [], scopes: [], authenticated: true } },
   action: { name: 'call' },
   resource: { type: 'tool', id: over.tool ?? 'conformance__read', properties: { risk: over.risk ?? 'read', agent: 'conformance' } },
   context: { args: {} },
@@ -37,6 +37,10 @@ export async function checkAuthorization(port: AuthorizationPort, f: Authorizati
   if (sample) c.all(conforms('access-decision', sample), 'decision');
   for (const [i, r] of (f.allow ?? []).entries()) c.expect((await c.attempt(`allow #${i}`, () => port.evaluate(r)))?.decision === true, `allow #${i}: expected decision true`);
   for (const [i, r] of (f.deny ?? []).entries()) c.expect((await c.attempt(`deny #${i}`, () => port.evaluate(r)))?.decision === false, `deny #${i}: expected decision false`);
+  const anon = sampleAccess({ risk: 'read' });
+  anon.subject = { type: 'anonymous', id: 'anonymous', properties: { roles: [], scopes: [], authenticated: false } };
+  const anonymous = await c.attempt('evaluate anonymous', () => port.evaluate(anon));
+  if (anonymous) c.expect(anonymous.decision !== true, 'anonymous: an unauthenticated subject must be denied');
   return c;
 }
 

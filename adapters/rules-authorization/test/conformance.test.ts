@@ -5,7 +5,7 @@ import { adapter } from '../src/index.ts';
 
 test('rules-authorization passes AuthorizationPort conformance', async () => {
   const report = await checkAdapter(adapter, {
-    options: { rules: [{ effect: 'allow', risk: ['read'] }] },
+    options: { rules: [{ effect: 'allow', risk: ['read'], when: { kind: 'user' } }] },
     fixtures: {
       allow: [sampleAccess({ risk: 'read' })],
       deny: [sampleAccess({ risk: 'exec' })],

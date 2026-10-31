@@ -26,6 +26,20 @@ test_unauthenticated_agent_denied if {
 	not agents.allow with input as r
 }
 
+test_unauthenticated_user_denied if {
+	r := json.patch(req("user", ["analyst"], "read"), [{"op": "replace", "path": "/subject/properties/authenticated", "value": false}])
+	not agents.allow with input as r
+}
+
+test_anonymous_denied if {
+	r := {
+		"subject": {"type": "anonymous", "id": "anonymous", "properties": {"roles": [], "scopes": [], "authenticated": false}},
+		"action": {"name": "call"},
+		"resource": {"type": "tool", "id": "t", "properties": {"risk": "read", "agent": "a"}},
+	}
+	not agents.allow with input as r
+}
+
 test_reason if {
 	d := agents.decision with input as req("user", ["viewer"], "exec")
 	d == {"allow": false, "reason": "exec tools are denied to everyone"}

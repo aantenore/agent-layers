@@ -63,7 +63,7 @@ export function toolAccessRequest(tool: string, spec: ToolSpec, args: unknown, c
 export function subjectOf(req: AccessRequest): PolicySubject {
   const subject = req.subject ?? ({} as Partial<AccessRequest['subject']>);
   const props = subject.properties ?? {};
-  const kind = subject.type === 'user' || subject.type === 'agent' ? subject.type : undefined;
+  const kind: 'user' | 'agent' | undefined = subject.type === 'user' ? 'user' : subject.type === 'agent' ? 'agent' : undefined;
   const authenticated = props.authenticated !== false;
   const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
   const risk = req.resource.properties?.risk;

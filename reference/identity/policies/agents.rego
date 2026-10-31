@@ -1,7 +1,9 @@
 # Tool-call authorization for agents. Input: an AccessRequest (see spec/schemas/access-request.json).
 #
-#   data.agents.allow     boolean, used by the reinloop `opa` adapter (default path agents/allow)
-#   data.agents.decision  { allow, reason }, the same decision with a reason (path agents/decision)
+#   data.agents.decision  { allow, reason }, the decision the `opa` adapter reads (default path agents/decision)
+#   data.agents.allow     boolean, the same decision without a reason
+#
+# Only authenticated subjects are allowed: an anonymous or unauthenticated request is always denied.
 package agents
 
 default allow := false
@@ -12,11 +14,14 @@ user_risks := {
 	"analyst": {"read", "write"},
 }
 
+authenticated if input.subject.properties.authenticated == true
+
 risk := object.get(input, ["resource", "properties", "risk"], null)
 
 roles := object.get(input, ["subject", "properties", "roles"], [])
 
 allow if {
+	authenticated
 	input.subject.type == "user"
 	some role in roles
 	risk in user_risks[role]
@@ -24,8 +29,8 @@ allow if {
 
 # The agent's own (authenticated, client-credentials) identity: read tools only.
 allow if {
+	authenticated
 	input.subject.type == "agent"
-	input.subject.properties.authenticated == true
 	risk == "read"
 }
 

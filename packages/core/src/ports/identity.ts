@@ -23,7 +23,7 @@ export interface CredentialPort extends PortBase {
 
 /** Authorization request: subject, action, resource, context. Schema: spec/schemas/access-request.json. */
 export interface AccessRequest {
-  subject: { type: string; id: string; properties?: { roles?: string[]; scopes?: string[]; [k: string]: unknown } };
+  subject: { type: 'user' | 'agent' | 'anonymous' | (string & {}); id: string; properties?: { roles?: string[]; scopes?: string[]; authenticated?: boolean; [k: string]: unknown } };
   action: { name: string; properties?: Record<string, unknown> };
   resource: { type: string; id: string; properties?: { risk?: ToolRiskLevel; agent?: string; [k: string]: unknown } };
   context?: { args?: unknown; [k: string]: unknown };

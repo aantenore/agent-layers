@@ -1,6 +1,6 @@
 # ApprovalPort
 
-Layer: `identity` (L6 Identity & access) · Version: 0.1.0 · Conformance: `checkApproval`
+Layer: `identity` (L6 Identity & access) · Version: 0.2.0 · Conformance: `checkApproval`
 
 ## Purpose
 
@@ -62,6 +62,7 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 
 ## Version history
 
+- 0.2.0 — the embedded access request may carry an `anonymous` subject; `subject.properties.authenticated` added
 - 0.1.0 — initial
 
 Example adapters: `memory-approval` (in-process store).
