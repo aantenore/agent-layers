@@ -15,6 +15,7 @@ from pydantic_ai import Agent
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import RunContext, ToolDefinition
 from pydantic_ai.usage import UsageLimits
 
@@ -60,12 +61,25 @@ def model_http_client(settings: Settings) -> httpx2.AsyncClient:
     return httpx2.AsyncClient(auth=CallerBearer(), timeout=settings.model_timeout_s)
 
 
+def model_settings(spec: AgentSpec) -> ModelSettings | None:
+    """The agent file's `settings` (language names) as Pydantic AI model settings; None without any."""
+    out = ModelSettings()
+    if isinstance(temperature := spec.settings.get('temperature'), int | float):
+        out['temperature'] = float(temperature)
+    if isinstance(max_output := spec.settings.get('maxOutputTokens'), int):
+        out['max_tokens'] = max_output
+    if isinstance(stop := spec.settings.get('stop'), list):
+        out['stop_sequences'] = list(stop)
+    return out or None
+
+
 def build_agent(spec: AgentSpec, settings: Settings, http_client: httpx2.AsyncClient) -> Agent[None, str]:
     uses_tools = bool(spec.tools) or spec.knowledge != ()
     return Agent(
         gateway_model(settings, model_alias(spec, settings), http_client),
         name=spec.name,
         instructions=spec.instructions or None,
+        model_settings=model_settings(spec),
         toolsets=[gateway_tools(settings, spec)] if uses_tools else [],
     )
 

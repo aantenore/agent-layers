@@ -63,7 +63,8 @@ gateway instead of the scripted one.
 ## The agent file
 
 `AGENT_FILE` is an agent Markdown file of agent-layers, read like the core reads it: `key: value` and `key: [a, b]`
-front matter between `---` fences, the body as instructions. The same file runs on the in-process runtimes and here.
+front matter between `---` fences (a one-line flow mapping for `settings`), the body as instructions. The same file
+runs on the in-process runtimes and here. A file with `params` is refused, as the core refuses it.
 
 | Key | Used as |
 |---|---|
@@ -72,13 +73,14 @@ front matter between `---` fences, the body as instructions. The same file runs 
 | `model` | Model alias of the gateway's OpenAI-compatible API (`GATEWAY_MODEL` overrides it) |
 | `tools` | Globs over the gateway's MCP tools (`<source>__<tool>`) |
 | `knowledge` | Knowledge sources, served by the gateway as `knowledge__<source>` tools; all when omitted |
+| `settings` | Model settings: `temperature`, `maxOutputTokens` (sent as `max_tokens`), `stop` |
 
 The model must be an alias such as `default` or `mock`, never `agent:<name>`: the gateway would run an agent of
 the stack again, and with this runtime that is this agent. Both the settings and the agent refuse it.
 
 ## Identity
 
-1. The gateway verifies the caller and runs the agent with the caller's identity.
+1. The gateway verifies the caller and runs the agent as that caller.
 2. The `a2a` runtime adapter asks the stack's credentials slot for a token for `auth.audience`, on behalf of the
    caller, and sends it as `Authorization: Bearer ...` with the A2A message.
 3. This agent requires that bearer on every JSON-RPC request (401 otherwise) and keeps it in memory beside the task
@@ -191,7 +193,7 @@ node --test runtimes/pydantic-ai/test-e2e.mjs   # from the repository root: gate
 
 The end-to-end test starts `agent-layers gateway --profile polyglot` and this agent on free ports, then checks that
 an A2A message and `agent:assistant` are answered through the gateway with the scripted model, that the tool call
-went through `/mcp` and was authorized (`authorize` and `execute_tool` spans), that requests without a credential
+went through `/mcp` and was authorized (`agent.access.check` and `agent.tool.call` spans), that requests without a credential
 are refused by both processes and a rejected credential fails the run, that no token appears in either process's
 output or in telemetry, and that both stop on SIGTERM. `POLYGLOT_LIVE=1` adds a run on `polyglot-local`, skipped
 when the model is not served.

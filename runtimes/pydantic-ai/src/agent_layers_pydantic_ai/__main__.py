@@ -10,7 +10,7 @@ import uvicorn
 from .agent import model_alias
 from .app import create_app
 from .settings import SettingsError, load_settings, warn_unsafe_limits
-from .spec import load_agent_spec
+from .spec import AgentFileError, load_agent_spec
 
 log = logging.getLogger('agent_layers_pydantic_ai')
 
@@ -20,7 +20,7 @@ def main() -> int:
         settings = load_settings()
         spec = load_agent_spec(settings.agent_file, settings.agent_name)
         alias = model_alias(spec, settings)
-    except (SettingsError, OSError) as err:
+    except (SettingsError, AgentFileError, OSError) as err:
         print(f'agent-layers-pydantic-ai: {err}', file=sys.stderr)
         return 2
     logging.basicConfig(level=settings.log_level.upper(), format='%(levelname)s %(name)s: %(message)s')

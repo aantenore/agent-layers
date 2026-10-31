@@ -150,12 +150,12 @@ describe('polyglot: Pydantic AI agent as the runtime of the stack', { skip: !has
     const ok = (path) => requests.filter((s) => s.attrs['url.path'] === path && s.attrs['http.response.status_code'] === 200 && s.attrs['gateway.authenticated'] === true);
     assert.ok(ok('/v1/chat/completions').length >= 4, 'model calls of the Python agent at /v1');
     assert.ok(ok('/mcp').length >= 2, 'tool calls of the Python agent at /mcp');
-    const allowed = spans(pair.telemetry, 'authorize').filter((s) => s.attrs['gen_ai.tool.name'] === 'util__convert_temperature' && s.attrs['policy.decision'] === 'allow');
+    const allowed = spans(pair.telemetry, 'agent.access.check').filter((s) => s.attrs['agent.tool.name'] === 'util__convert_temperature' && s.attrs['agent.access.decision'] === 'allow');
     assert.ok(allowed.length >= 2, 'authorization decisions for the tool');
-    const executed = spans(pair.telemetry, 'execute_tool').filter((s) => s.attrs['gen_ai.tool.name'] === 'util__convert_temperature' && s.attrs['tool.outcome'] === 'ok');
+    const executed = spans(pair.telemetry, 'agent.tool.call').filter((s) => s.attrs['agent.tool.name'] === 'util__convert_temperature' && s.attrs['agent.tool.outcome'] === 'ok');
     assert.ok(executed.length >= 2);
-    assert.ok(spans(pair.telemetry, 'guard.check').some((s) => s.attrs['guard.stage'] === 'tool_args'), 'tool guards ran');
-    assert.match(pair.gateway.output, /\[L6 identity\] authorize .*util__convert_temperature policy\.decision=allow/);
+    assert.ok(spans(pair.telemetry, 'agent.guard.check').some((s) => s.attrs['agent.guard.stage'] === 'tool_args'), 'tool guards ran');
+    assert.match(pair.gateway.output, /\[L6 identity\] agent\.access\.check .*util__convert_temperature agent\.access\.decision=allow/);
   });
 
   test('one trace spans gateway, A2A, the Python agent and its calls back to the gateway', async () => {
@@ -171,7 +171,7 @@ describe('polyglot: Pydantic AI agent as the runtime of the stack', { skip: !has
     // The Python agent's calls are children of the span that sent the A2A message.
     const callbacks = inTrace.filter((r) => r.name === 'gateway.request' && r.attrs['url.path'] !== '/a2a/assistant');
     assert.ok(callbacks.every((r) => r.parentSpanId === send.spanId));
-    assert.ok(inTrace.some((r) => r.name === 'execute_tool'), 'the tool call is in the same trace');
+    assert.ok(inTrace.some((r) => r.name === 'agent.tool.call'), 'the tool call is in the same trace');
   });
 
   test('requests without a credential are refused by the gateway and by the Python agent', async () => {
@@ -224,7 +224,7 @@ describe('polyglot-local: the same pair with a model served on this machine', { 
       const task = await a2aRun(`${pair.gw}/a2a/assistant`, DEV_TOKEN, 'Convert 100 C to Fahrenheit. Use the tool.');
       assert.equal(task.status.state, 'TASK_STATE_COMPLETED');
       assert.ok(answer(task).length > 0);
-      assert.ok(spans(pair.telemetry, 'chat').some((s) => s.attrs['gen_ai.request.model'] === model));
+      assert.ok(spans(pair.telemetry, 'agent.model.call').some((s) => s.attrs['agent.model.requested'] === model));
       for (const text of [pair.gateway.output, pair.agent.output]) assert.ok(!text.includes(DEV_TOKEN));
     } finally {
       await Promise.allSettled([stop(pair.gateway), stop(pair.agent)]);

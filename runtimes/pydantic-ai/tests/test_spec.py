@@ -2,8 +2,9 @@ from pathlib import Path
 
 import pytest
 
+from agent_layers_pydantic_ai.agent import model_settings
 from agent_layers_pydantic_ai.settings import SettingsError, load_settings
-from agent_layers_pydantic_ai.spec import load_agent_spec, matches_any, parse_front_matter
+from agent_layers_pydantic_ai.spec import AgentFileError, load_agent_spec, matches_any, parse_front_matter
 
 EXAMPLE_AGENT = Path(__file__).resolve().parents[3] / 'examples' / 'minimal' / 'agents' / 'assistant.md'
 
@@ -23,6 +24,25 @@ def test_front_matter_like_the_core_parser():
     assert meta == {'name': 'a', 'tools': ['x__*', 'y__z']}
     assert body == 'Body'
     assert parse_front_matter('  no front matter  ') == ({}, 'no front matter')
+
+
+def test_settings_are_read_and_params_refused_like_the_core(tmp_path):
+    file = tmp_path / 'a.md'
+    file.write_text('---\nmodel: m\nsettings: { temperature: 0, maxOutputTokens: 2048, stop: [END] }\n---\nhi')
+    spec = load_agent_spec(file)
+    assert spec.settings == {'temperature': 0, 'maxOutputTokens': 2048, 'stop': ['END']}
+    assert model_settings(spec) == {'temperature': 0.0, 'max_tokens': 2048, 'stop_sequences': ['END']}
+    file.write_text('---\nmodel: m\n---\nhi')
+    assert model_settings(load_agent_spec(file)) is None
+    file.write_text('---\nmodel: m\nparams: { temperature: 0 }\n---\nhi')
+    with pytest.raises(AgentFileError, match='params was removed'):
+        load_agent_spec(file)
+    file.write_text('---\nmodel: m\nsettings: { top_p: 1 }\n---\nhi')
+    with pytest.raises(AgentFileError, match='top_p'):
+        load_agent_spec(file)
+    file.write_text('---\nmodel: m\nsettings: { maxOutputTokens: 0 }\n---\nhi')
+    with pytest.raises(AgentFileError, match='maxOutputTokens'):
+        load_agent_spec(file)
 
 
 def test_globs_match_the_core_semantics():
