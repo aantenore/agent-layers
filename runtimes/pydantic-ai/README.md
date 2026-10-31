@@ -107,9 +107,13 @@ introspection endpoint:
 - Callers that share one credential share tasks. The static dev credentials of the `polyglot` profile hand every caller
   the same token.
 
-At most `MAX_TASKS` tasks are kept, with their owners: the oldest finished ones are dropped beyond it (a running task is
-never dropped). Conversations are capped at the same number; the least recently used one is dropped with its history,
-and its `contextId` is then free for the next caller.
+At most `MAX_TASKS` tasks and `MAX_TASKS` conversations are kept, and `MAX_TASKS // 4` of each per caller key. Beyond a
+cap the oldest finished task, or the least recently used conversation with no task in flight, is dropped (the caller's
+own first); a task in flight is never dropped. A caller at its cap with nothing to drop gets the JSON-RPC error -32000
+"Too many tasks for this caller". A dropped conversation leaves a tombstone naming its owner, so no other caller can
+claim its `contextId`; its owner can use it again with an empty history. Tombstones are bounded too (`MAX_TASKS`,
+oldest first), so a very old dropped `contextId` becomes free again. A run writes to its conversation only while the
+conversation still belongs to the owner of that run.
 
 Also refused: requests with an `Origin` header (the agent is called server to server) and, when bound to loopback,
 `Host` names that are not loopback ones. The agent card and `/healthz` are public.
@@ -126,7 +130,7 @@ Also refused: requests with an `Origin` header (the agent is called server to se
 | `A2A_PORT` | `9100` | Port of the A2A server |
 | `A2A_PUBLIC_URL` | `http://localhost:<port>/` | JSON-RPC URL written in the agent card |
 | `MAX_CONCURRENT_RUNS` | `8` | Runs in parallel |
-| `MAX_TASKS` | `1000` | Tasks, and conversations, kept in memory; the oldest finished ones are dropped beyond it |
+| `MAX_TASKS` | `1000` | Tasks, and conversations, kept in memory; a quarter of it per caller key (see Task ownership) |
 | `SHUTDOWN_GRACE_S` | `10` | On SIGTERM or SIGINT, how long runs in flight may finish before they are cancelled |
 | `MODEL_TIMEOUT_S` | `120` | Time limit of one model request |
 | `LOG_LEVEL` | `info` | Log level |

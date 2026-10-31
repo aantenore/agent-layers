@@ -8,6 +8,7 @@ verifies it. The token is never stored with the task, returned, or logged.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,6 +25,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 CALLER_TOKEN: ContextVar[str | None] = ContextVar('caller_token', default=None)
 
+RUN_OWNER: ContextVar[str | None] = ContextVar('run_owner', default=None)
+"""The owner key of the task being run: what its writes to the conversation history are checked against."""
+
 LOOPBACK_HOSTS = frozenset({'localhost', '127.0.0.1', '[::1]', '::1'})
 
 
@@ -39,6 +43,12 @@ def caller_token() -> str:
     if not token:
         raise MissingCaller()
     return token
+
+
+def owner_key() -> str | None:
+    """The owner of the request being handled: the digest of its bearer token, None outside a request."""
+    token = CALLER_TOKEN.get()
+    return hashlib.sha256(token.encode()).hexdigest() if token else None
 
 
 def bearer_of(header: str | None) -> str | None:
@@ -147,6 +157,7 @@ class CallerWorker(AgentWorker[Any, Any]):
         if task is not None and task['status']['state'] == 'canceled':
             return  # canceled before it started
         reset = CALLER_TOKEN.set(token)
+        reset_owner = RUN_OWNER.set(owner_key())
         try:
             with anyio.CancelScope() as scope:
                 self._scopes[task_id] = scope
@@ -155,6 +166,7 @@ class CallerWorker(AgentWorker[Any, Any]):
                 finally:
                     self._scopes.pop(task_id, None)
         finally:
+            RUN_OWNER.reset(reset_owner)
             CALLER_TOKEN.reset(reset)
 
     async def cancel_run(self, task_id: str) -> None:
