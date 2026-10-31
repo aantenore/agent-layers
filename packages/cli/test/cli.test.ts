@@ -140,7 +140,7 @@ test('deploy --dry-run plans through the deploy slot', async () => {
 });
 
 test('the generated offline test passes', () => {
-  const r = spawnSync(process.execPath, ['--conditions=source', '--test', 'tests/**/*.test.ts'], {
+  const r = spawnSync(process.execPath, ['--conditions=@agent-layers/source', '--test', 'tests/**/*.test.ts'], {
     cwd: dir, encoding: 'utf8', timeout: 120_000, env: { PATH: process.env.PATH, LLM_BASE_URL: 'http://127.0.0.1:9/v1' },
   });
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);

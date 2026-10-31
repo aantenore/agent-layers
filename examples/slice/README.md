@@ -22,8 +22,8 @@ The Pydantic AI agent (`runtimes/pydantic-ai`) calls the gateway back for its mo
 ## Run
 
 ```bash
-node --conditions=source scripts/slice.mjs                      # all tiers; starts and stops everything it needs
-node --conditions=source scripts/slice.mjs --only prototype     # no Docker, no model
+node --conditions=@agent-layers/source scripts/slice.mjs                      # all tiers; starts and stops everything it needs
+node --conditions=@agent-layers/source scripts/slice.mjs --only prototype     # no Docker, no model
 ```
 
 Pilot and production need Docker, `uv` and Ollama serving `lfm2.5:8b` (the LiteLLM group `fast`) and `qwen3:4b`

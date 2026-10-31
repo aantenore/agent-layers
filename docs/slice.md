@@ -11,7 +11,7 @@ production, one question per cell, faults on reinloop. The full
 matrix was recorded before 1.0, so span and event names in it are the old ones: `chat` is now `agent.model.call` and
 `knowledge.error` is `agent.knowledge.error`.
 
-Driver: [`scripts/slice.mjs`](../scripts/slice.mjs) (`node --conditions=source scripts/slice.mjs`). It brings up only
+Driver: [`scripts/slice.mjs`](../scripts/slice.mjs) (`node --conditions=@agent-layers/source scripts/slice.mjs`). It brings up only
 the reference services each tier needs and takes them down with their volumes at the end. Every wait has a time
 limit. `--minimal` asks only the tool question, on reinloop and Pydantic AI, skips the comparison cell and injects
 the faults on reinloop only; `--inject <runtimes|none>` and `--inject-model <group>` choose where the faults run and on
@@ -110,7 +110,7 @@ the gateway to loopback with `allowedHosts`.
 ### After 1.0: hosted model and Pydantic AI faults
 
 Two runs on 2026-10-31, `KEYCLOAK_PORT=18080`, `OPENAPI_MCP_PORT=8091`, gateway on port 8799, tool question as alice,
-one run per cell. Run A: `node --env-file=.env --conditions=source scripts/slice.mjs --only pilot,production --minimal
+one run per cell. Run A: `node --env-file=.env --conditions=@agent-layers/source scripts/slice.mjs --only pilot,production --minimal
 --inject pydantic --inject-model fast`. Run B, the same cells on the local model: `... --minimal --inject none`. Each
 run took about two minutes from the first `docker compose up` to the last `down -v`; nothing was left running.
 
@@ -150,7 +150,7 @@ checks passed, `production-basic` refused by the readiness gate, no credential /
 
 ### After 1.0: minimal re-run
 
-`node --conditions=source scripts/slice.mjs --only pilot,production --minimal`, 2026-10-31, model group `fast`
+`node --conditions=@agent-layers/source scripts/slice.mjs --only pilot,production --minimal`, 2026-10-31, model group `fast`
 (`lfm2.5:8b` on the host Ollama), `KEYCLOAK_PORT=18080`, `OPENAPI_MCP_PORT=8091`, gateway on port 8799, Keycloak
 recreated so the realm's fixed service-account id is imported. The tool question as alice, one run per cell.
 

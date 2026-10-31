@@ -25,7 +25,7 @@ same template, generated.
 
 Run `init` through the scoped package name: the unscoped `agent-layers` name on npm is an unrelated package. After
 `npm install` the CLI is a dev dependency of the project, so `npx agent-layers` runs the local binary. Inside this
-repository, use `node --conditions=source packages/cli/src/cli.ts <command>` instead of `npx`.
+repository, use `node --conditions=@agent-layers/source packages/cli/src/cli.ts <command>` instead of `npx`.
 
 ## Concepts in one paragraph each
 

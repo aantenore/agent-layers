@@ -95,10 +95,10 @@ git clone https://github.com/aantenore/agent-layers && cd agent-layers
 npm install
 
 cd examples/minimal
-node --conditions=source ../../packages/cli/src/cli.ts check      # config, adapters, readiness, conformance
-node --conditions=source ../../packages/cli/src/cli.ts dev        # talk to the agent, one trace line per layer
-node --conditions=source --test "tests/**/*.test.ts"              # smoke dataset, offline
-node --conditions=source ../../packages/cli/src/cli.ts diff prototype production
+node --conditions=@agent-layers/source ../../packages/cli/src/cli.ts check      # config, adapters, readiness, conformance
+node --conditions=@agent-layers/source ../../packages/cli/src/cli.ts dev        # talk to the agent, one trace line per layer
+node --conditions=@agent-layers/source --test "tests/**/*.test.ts"              # smoke dataset, offline
+node --conditions=@agent-layers/source ../../packages/cli/src/cli.ts diff prototype production
 ```
 
 Outside the repository, start from the published packages: `npx @agent-layers/cli init my-agent`, `npm install`,

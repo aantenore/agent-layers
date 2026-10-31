@@ -5,8 +5,8 @@
 //   npm run docs:adapters           rewrite the section
 //   node scripts/gen-adapters-catalog.mjs --check   exit 1 when the section is out of date
 //
-// Adapter packages ship TypeScript behind the `source` export condition, so the script re-runs itself with
-// `node --conditions=source`. A package that fails to import is listed as "load error" instead of aborting.
+// Adapter packages ship TypeScript behind the `@agent-layers/source` export condition, so the script re-runs itself with
+// `node --conditions=@agent-layers/source`. A package that fails to import is listed as "load error" instead of aborting.
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,7 +21,7 @@ const cell = (value) => String(value ?? '').replace(/\|/g, '\\|').replace(/\s+/g
 
 function entryOf(pkg) {
   const dot = pkg.exports?.['.'];
-  const entry = typeof dot === 'string' ? dot : dot?.source ?? dot?.import ?? dot?.default ?? pkg.main ?? 'index.js';
+  const entry = typeof dot === 'string' ? dot : dot?.['@agent-layers/source'] ?? dot?.import ?? dot?.default ?? pkg.main ?? 'index.js';
   return typeof entry === 'string' ? entry : entry?.default ?? 'index.js';
 }
 

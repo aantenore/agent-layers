@@ -1,7 +1,7 @@
 // The vertical slice: the same agent, tools and knowledge (examples/slice) on three runtimes and three profiles,
 // through the gateway, with failure injection in production and layer attribution from the recorded telemetry.
 //
-//   node --conditions=source scripts/slice.mjs [--only prototype,pilot,production] [--minimal] [--keep]
+//   node --conditions=@agent-layers/source scripts/slice.mjs [--only prototype,pilot,production] [--minimal] [--keep]
 //     [--inject reinloop,pydantic|none] [--inject-model fast]
 //
 // Starts what each step needs (reference services with docker compose, the gateway, the Python agent) with bounded
@@ -24,7 +24,7 @@ const OUT = join(SLICE, '.agent-layers');
 const CLI = join(ROOT, 'packages', 'cli', 'src', 'cli.ts');
 const PY_DIR = join(ROOT, 'runtimes', 'pydantic-ai');
 const PYTHON = join(PY_DIR, '.venv', 'bin', 'python');
-const NODE_ARGS = ['--conditions=source', '--disable-warning=ExperimentalWarning'];
+const NODE_ARGS = ['--conditions=@agent-layers/source', '--disable-warning=ExperimentalWarning'];
 
 const args = process.argv.slice(2);
 const onlyAt = args.indexOf('--only');
@@ -52,7 +52,7 @@ const REAL_MODEL = process.env.HOSTED_MODEL ? 'hosted' : 'fast';
 const INJECT_MODEL = opt('inject-model') ?? REAL_MODEL;
 
 const [{ scoreLayers }, { ATTR, SPAN }] = await Promise.all([import('@agent-layers/adapter-layer-signals'), import('@agent-layers/core')]).catch(() => {
-  console.error('run with: node --conditions=source scripts/slice.mjs');
+  console.error('run with: node --conditions=@agent-layers/source scripts/slice.mjs');
   process.exit(2);
 });
 

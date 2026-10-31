@@ -10,12 +10,12 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const SKIP_DIRS = new Set(['node_modules', 'dist', '__pycache__']);
 const skipDir = (name) => SKIP_DIRS.has(name) || (name.startsWith('.') && name !== '.github');
 
-/** Adapter packages ship TypeScript behind the `source` export condition. Re-run under it when it is missing. */
+/** Adapter packages ship TypeScript behind the `@agent-layers/source` export condition. Re-run under it when it is missing. */
 export function ensureSourceCondition(scriptUrl) {
-  const active = process.execArgv.some((a) => a === '--conditions=source' || a === '-C=source')
-    || /(--conditions=source|-C source)/.test(process.env.NODE_OPTIONS ?? '');
+  const active = process.execArgv.some((a) => a === '--conditions=@agent-layers/source' || a === '-C=@agent-layers/source')
+    || /(--conditions=@agent-layers\/source|-C @agent-layers\/source)/.test(process.env.NODE_OPTIONS ?? '');
   if (active) return;
-  const res = spawnSync(process.execPath, ['--conditions=source', '--disable-warning=ExperimentalWarning', fileURLToPath(scriptUrl), ...process.argv.slice(2)], { stdio: 'inherit' });
+  const res = spawnSync(process.execPath, ['--conditions=@agent-layers/source', '--disable-warning=ExperimentalWarning', fileURLToPath(scriptUrl), ...process.argv.slice(2)], { stdio: 'inherit' });
   process.exit(res.status ?? 1);
 }
 

@@ -20,7 +20,7 @@
   },
   "exports": {
     ".": {
-      "source": "./src/index.ts",
+      "@agent-layers/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
@@ -34,8 +34,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "gen:schema": "node --conditions=source scripts/gen-schema.ts",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "gen:schema": "node --conditions=@agent-layers/source scripts/gen-schema.ts",
+    "test": "node --conditions=@agent-layers/source --test \"test/**/*.test.ts\"",
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "devDependencies": {

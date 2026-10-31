@@ -94,7 +94,7 @@ async function startPair(profile, dir) {
   const [gwPort, agentPort] = [await freePort(), await freePort()];
   const telemetry = join(dir, `${profile}-telemetry.jsonl`);
   const env = { ...process.env, A2A_AGENT_URL: `http://localhost:${agentPort}`, POLYGLOT_TELEMETRY_PATH: telemetry };
-  const gateway = start('gateway', process.execPath, ['--conditions=source', '--disable-warning=ExperimentalWarning', CLI, 'gateway', '--profile', profile, '--port', String(gwPort)], { cwd: EXAMPLE, env });
+  const gateway = start('gateway', process.execPath, ['--conditions=@agent-layers/source', '--disable-warning=ExperimentalWarning', CLI, 'gateway', '--profile', profile, '--port', String(gwPort)], { cwd: EXAMPLE, env });
   const agent = start('python agent', PYTHON, ['-m', 'agent_layers_pydantic_ai'], {
     cwd: HERE,
     env: { ...process.env, AGENT_FILE: join(EXAMPLE, 'agents', 'assistant.md'), GATEWAY_URL: `http://127.0.0.1:${gwPort}`, A2A_PORT: String(agentPort), MODEL_PRICING: JSON.stringify({ default: PRICE }) },

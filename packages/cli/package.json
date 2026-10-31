@@ -23,7 +23,7 @@
   },
   "exports": {
     ".": {
-      "source": "./src/main.ts",
+      "@agent-layers/source": "./src/main.ts",
       "types": "./dist/main.d.ts",
       "default": "./dist/main.js"
     }
@@ -36,7 +36,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "test": "node --conditions=@agent-layers/source --test \"test/**/*.test.ts\"",
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "dependencies": {

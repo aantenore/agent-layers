@@ -21,7 +21,7 @@
   },
   "exports": {
     ".": {
-      "source": "./src/index.ts",
+      "@agent-layers/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -31,7 +31,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --conditions=source --test \"test/**/*.test.ts\"",
+    "test": "node --conditions=@agent-layers/source --test \"test/**/*.test.ts\"",
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
