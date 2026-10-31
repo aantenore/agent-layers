@@ -45,15 +45,18 @@ describe('from telemetry records', () => {
     assert.equal(byLayer([span('execute_tool', 'tool', { 'tool.outcome': 'denied' })]).tool, undefined);
   });
 
-  test('knowledge: failed and empty searches, and knowledge-layer tools', () => {
+  test('knowledge: failed searches and knowledge-layer tools; an empty search is reported, not failed', () => {
     const s = byLayer([
       span('knowledge.search', 'knowledge', { 'knowledge.passages': 3 }),
       span('knowledge.search', 'knowledge', { 'knowledge.passages': 0 }),
       span('knowledge.search', 'knowledge', {}, 'error'),
       span('execute_tool', 'knowledge', { 'tool.outcome': 'error' }),
     ]).knowledge!;
-    assert.equal(s.value, 0.25);
-    assert.match(s.reason!, /1 searches failed, 1 returned no passages, 1 knowledge tool errors \(of 4\)/);
+    assert.equal(s.value, 0.5);
+    assert.match(s.reason!, /1 searches failed, 1 knowledge tool errors \(of 4\); 1 returned no passages/);
+    const offTopic = byLayer([span('knowledge.search', 'knowledge', { 'knowledge.passages': 0 })]).knowledge!;
+    assert.equal(offTopic.value, 1, 'a question the sources do not cover is not a knowledge failure');
+    assert.match(offTopic.reason!, /1 searches ok; 1 returned no passages/);
   });
 
   test('llm: errored calls and cut-off answers', () => {

@@ -82,16 +82,19 @@ export function scoreLayers(items: readonly SignalItem[], run: SignalRun): EvalS
     scores.set('tool', score('tool', 1 - bad.length / total, bad.length ? `${bad.length}/${total} calls failed: ${names}` : `${total} calls ok`));
   }
 
-  // knowledge: searches that failed or came back empty, plus errors of knowledge-layer tools.
+  // knowledge: searches that failed, plus errors of knowledge-layer tools. An empty result is reported but is not a
+  // failure: every model call searches with the user's text, and a question the sources do not cover (a conversion, a
+  // greeting) rightly finds nothing. Whether the answer needed a passage is for answer-level evaluators to say.
   const searches = named('knowledge.search');
   if (searches.length || knowledgeExecs.length) {
     const failed = searches.filter((s) => s.status === 'error').length;
     const empty = searches.filter((s) => s.status !== 'error' && s.attrs['knowledge.passages'] === 0).length;
     const toolErrors = knowledgeExecs.filter(failedExec).length;
     const total = searches.length + knowledgeExecs.length;
-    const bad = failed + empty + toolErrors;
-    const parts = [failed && `${failed} searches failed`, empty && `${empty} returned no passages`, toolErrors && `${toolErrors} knowledge tool errors`].filter(Boolean).join(', ');
-    scores.set('knowledge', score('knowledge', 1 - bad / total, bad ? `${parts} (of ${total})` : `${total} searches ok`));
+    const bad = failed + toolErrors;
+    const parts = [failed && `${failed} searches failed`, toolErrors && `${toolErrors} knowledge tool errors`].filter(Boolean).join(', ');
+    const note = empty ? `; ${empty} returned no passages` : '';
+    scores.set('knowledge', score('knowledge', 1 - bad / total, `${bad ? `${parts} (of ${total})` : `${total} searches ok`}${note}`));
   }
 
   // llm: errored calls, truncated or withheld answers, or a run that failed for a model-side reason.

@@ -12,7 +12,7 @@ A layer without any signal gets no score.
 | `guardrail` | `guard.check` spans; a run stopped with reason `guardrail:...` | 0 if anything was blocked, 0.5 if only redacted, else 1 |
 | `identity` | `authorize` spans | 1 - denied / decisions |
 | `tool` | `execute_tool` spans (`tool.outcome` `error`), else `tool_result` events with `isError` | 1 - failed / calls; denied and blocked calls belong to identity and guardrail |
-| `knowledge` | `knowledge.search` spans (failed or empty), `execute_tool` spans of the knowledge layer | 1 - bad / total |
+| `knowledge` | `knowledge.search` spans (failed; empty ones are reported in the reason, not failed), `execute_tool` spans of the knowledge layer | 1 - failed / total |
 | `llm` | `chat` spans (error, finish reason `length`, `content_filter`), else `model_response` events (`finish_reason`); a failed run whose reason is a provider or network error | 1 - bad / calls, 0 for a provider failure |
 | `cache` | `cache.lookup` spans | 1 - failed lookups / lookups; a miss is healthy, the reason has the hit rate |
 | `harness` | the run status and reason | 1 if completed; 0 for any other status not blamed on a guard or the model |
