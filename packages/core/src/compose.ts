@@ -119,6 +119,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
       guards: ports.guardrails, telemetry, extBytes,
       ...(ports.cache ? { cache: ports.cache } : {}), ...(ports.router ? { router: ports.router } : {}),
       ...(config.pipeline.cacheTtlMs ? { cacheTtlMs: config.pipeline.cacheTtlMs } : {}),
+      cacheScope: config.pipeline.cacheScope ?? 'caller',
     });
     models.set(key, m);
     return m;

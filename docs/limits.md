@@ -67,6 +67,11 @@ described in Why. **Accepted** is the validated range. **Safe range** is what pr
 | `pipeline.cacheTtlMs` | — | 0–∞ | — | — | Lifetime of cached model answers; when unset (or 0) the cache adapter's own TTL applies. |
 | `pipeline.approvalTimeoutMs` | `0` ms | 0–∞ | 0–3600000 | warn outside safe range | How long a tool call waits for a human approval; 0 does not wait, so the call is refused while pending. |
 
+`pipeline.cacheScope` is a setting next to these limits, not a number: `"caller"` (default) keys cached model answers
+by caller id, so an answer built from one caller's knowledge is never served to another; `"shared"` keeps one entry
+for every caller. On a production profile with knowledge sources and a cache, `agent-layers check` prints `WARN` for
+`"shared"`; it does not fail the check. See [cache](layers/cache.md#boundaries).
+
 ### `limits`
 
 | Setting | Default | Accepted | Safe range | On production | Why |

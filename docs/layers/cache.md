@@ -12,7 +12,7 @@ quotas. The agent sees an ordinary [llm](llm.md) endpoint.
 | Port | What it does |
 |---|---|
 | [RouterPort](../../spec/ports/RouterPort.md) | `select` picks the model for a `ModelRequest` |
-| [CachePort](../../spec/ports/CachePort.md) | `get` / `set` / `delete` with a TTL; usable by any layer (tool results, embeddings, retrieval); model-reply keys are computed over the `ModelRequest` |
+| [CachePort](../../spec/ports/CachePort.md) | `get` / `set` / `delete` with a TTL; usable by any layer (tool results, embeddings, retrieval); model-reply keys are computed over the `ModelRequest` and the caller |
 
 ### Where it sits
 
@@ -57,6 +57,11 @@ flowchart TB
 ## Boundaries
 
 - Output guards also run on cached answers: the cache stores the raw model reply, see [architecture](../architecture.md#composition-pipelines).
+- Cached answers are per caller by default (`pipeline.cacheScope: "caller"`): the key covers the guarded request and
+  the caller id (`anonymous` without one). The lookup happens before knowledge is injected, and knowledge search is
+  filtered by caller, so a key without the caller could serve one caller an answer built from another caller's
+  passages. `"shared"` keeps one entry for every caller; set it only when no knowledge source filters by caller.
+  `agent-layers check` warns about `"shared"` on a production profile that has knowledge sources.
 - Semantic caching is deliberately not part of the agent loop; exact-match caching is safe for tests and repeated
   identical requests.
 - Rate and spend limits per key are quotas; see [cost](../cross-cutting/cost.md).

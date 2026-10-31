@@ -21,7 +21,10 @@ export interface Readiness {
   problems: ReadinessProblem[];
   /** Unsafe limit values on the production tier; those with severity `fail` make `ok` false. See docs/limits.md. */
   limits: LimitFinding[];
-  /** Language warnings: ext keys an adapter reads that nothing in the profile produces. */
+  /**
+   * Warnings that do not fail the check: ext keys an adapter reads that nothing in the profile produces, and, on the
+   * production tier, a model cache shared across callers while knowledge sources are configured.
+   */
   warnings: string[];
 }
 
@@ -60,5 +63,15 @@ export async function readiness(config: ResolvedConfig, registry: AdapterRegistr
     const empty = v == null || (Array.isArray(v) && v.length === 0) || (slotInfo(slot)?.shape === 'map' && Object.keys(v as object).length === 0);
     if (empty) problems.push({ kind: 'missing-layer', slot, message: `${slot}: required by profile ${config.profile ?? '(base)'} but not configured` });
   }
-  return { ok: problems.length === 0 && !limits.some((l) => l.severity === 'fail'), tier: config.tier, requires, problems, limits, warnings: language.warnings };
+  const warnings = [...language.warnings];
+  if (config.tier === 'production') warnings.push(...sharedCacheWarnings(config));
+  return { ok: problems.length === 0 && !limits.some((l) => l.severity === 'fail'), tier: config.tier, requires, problems, limits, warnings };
+}
+
+/** A cache shared across callers can serve one caller's knowledge-based answer to another (docs/layers/cache.md). */
+function sharedCacheWarnings(config: ResolvedConfig): string[] {
+  const layers = config.layers as Record<string, unknown>;
+  const knowledge = layers.knowledge && typeof layers.knowledge === 'object' ? Object.values(layers.knowledge).filter((v) => v != null) : [];
+  if (config.pipeline.cacheScope !== 'shared' || layers.cache == null || knowledge.length === 0) return [];
+  return ['pipeline.cacheScope is shared while knowledge sources are configured: a cached answer built from one caller\'s passages can be served to another caller; use "caller"'];
 }

@@ -94,6 +94,7 @@ const pipeline: JsonSchema = {
       additionalProperties: false,
     },
     cacheTtlMs: lim(PIPELINE_LIMITS.cacheTtlMs, 'Lifetime of cached model answers'),
+    cacheScope: { enum: ['caller', 'shared'], description: 'Who shares a cached model answer. caller (default): one entry per caller id; shared: every caller, unsafe with caller-scoped knowledge.' },
     approvalTimeoutMs: lim(PIPELINE_LIMITS.approvalTimeoutMs, 'How long a tool call waits for a human approval; 0 does not wait'),
   },
   additionalProperties: false,

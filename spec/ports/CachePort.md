@@ -17,7 +17,7 @@ A small key/value store with optional expiry, so repeated work can be skipped. I
 
 ## Data shapes
 
-Keys are strings. Values are any JSON value; what goes in comes out equal. The model pipeline uses keys of the form `chat:<hash>`, where the hash covers the guarded [ModelRequest](../schemas/model-request.json) (without the stream flag), and stores the raw [ModelReply](../schemas/model-reply.json) (see [ModelPort](ModelPort.md)).
+Keys are strings. Values are any JSON value; what goes in comes out equal. The model pipeline uses keys of the form `model:<hash>`, where the hash covers the guarded [ModelRequest](../schemas/model-request.json) and, unless `pipeline.cacheScope` is `shared`, the caller id (`anonymous` without one), and stores the raw [ModelReply](../schemas/model-reply.json) (see [ModelPort](ModelPort.md)).
 
 ## Semantics
 

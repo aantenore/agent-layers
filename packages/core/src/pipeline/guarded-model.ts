@@ -12,12 +12,26 @@ import { sha256, stableStringify } from '../util.ts';
 import { guardsFor, runGuards } from './guards.ts';
 import { spanStream } from './span-stream.ts';
 
+/** Who shares a cached model reply (`pipeline.cacheScope`). */
+export type CacheScope = 'caller' | 'shared';
+
+/** Cache key of a guarded request. The caller is part of it unless the scope is `shared`. */
+export function modelCacheKey(req: ModelRequest, ctx: CallContext, scope: CacheScope = 'caller'): string {
+  const keyed = scope === 'shared' ? req : { caller: ctx.caller ? `${ctx.caller.kind}:${ctx.caller.id}` : 'anonymous', req };
+  return `model:${sha256(stableStringify(keyed))}`;
+}
+
 export interface GuardedModelOptions {
   /** Guards; those covering `input` and `output` run here. */
   guards?: readonly GuardPort[];
   /** Reply cache. */
   cache?: CachePort;
   cacheTtlMs?: number;
+  /**
+   * Who shares a cached reply. `caller` (default): the key includes the caller id (`anonymous` without one), so an
+   * answer built from one caller's knowledge is never served to another. `shared`: one entry for every caller.
+   */
+  cacheScope?: CacheScope;
   /** Model selection. */
   router?: RouterPort;
   /** Telemetry; falls back to `ctx.telemetry`. */
@@ -29,7 +43,8 @@ export interface GuardedModelOptions {
 /**
  * Wraps a ModelPort with the layers around a model call, in this order:
  * input guards (new user content) → cache lookup → router → model → cache store → output guards.
- * The cache stores the raw model reply, so output guards also run on cache hits.
+ * The cache stores the raw model reply, so output guards also run on cache hits. Its key includes the caller unless
+ * `cacheScope` is `shared`: knowledge is injected after the cache lookup and may differ per caller.
  * Output guards see every text a caller can be shown: text parts and reasoning parts.
  * A block throws GuardrailBlocked; a redact rewrites the text. Every step is a span with its `agent.layer`.
  * Streaming with output guards buffers the stream, because the full text is needed before it can be released.
@@ -45,7 +60,7 @@ export function guardedModel(model: ModelPort, opts: GuardedModelOptions = {}): 
     const guarded = await guardInput(req, guards, ctx, t);
     if (!opts.cache) return { req: guarded };
     const cache = opts.cache;
-    const key = `model:${sha256(stableStringify(guarded))}`;
+    const key = modelCacheKey(guarded, ctx, opts.cacheScope);
     const cached = await t.span(SPAN.cacheLookup, { [ATTR.layer]: 'cache' }, async (span) => {
       const hit = await cache.get(key).catch(() => undefined);
       span.setAttributes({ [ATTR.cacheHit]: hit !== undefined });

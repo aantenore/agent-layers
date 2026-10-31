@@ -214,7 +214,7 @@ in as a remote runtime (the `a2a` adapter) or uses the gateway's OpenAI-compatib
 | `profiles.<name>` | `extends`, `tier`, `requires`, `layers` (only what differs), `policy`, `pipeline`, `gateway`, `limits`, `vocabularies`, `mappings`, `description` |
 | `policy` | Local authorization rules `{ effect: allow\|ask\|deny, tools?, risk?, when?: { roles, scopes, kind, authenticated } }`, first match wins; `authenticated: true` matches any verified caller, `false` only an anonymous one |
 | `pipeline.knowledge` | `k`, `maxChars`, `maxK`, `mode`: `system` (default), `user`, `tools` (expose sources as tools), `off`; `fusion` (how several sources merge, see [stack.md](stack.md#knowledge-fusion)) |
-| `pipeline.cacheTtlMs`, `pipeline.approvalTimeoutMs` | Cache lifetime; how long a tool call waits for an approval |
+| `pipeline.cacheTtlMs`, `pipeline.cacheScope`, `pipeline.approvalTimeoutMs` | Cache lifetime; who shares a cached answer (`caller` by default, or `shared`); how long a tool call waits for an approval |
 | `gateway` | Network host: `port`, `host`, `inbound` (channel and trigger names to mount), `anonymous`, `publicOrigin`, `cors`, `allowedOrigins`, `allowedHosts`, and its limits (`maxBodyBytes`, `requestTimeoutMs`, ...); see [gateway.md](gateway.md) |
 | `vocabularies` | Values and aliases added to extensible vocabularies; see [stack.md](stack.md#vocabularies-and-mappings) |
 | `mappings` | Boundary mapping rules per adapter instance; see [stack.md](stack.md#vocabularies-and-mappings) |

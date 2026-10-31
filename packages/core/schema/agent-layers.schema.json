@@ -912,6 +912,13 @@
           ],
           "description": "Lifetime of cached model answers (ms); default: the cache adapter's TTL."
         },
+        "cacheScope": {
+          "enum": [
+            "caller",
+            "shared"
+          ],
+          "description": "Who shares a cached model answer. caller (default): one entry per caller id; shared: every caller, unsafe with caller-scoped knowledge."
+        },
         "approvalTimeoutMs": {
           "anyOf": [
             {

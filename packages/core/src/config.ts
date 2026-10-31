@@ -34,6 +34,8 @@ export type LayersConfig =
 export interface PipelineConfig {
   knowledge?: { k?: number; maxChars?: number; maxK?: number; mode?: 'system' | 'user' | 'tools' | 'off'; fusion?: FusionOptions };
   cacheTtlMs?: number;
+  /** Who shares a cached model reply: `caller` (default) or `shared`. */
+  cacheScope?: 'caller' | 'shared';
   approvalTimeoutMs?: number;
 }
 
