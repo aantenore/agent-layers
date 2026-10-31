@@ -26,18 +26,23 @@ From the command line: `agent-layers gateway --profile <name> [--port <n>] [--ho
    must be one of those names. `/healthz` and `/readyz` are exempt.
 3. Route lookup: exact paths before prefixes, longer before shorter; 404 or 405 with `Allow`.
 4. Authentication, unless the route is `public` (discovery documents): `Authorization: Bearer <credential>` verified
-   through the identity port, and the identity passed to the route. No credential: 401 with
+   through the identity port, and the verified `caller` passed to the route. No credential: 401 with
    `WWW-Authenticate: Bearer realm="agent-layers"`, unless the config sets `anonymous: true`. A credential that does not
    verify: always 401 with `error="invalid_token"`; the adapter's error text is never returned.
 5. Body limit (413) and time limit (504); an error inside a route is a 500 without its message.
-6. One span `gateway.request` on the `interface` layer, with method, path (never the query string), route, inbound
-   instance, status, duration and whether the caller was authenticated, plus a `gateway.requests` metric.
+6. Trace context: `traceparent` / `tracestate` are copied unchanged into `trace: {parent, state}` for the route and
+   the run; the telemetry adapter owns the format. The gateway only bounds them: a value longer than `maxTraceChars`
+   or with characters outside printable ASCII is dropped (a bad `tracestate` alone keeps the parent).
+7. One span `gateway.request` on the `interface` layer, with method, path (never the query string), route, inbound
+   instance, status, duration and whether the caller was authenticated, plus a `gateway.requests` metric. The span
+   joins the caller's trace when the telemetry adapter accepts it.
 
 `GET /healthz` answers 200 while the process runs. `GET /readyz` answers 200 when the profile passes the readiness
-gate and the gateway is not draining, 503 otherwise.
+gate and the gateway is not draining, 503 otherwise; the body counts readiness `problems` and language `warnings`.
 
 Triggers mounted on the gateway hand their events to a sink that starts the run in the background and answers with
-its run id. A trigger run needs an identity unless the config sets `anonymous: true`.
+its run id. A trigger run needs a caller unless the config sets `anonymous: true`. Its end is the event
+`gateway.trigger.done` with `agent.trigger.kind`, `agent.name`, `agent.run.id` and `agent.run.status`.
 
 On the production tier the gateway refuses to start without an identity adapter or with `anonymous: true`. On other
 tiers, without an identity adapter it starts only with `anonymous: true`.
@@ -61,6 +66,7 @@ The `gateway` block of the stack config, overridable per profile; `serveStack` t
 | `bodyTimeoutMs` | integer | `120000` | Time a client has to send the whole request; capped by `requestTimeoutMs` |
 | `corsMaxAgeS` | integer | `600` | How long browsers may cache a CORS preflight answer |
 | `maxRequestIdChars` | integer | `64` | Longest `X-Request-Id` kept from the caller; longer ones are replaced |
+| `maxTraceChars` | integer | `512` | Longest `traceparent` and `tracestate` kept from the caller, each; longer or non-printable ones are dropped |
 | `publicOrigin` | string | the listen address | Origin used in absolute URLs, behind a proxy |
 | `cors` | `{ origins }` | off | Origins allowed to call from a browser (`*` for any) |
 | `allowedOrigins` | string[] | `[]` | Origins accepted besides the gateway's own, without CORS headers (desktop clients) |

@@ -114,6 +114,7 @@ const gateway: JsonSchema = {
     closeGraceMs: lim(GATEWAY_LIMITS.closeGraceMs, 'How long shutdown waits for requests and trigger runs in flight'),
     corsMaxAgeS: lim(GATEWAY_LIMITS.corsMaxAgeS, 'How long browsers may cache a CORS preflight answer'),
     maxRequestIdChars: lim(GATEWAY_LIMITS.maxRequestIdChars, 'Longest X-Request-Id kept from the caller; longer ones are replaced'),
+    maxTraceChars: lim(GATEWAY_LIMITS.maxTraceChars, 'Longest traceparent and tracestate kept from the caller, each; longer or non-printable ones are dropped'),
     publicOrigin: { type: 'string', minLength: 1 },
     allowedOrigins: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Origins accepted besides the gateway\'s own; other Origin headers get 403.' },
     allowedHosts: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Accepted Host names (name or name:port); default: loopback names when bound to loopback.' },

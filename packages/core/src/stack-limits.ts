@@ -9,6 +9,7 @@ export const GATEWAY_LIMITS = defineLimits({
   closeGraceMs: { path: 'gateway.closeGraceMs', default: 10_000, unit: 'ms', min: 0, max: 3_600_000 },
   corsMaxAgeS: { path: 'gateway.corsMaxAgeS', default: 600, unit: 's', min: 0, max: 86_400 },
   maxRequestIdChars: { path: 'gateway.maxRequestIdChars', default: 64, unit: 'chars', min: 1, max: 256 },
+  maxTraceChars: { path: 'gateway.maxTraceChars', default: 512, unit: 'chars', min: 1, max: 8192 },
 });
 
 /** Limits of the composition pipelines (`pipeline` block). */

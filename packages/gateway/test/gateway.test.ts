@@ -8,7 +8,7 @@ import {
 import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
 import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
 import { identityAdapter } from '@agent-layers/adapter-static-identity';
-import { serveStack } from '../src/index.ts';
+import { serveStack, traceOf } from '../src/index.ts';
 
 let sink: TriggerSink | undefined;
 
@@ -18,13 +18,13 @@ const echoChannel = defineAdapter<'ChannelPort'>({
   create: (): ChannelPort => ({
     mount: (host) => ({
       routes: [
-        { path: '/card', methods: ['GET'], public: true, handle: async (_req, ctx) => Response.json({ url: `${ctx.origin}/echo`, who: ctx.identity?.subject ?? null }) },
+        { path: '/card', methods: ['GET'], public: true, handle: async (_req, ctx) => Response.json({ url: `${ctx.origin}/echo`, who: ctx.caller?.id ?? null, trace: ctx.trace ?? null }) },
         {
           path: '/echo', methods: ['POST'],
           async handle(req, ctx) {
             const { text } = await req.json() as { text: string };
-            const r = await host.run('assistant', text, { ...(ctx.identity ? { identity: ctx.identity } : {}) });
-            return Response.json({ who: ctx.identity?.subject ?? null, output: r.output, status: r.status });
+            const r = await host.run('assistant', text, { ...(ctx.caller ? { caller: ctx.caller } : {}) });
+            return Response.json({ who: ctx.caller?.id ?? null, output: r.output, status: r.status });
           },
         },
         { path: '/slow', methods: ['GET'], handle: (_req, ctx) => new Promise((resolve) => ctx.signal.addEventListener('abort', () => resolve(new Response('late')))) },
@@ -45,7 +45,7 @@ const hookTrigger = defineAdapter<'TriggerPort'>({
           path: '/hook', methods: ['POST'],
           async handle(_req, ctx) {
             try {
-              const { runId } = await s.accept({ id: `t-${Date.now()}`, type: 'test', source: 'test', data: 'hello' }, { ...(ctx.identity ? { identity: ctx.identity } : {}) });
+              const { runId } = await s.accept({ id: `t-${Date.now()}`, kind: 'test', source: 'test', data: 'hello' }, { ...(ctx.caller ? { caller: ctx.caller } : {}) });
               return Response.json({ runId }, { status: 202 });
             } catch (err) {
               return Response.json({ error: (err as { kind?: string }).kind }, { status: 403 });
@@ -88,7 +88,7 @@ test('health and readiness are public; the request id is echoed; routes are list
     assert.equal(ready.status, 503, 'a production profile without guards, authorization, telemetry and state is not ready');
     assert.deepEqual(gw.routes, ['GET /card (echo-http)', 'POST /echo (echo-http)', 'GET /slow (echo-http)', '* /boom (echo-http)', 'POST /hook (hook)']);
     const card = await (await fetch(`${gw.url}/card`)).json() as { url: string; who: null };
-    assert.deepEqual(card, { url: `${gw.url}/echo`, who: null });
+    assert.deepEqual(card, { url: `${gw.url}/echo`, who: null, trace: null });
   } finally {
     await gw.close();
     await stack.close();
@@ -189,7 +189,7 @@ test('access log: one interface span per request, path without the query, status
     assert.equal(span.attrs['url.path'], '/echo');
     assert.equal(span.attrs['http.response.status_code'], 200);
     assert.equal(span.attrs['gateway.authenticated'], true);
-    assert.ok(records.some((r) => r.type === 'span' && r.name === 'invoke_agent'), 'the run is traced under the request');
+    assert.ok(records.some((r) => r.type === 'span' && r.name === 'agent.run'), 'the run is traced under the request');
     assert.ok(!JSON.stringify(records).includes('secret-in-query'));
     assert.ok(!JSON.stringify(records).includes('dev-token'));
   } finally {
@@ -215,16 +215,16 @@ test('CORS is off by default and answers only the configured origins', async () 
   }
 });
 
-test('triggers: accepted with the caller identity; never anonymous without anonymous: true', async () => {
+test('triggers: accepted with the caller; never anonymous without anonymous: true', async () => {
   const stack = await stackFor('production');
   const gw = await serveStack(stack, { port: 0 });
   try {
     const ok = await fetch(`${gw.url}/hook`, { method: 'POST', headers: auth });
     assert.equal(ok.status, 202);
     assert.match((await ok.json() as { runId: string }).runId, /^t-/);
-    await assert.rejects(sink!.accept({ id: 'x', type: 't', source: 's' }), (e: { kind?: string }) => e.kind === 'unauthenticated');
+    await assert.rejects(sink!.accept({ id: 'x', kind: 't', source: 's' }), (e: { kind?: string }) => e.kind === 'unauthenticated');
     assert.equal((await fetch(`${gw.url}/hook`, { method: 'POST' })).status, 401);
-    await assert.rejects(sink!.accept({ id: 'x', type: 't', source: 's', agent: 'ghost' }, { identity: { subject: 'u', kind: 'user' } }), (e: { kind?: string }) => e.kind === 'not_found');
+    await assert.rejects(sink!.accept({ id: 'x', kind: 't', source: 's', agent: 'ghost' }, { caller: { id: 'u', kind: 'user', roles: [], scopes: [] } }), (e: { kind?: string }) => e.kind === 'not_found');
   } finally {
     await gw.close();
     await stack.close();
@@ -270,6 +270,44 @@ test('Origin and Host checks: foreign origins and unknown host names get 403', a
   } finally {
     await gw.close();
     await named.close();
+    await stack.close();
+  }
+});
+
+test('trace context: copied unchanged, bounded in length and charset (gateway.maxTraceChars)', async () => {
+  const parent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+  assert.deepEqual(traceOf(parent, 'a=1', 512), { parent, state: 'a=1' });
+  assert.deepEqual(traceOf('any opaque value', ['a=1', 'b=2'], 512), { parent: 'any opaque value', state: 'a=1,b=2' }, 'the format is not checked here');
+  assert.equal(traceOf('x'.repeat(513), undefined, 512), undefined, 'too long');
+  assert.equal(traceOf('bad\u0000value', undefined, 512), undefined, 'non-printable');
+  assert.equal(traceOf('caf\u00e9', undefined, 512), undefined, 'non-ASCII');
+  assert.equal(traceOf([parent, parent], undefined, 512), undefined, 'repeated');
+  assert.deepEqual(traceOf(parent, 's'.repeat(600), 512), { parent }, 'a bad state is dropped, the parent kept');
+  const stack = await stackFor('prototype');
+  const gw = await serveStack(stack, { port: 0, anonymous: true, maxTraceChars: 60 });
+  try {
+    const card = async (headers: Record<string, string>) => (await (await fetch(`${gw.url}/card`, { headers })).json() as { trace: unknown }).trace;
+    assert.deepEqual(await card({ traceparent: parent, tracestate: 'vendor=1' }), { parent, state: 'vendor=1' });
+    assert.equal(await card({ traceparent: `${parent}-and-more-than-sixty` }), null);
+    await assert.rejects(serveStack(stack, { port: 0, anonymous: true, maxTraceChars: 0 }), /gateway\.maxTraceChars/);
+  } finally {
+    await gw.close();
+    await stack.close();
+  }
+});
+
+test('trigger runs are reported with the core attribute names', async () => {
+  const records: TelemetryRecord[] = [];
+  const stack = await stackFor('production', records);
+  const gw = await serveStack(stack, { port: 0 });
+  try {
+    await sink!.accept({ id: 't-attrs', kind: 'test', source: 's', data: 'ping' }, { caller: { id: 'u', kind: 'user', roles: [], scopes: [] } });
+    for (let i = 0; i < 50 && !records.some((r) => r.type === 'event' && r.name === 'gateway.trigger.done'); i++) await new Promise((r) => setTimeout(r, 10));
+    const done = records.find((r) => r.type === 'event' && r.name === 'gateway.trigger.done');
+    assert.ok(done && done.type === 'event');
+    assert.deepEqual([done.attrs['agent.trigger.kind'], done.attrs['agent.run.id'], done.attrs['agent.name'], done.attrs['agent.run.status']], ['test', 't-attrs', 'assistant', 'completed']);
+  } finally {
+    await gw.close();
     await stack.close();
   }
 });

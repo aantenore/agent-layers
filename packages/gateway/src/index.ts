@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
-  coerceLimits, configuredAdapters, ConfigError, findRoute, GATEWAY_LIMITS, InboundRejected, limitList, limitValue, readiness, traceContext, validateLimits,
-  type ChannelPort, type GatewayConfig, type Identity, type TraceContext, type InboundContext, type InboundRoute, type Stack, type TelemetryPort,
+  ATTR, coerceLimits, configuredAdapters, ConfigError, findRoute, GATEWAY_LIMITS, InboundRejected, limitList, limitValue, readiness, validateLimits,
+  type Caller, type ChannelPort, type GatewayConfig, type TraceContext, type InboundContext, type InboundRoute, type Stack, type TelemetryPort,
   type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
 import { BodyTooLarge, errorResponse, readBody, toRequest, writeResponse } from './http.ts';
@@ -33,6 +33,21 @@ const RESERVED = ['/healthz', '/readyz'];
 const REQUEST_ID_CHARS = /^[A-Za-z0-9._-]+$/;
 const REALM = 'agent-layers';
 const LOOPBACK = ['127.0.0.1', 'localhost', '::1'];
+/** Printable ASCII: what a trace header may carry once it is copied into the run. */
+const TRACE_CHARS = /^[\x20-\x7e]+$/;
+
+/**
+ * The caller's trace context, copied from `traceparent` / `tracestate` unchanged: the format belongs to the telemetry
+ * adapter. The gateway bounds it only: a value longer than `maxChars` or with non-printable characters is dropped
+ * (no parent: no trace context; a bad state: the parent alone). A repeated `traceparent` is dropped too.
+ */
+export function traceOf(parent: string | string[] | undefined, state: string | string[] | undefined, maxChars: number): TraceContext | undefined {
+  const ok = (v: string | undefined): v is string => typeof v === 'string' && v.length > 0 && v.length <= maxChars && TRACE_CHARS.test(v);
+  const p = Array.isArray(parent) ? (parent.length === 1 ? parent[0] : undefined) : parent;
+  if (!ok(p)) return undefined;
+  const st = Array.isArray(state) ? state.join(',') : state;
+  return ok(st) ? { parent: p, state: st } : { parent: p };
+}
 
 interface Mounted { route: InboundRoute; instance: string }
 
@@ -81,6 +96,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   const closeGraceMs = limitValue(L.closeGraceMs, limits.closeGraceMs);
   const corsMaxAgeS = limitValue(L.corsMaxAgeS, limits.corsMaxAgeS);
   const maxRequestIdChars = limitValue(L.maxRequestIdChars, limits.maxRequestIdChars);
+  const maxTraceChars = limitValue(L.maxTraceChars, limits.maxTraceChars);
   const telemetry: TelemetryPort = stack.telemetry;
   if (tier === 'production' && anonymous) throw new ConfigError(['gateway: anonymous requests are not allowed on the production tier (remove gateway.anonymous)']);
   if (tier === 'production' && !stack.ports.identity) throw new ConfigError(['gateway: the production tier needs an identity adapter (layers.identity) to authenticate requests']);
@@ -108,13 +124,13 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     async accept(trigger, ctx = {}) {
       const agent = trigger.agent ?? stack.agents()[0];
       if (!agent || !stack.agents().includes(agent)) throw new InboundRejected('not_found', `unknown agent "${trigger.agent ?? ''}"`);
-      if (!ctx.identity && !anonymous) throw new InboundRejected('unauthenticated', 'a trigger run needs an identity');
+      if (!ctx.caller && !anonymous) throw new InboundRejected('unauthenticated', 'a trigger run needs a caller');
       if (draining) throw new InboundRejected('forbidden', 'the gateway is shutting down');
       const input = typeof trigger.data === 'string' ? trigger.data : JSON.stringify(trigger.data ?? {});
-      const attrs = { 'agent.layer': 'interface' as const, 'trigger.type': trigger.type, 'run.id': trigger.id, 'gen_ai.agent.name': agent };
-      track(host.run(agent, input, { runId: trigger.id, ...(ctx.identity ? { identity: ctx.identity } : {}) })
-        .then((r) => telemetry.event('gateway.trigger.done', { ...attrs, 'run.status': String(r.status) }))
-        .catch(() => telemetry.event('gateway.trigger.done', { ...attrs, 'run.status': 'failed' })));
+      const attrs = { [ATTR.layer]: 'interface' as const, [ATTR.triggerKind]: trigger.kind, [ATTR.runId]: trigger.id, [ATTR.name]: agent };
+      track(host.run(agent, input, { runId: trigger.id, ...(ctx.caller ? { caller: ctx.caller } : {}) })
+        .then((r) => telemetry.event('gateway.trigger.done', { ...attrs, [ATTR.runStatus]: String(r.status) }))
+        .catch(() => telemetry.event('gateway.trigger.done', { ...attrs, [ATTR.runStatus]: 'failed' })));
       return { runId: trigger.id };
     },
   };
@@ -145,7 +161,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   const routes = mounted.map((m) => m.route);
   let origin = '';
 
-  async function authenticate(req: IncomingMessage): Promise<{ identity?: Identity } | Response> {
+  async function authenticate(req: IncomingMessage): Promise<{ caller?: Caller } | Response> {
     const header = req.headers.authorization;
     if (!header) {
       if (anonymous) return {};
@@ -155,7 +171,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     const invalid = () => errorResponse(401, 'invalid credential', 'authentication_error', { 'www-authenticate': `Bearer realm="${REALM}", error="invalid_token"` });
     if (!m || !stack.ports.identity) return invalid();
     try {
-      return { identity: await stack.verify(m[1]!) };
+      return { caller: await stack.verify(m[1]!) };
     } catch {
       // The identity adapter's message can name the credential or its issuer: the client learns only that it failed.
       return invalid();
@@ -205,7 +221,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     if (path === '/healthz') return Response.json({ status: 'ok' });
     if (path === '/readyz') {
       const ok = ready.ok && !draining;
-      return Response.json({ status: draining ? 'draining' : ok ? 'ready' : 'not-ready', tier, problems: ready.problems.length }, { status: ok ? 200 : 503 });
+      return Response.json({ status: draining ? 'draining' : ok ? 'ready' : 'not-ready', tier, problems: ready.problems.length, warnings: ready.warnings.length }, { status: ok ? 200 : 503 });
     }
     const refused = checkOriginAndHost(req);
     if (refused) return refused;
@@ -218,13 +234,13 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     const entry = mounted.find((m) => m.route === route)!;
     attrs['http.route'] = route.path;
     attrs['gateway.inbound'] = entry.instance;
-    let identity: Identity | undefined;
+    let caller: Caller | undefined;
     if (!route.public) {
       const auth = await authenticate(req);
       if (auth instanceof Response) return auth;
-      identity = auth.identity;
+      caller = auth.caller;
     }
-    attrs['gateway.authenticated'] = !!identity;
+    attrs['gateway.authenticated'] = !!caller;
     let body: Buffer | undefined;
     try {
       body = await readBody(req, maxBodyBytes);
@@ -232,7 +248,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
       if (err instanceof BodyTooLarge) return errorResponse(413, `request body larger than ${maxBodyBytes} bytes`, 'invalid_request_error', { connection: 'close' });
       throw err;
     }
-    const ctx: InboundContext = { requestId, signal, origin, ...(identity ? { identity } : {}), ...(trace ? { trace } : {}) };
+    const ctx: InboundContext = { requestId, signal, origin, ...(caller ? { caller } : {}), ...(trace ? { trace } : {}) };
     // A route that does not answer within the time limit (or before the client leaves) loses the exchange.
     const lost = untilAborted(signal);
     return Promise.race([lost, route.handle(toRequest(req, origin, body, signal), ctx)]);
@@ -249,10 +265,9 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     const attrs: Record<string, string | number | boolean> = {
       'http.request.method': req.method ?? 'GET', 'url.path': new URL(req.url ?? '/', 'http://gateway').pathname, 'gateway.request_id': requestId,
     };
-    // W3C Trace Context of the caller: the request span joins its trace. Malformed values are ignored.
-    const one = (h: string | string[] | undefined) => (Array.isArray(h) ? (h.length === 1 ? h[0] : undefined) : h);
-    const trace = traceContext(one(req.headers.traceparent), Array.isArray(req.headers.tracestate) ? req.headers.tracestate.join(',') : req.headers.tracestate);
-    await telemetry.span('gateway.request', { 'agent.layer': 'interface', ...attrs }, async (span) => {
+    // The caller's trace context, bounded: the request span joins it when the telemetry adapter can read it.
+    const trace = traceOf(req.headers.traceparent, req.headers.tracestate, maxTraceChars);
+    await telemetry.span('gateway.request', { [ATTR.layer]: 'interface', ...attrs }, async (span) => {
       let response: Response;
       if (draining) response = errorResponse(503, 'the gateway is shutting down', 'unavailable', { connection: 'close' });
       else {
@@ -267,7 +282,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
       }
       await writeResponse(res, response, { 'x-request-id': requestId, ...cors(req) });
       span.setAttributes({ ...attrs, 'http.response.status_code': response.status, 'gateway.duration_ms': Date.now() - started });
-      telemetry.metric('gateway.requests', 1, { 'agent.layer': 'interface', 'http.response.status_code': response.status, ...(attrs['gateway.inbound'] ? { 'gateway.inbound': String(attrs['gateway.inbound']) } : {}) });
+      telemetry.metric('gateway.requests', 1, { [ATTR.layer]: 'interface', 'http.response.status_code': response.status, ...(attrs['gateway.inbound'] ? { 'gateway.inbound': String(attrs['gateway.inbound']) } : {}) });
     }, trace ? { parent: trace } : undefined).catch(() => { if (!res.headersSent) { res.writeHead(500); } if (!res.writableEnded) res.end(); });
   }
 

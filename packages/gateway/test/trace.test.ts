@@ -10,7 +10,7 @@ const traceChannel = defineAdapter<'ChannelPort'>({
   create: (): ChannelPort => ({ mount: () => ({ routes: [{ path: '/trace', methods: ['GET'], handle: async (_req, ctx) => Response.json(ctx.trace ?? null) }] }) }),
 });
 
-test('the gateway joins the caller trace: request span parented on traceparent, context passed to the route', async () => {
+test('the gateway copies the caller trace: request span parented on it, context passed to the route, bounded only', async () => {
   const spans: { name: string; opts?: SpanOptions }[] = [];
   const capture: TelemetryPort = { span: (name, _a, fn, opts) => { spans.push({ name, ...(opts ? { opts } : {}) }); return fn({ setAttributes() {}, addEvent() {}, setError() {} }); }, event() {}, metric() {} };
   const stack = await compose(resolveProfile({
@@ -20,9 +20,10 @@ test('the gateway joins the caller trace: request span parented on traceparent, 
   try {
     const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
     const get = (h: Record<string, string>) => fetch(`${gw.url}/trace`, { headers: { authorization: 'Bearer t', ...h } }).then((r) => r.json());
-    assert.deepEqual(await get({ traceparent, tracestate: 'v=1' }), { traceparent, tracestate: 'v=1' });
-    assert.deepEqual(spans.at(-1), { name: 'gateway.request', opts: { parent: { traceparent, tracestate: 'v=1' } } });
-    assert.equal(await get({ traceparent: 'not-a-trace' }), null);
+    assert.deepEqual(await get({ traceparent, tracestate: 'v=1' }), { parent: traceparent, state: 'v=1' });
+    assert.deepEqual(spans.at(-1), { name: 'gateway.request', opts: { parent: { parent: traceparent, state: 'v=1' } } });
+    assert.deepEqual(await get({ traceparent: 'not-a-trace' }), { parent: 'not-a-trace' }, 'opaque: the telemetry adapter judges the format');
+    assert.equal(await get({ traceparent: 'x'.repeat(513) }), null, 'longer than gateway.maxTraceChars (512)');
     assert.deepEqual(spans.at(-1), { name: 'gateway.request' });
   } finally {
     await gw.close();

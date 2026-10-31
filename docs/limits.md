@@ -53,6 +53,7 @@ described in Why. **Accepted** is the validated range. **Safe range** is what pr
 | `gateway.closeGraceMs` | `10000` ms | 0–3600000 | — | — | How long shutdown waits for requests and trigger runs in flight before closing connections. |
 | `gateway.corsMaxAgeS` | `600` s | 0–86400 | — | — | How long a browser may cache a CORS preflight answer. |
 | `gateway.maxRequestIdChars` | `64` chars | 1–256 | — | — | Longest `X-Request-Id` kept from the caller; longer ones are replaced, so logs stay small. |
+| `gateway.maxTraceChars` | `512` chars | 1–8192 | — | — | Longest `traceparent` and `tracestate` copied into a run, each; longer or non-printable ones are dropped, so a caller cannot grow every span and outbound header. |
 
 ### `pipeline`
 

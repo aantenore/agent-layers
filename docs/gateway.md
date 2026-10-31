@@ -88,7 +88,8 @@ Every request goes through the same steps before any route runs (details in the
    string, route, inbound adapter, status, duration, whether the caller was authenticated. Runs and tool calls nest
    under it. When the request carries a W3C `traceparent` (and `tracestate`), the gateway copies them unchanged into
    `ctx.trace` (`{ parent, state? }`, opaque to the core) and the telemetry adapter joins that trace; a value it cannot
-   parse is ignored and starts a new trace.
+   parse is ignored and starts a new trace. The gateway bounds them only: longer than `gateway.maxTraceChars` (512) or
+   outside printable ASCII, a value is dropped.
 
 Agent cards and the health endpoints are public. Sessions (MCP) and tasks (A2A) belong to the caller that created
 them: another caller presenting their id gets "not found".
@@ -118,7 +119,7 @@ event) or, without one, with the caller that sent the event; never anonymously u
 
 `gateway` takes `port`, `host`, `inbound` (instance names to mount; every mountable channel and trigger by default),
 `anonymous`, `publicOrigin`, `cors`, `allowedOrigins`, `allowedHosts` and the limits `maxBodyBytes`, `requestTimeoutMs`,
-`headersTimeoutMs`, `bodyTimeoutMs`, `closeGraceMs`, `corsMaxAgeS` and `maxRequestIdChars`, and a profile can override
+`headersTimeoutMs`, `bodyTimeoutMs`, `closeGraceMs`, `corsMaxAgeS`, `maxRequestIdChars` and `maxTraceChars`, and a profile can override
 any of them. `agent-layers gateway --profile production [--port n] [--host h]` composes the
 profile, refuses to start a production-tier profile that fails the readiness gate, prints the mounted routes, and
 stops gracefully on SIGINT or SIGTERM. `agent-layers dev` keeps using only the channels that serve themselves (the
