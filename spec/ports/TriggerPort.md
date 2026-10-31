@@ -31,7 +31,7 @@ Start runs without a person asking: on a schedule, on an event from another syst
 - The handler is asynchronous. The trigger waits for it to complete before it considers the firing handled; how it reacts to a failing handler (retry, drop, dead-letter) is the adapter's documented behaviour.
 - Delivery guarantees are the adapter's. A source that can redeliver should keep `id` stable across redeliveries.
 - `close` stops new deliveries. In-flight handlers may still finish.
-- Reference host behaviour: the handler runs the trigger's `agent`, or the first configured agent when it is omitted; the trigger `id` becomes the run id; `data` is the run input (a string as is, anything else JSON-encoded). The run has no inbound credential, so it carries no user identity.
+- Reference host behaviour: the handler runs the trigger's `agent`, or the first configured agent when it is omitted; the trigger `id` becomes the run id; `data` is the run input (a string as is, anything else JSON-encoded). The run has no inbound credential: it carries the identity the host was started with (a service identity), or none.
 - The trigger does not decide what the agent does; it only says what happened and optionally which agent to run.
 
 ## Errors

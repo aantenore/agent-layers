@@ -2,7 +2,7 @@ import { compose, readiness, type Identity, type Stack } from '@agent-layers/cor
 import { createInterface } from 'node:readline';
 import { UsageError, type Io } from '../io.ts';
 import { openProject } from '../project.ts';
-import { authenticate, callerContext, runAs } from '../identity.ts';
+import { authenticate, callerContext } from '../identity.ts';
 import { traceTelemetry } from '../trace.ts';
 import { servicesOf } from './deploy.ts';
 
@@ -32,8 +32,7 @@ export async function dev(io: Io, args: DevArgs): Promise<number> {
     const identity = await authenticate(stack, p, args.token);
     if (args.message !== undefined) return await once(stack, agent, args.message, io, identity);
     if (stack.ports.channels.length && !args.agent) {
-      runAs(stack, identity);
-      const handle = await stack.start();
+      const handle = await stack.start(identity ? { identity } : {});
       await (handle.done ?? new Promise<void>((r) => process.once('SIGINT', () => r())));
       await handle.close();
       return 0;

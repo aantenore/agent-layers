@@ -38,6 +38,12 @@ export interface StackPorts {
   triggers: TriggerPort[];
 }
 
+/** How channels and triggers started by the stack run. */
+export interface StartOptions {
+  /** Identity of runs whose call brings none: the caller of a terminal session, the service identity of triggers. */
+  identity?: Identity;
+}
+
 /** A composed stack: the ports wired together, ready for a runtime. */
 export interface Stack {
   readonly config: ResolvedConfig;
@@ -60,9 +66,12 @@ export interface Stack {
   agents(): string[];
   /** The configured agent, bound by the runtime slot. */
   agent(name: string): Promise<RunnableAgent>;
-  /** What channels need to reach the stack. */
-  host(): ChannelHost;
-  /** Starts channels and triggers. The handle's `done` resolves when a self-ending channel (a terminal) ends. */
-  start(): Promise<ChannelHandle>;
+  /** What channels need to reach the stack. Runs without an identity of their own get `opts.identity`. */
+  host(opts?: StartOptions): ChannelHost;
+  /**
+   * Starts channels and triggers; their runs carry `opts.identity` unless a call brings its own.
+   * The handle's `done` resolves when a self-ending channel (a terminal) ends.
+   */
+  start(opts?: StartOptions): Promise<ChannelHandle>;
   close(): Promise<void>;
 }

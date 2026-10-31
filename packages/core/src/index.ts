@@ -21,5 +21,5 @@ export { assembleChunks, contentText, lastUserText, newUserMessageIndexes, respo
 export { filterTools, formatPassages, knowledgeTools, toChatTools } from './tools.ts';
 export * from './pipeline/index.ts';
 export { compose, type ComposeOptions } from './compose.ts';
-export type { Stack, StackPorts } from './stack.ts';
+export type { Stack, StackPorts, StartOptions } from './stack.ts';
 export { deepMerge, globToRegExp, matchesAny, stableStringify } from './util.ts';

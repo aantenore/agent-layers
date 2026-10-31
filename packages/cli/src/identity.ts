@@ -1,4 +1,4 @@
-import type { AdapterRef, CallContext, ChannelHost, Identity, Stack } from '@agent-layers/core';
+import type { AdapterRef, CallContext, Identity, Stack } from '@agent-layers/core';
 import { UsageError } from './io.ts';
 import type { Project } from './project.ts';
 
@@ -35,13 +35,3 @@ export async function authenticate(stack: Stack, p: Pick<Project, 'config' | 'en
 
 /** Run context for the authenticated caller. */
 export const callerContext = (identity: Identity | undefined): Partial<CallContext> => (identity ? { identity } : {});
-
-/** Makes the channels and triggers started by the stack run as this caller unless a call brings its own identity. */
-export function runAs(stack: Stack, identity: Identity | undefined): void {
-  if (!identity) return;
-  const host = stack.host.bind(stack);
-  stack.host = (): ChannelHost => {
-    const h = host();
-    return { ...h, run: (agent, input, ctx) => h.run(agent, input, { identity, ...ctx }), ...(h.stream ? { stream: (agent, input, ctx) => h.stream!(agent, input, { identity, ...ctx }) } : {}) };
-  };
-}

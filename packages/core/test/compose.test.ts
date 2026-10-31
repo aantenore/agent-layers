@@ -99,3 +99,33 @@ test('ctx.stack() gives adapters the composed stack at use time and throws while
   assert.equal(requests[0]!.messages[0]!.content, '[x]', 'the stack model applies the stack guards');
   await s.close();
 });
+
+test('start({ identity }): channel and trigger runs carry it unless the call brings its own', async () => {
+  const seen: (string | undefined)[] = [];
+  const runtime: RuntimePort = { bind: (_s, agent) => ({ name: agent.name, async run(_i, c) { seen.push(c?.identity?.subject); return { runId: c?.runId ?? 'r', status: 'completed', output: '' }; } }) };
+  let fire: ((t: { id: string; type: string; source: string }) => Promise<void>) | undefined;
+  const s = await compose(resolveProfile({
+    agents: { a: { model: 'm' } },
+    layers: { runtime: { adapter: 'rt' }, channels: [{ adapter: 'ch' }], triggers: [{ adapter: 'tr' }] },
+  }), {
+    adapters: [
+      testAdapter('RuntimePort', 'harness', 'rt', () => runtime),
+      testAdapter('ChannelPort', 'interface', 'ch', () => ({
+        async serve(host: import('../src/index.ts').ChannelHost) {
+          await host.run('a', 'x');
+          await host.run('a', 'y', { identity: { subject: 'caller', kind: 'user' } });
+          return { close: async () => {} };
+        },
+      })),
+      testAdapter('TriggerPort', 'interface', 'tr', () => ({ async start(h: typeof fire) { fire = h; return { close: async () => {} }; } })),
+    ],
+  });
+  const handle = await s.start({ identity: { subject: 'svc', kind: 'agent' } });
+  await fire!({ id: 't1', type: 'tick', source: 'test' });
+  assert.deepEqual(seen, ['svc', 'caller', 'svc']);
+  await handle.close();
+  seen.length = 0;
+  await s.host().run('a', 'z');
+  assert.deepEqual(seen, [undefined], 'without start options no identity is invented');
+  await s.close();
+});

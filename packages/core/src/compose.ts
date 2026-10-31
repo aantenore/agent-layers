@@ -129,15 +129,17 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
       }
       return p;
     },
-    host() {
+    host(opts = {}) {
+      const as = (ctx: Partial<CallContext> | undefined): Partial<CallContext> | undefined =>
+        opts.identity && !ctx?.identity ? { ...ctx, identity: opts.identity } : ctx;
       return {
         agents: () => stack.agents(),
-        run: async (agent, input, ctx) => (await stack.agent(agent)).run(input, ctx),
+        run: async (agent, input, ctx) => (await stack.agent(agent)).run(input, as(ctx)),
         ...(ports.identity ? { verify: (c: string) => stack.verify(c) } : {}),
       };
     },
-    async start() {
-      const host = stack.host();
+    async start(opts = {}) {
+      const host = stack.host(opts);
       const handles: ChannelHandle[] = [];
       for (const c of ports.channels) handles.push(await c.serve(host));
       for (const t of ports.triggers) {
