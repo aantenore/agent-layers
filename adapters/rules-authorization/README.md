@@ -14,8 +14,11 @@ this port, so an `ask` rule that arrives here counts as not allowed without appr
 | `rules` | object[] | required | Rules with `effect` (`allow`, `ask`, `deny`), optional `tools` globs, `risk` list and `when` (`roles`, `scopes`, `kind`, `authenticated`) |
 | `default` | `allow` \| `deny` | `deny` | Decision when no rule matches |
 
-`when.authenticated: true` matches any verified subject (user or agent) and never an anonymous caller; scope allow and
-`ask` rules with it so the default posture stays anonymous denied.
+`when.authenticated: true` matches any verified caller (user or agent) and never an anonymous one; scope allow and
+`ask` rules with it so the default posture stays anonymous denied. `risk` takes core values (`read`, `write`, `exec`)
+and values added in the stack's `vocabularies` block: a rule on a core value also matches the values added `like` it,
+and a risk the stack does not know counts as `exec`. Decisions are `{ allowed, reason }`; the reason stays inside the
+stack.
 
 ```json
 {

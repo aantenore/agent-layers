@@ -1,15 +1,20 @@
-import { defineAdapter, PORT_VERSIONS, type CredentialPort, type Identity, type IdentityPort } from '@agent-layers/core';
+import { defineAdapter, PORT_VERSIONS, type Caller, type CredentialPort, type IdentityPort } from '@agent-layers/core';
 
+/** One caller of the table. `subject` becomes `Caller.id`; `claims` are kept under `ext["static-identity.claims"]`. */
 export interface TokenEntry {
   subject: string;
   kind?: 'user' | 'agent';
   roles?: string[];
   scopes?: string[];
+  /** Display name (`Caller.name`). */
+  name?: string;
   claims?: Record<string, unknown>;
 }
 
+export const CLAIMS_KEY = 'static-identity.claims';
+
 export interface StaticIdentityOptions {
-  /** Credential → identity. */
+  /** Credential → caller. */
   tokens: Record<string, TokenEntry>;
 }
 
@@ -30,11 +35,10 @@ export function createStaticIdentity(options: StaticIdentityOptions, name = 'sta
     async verify(credential) {
       const entry = credential ? table.get(credential) : undefined;
       if (!entry) throw new Error('invalid credential');
-      const identity: Identity = { subject: entry.subject, kind: entry.kind ?? 'user', token: credential };
-      if (entry.roles) identity.roles = [...entry.roles];
-      if (entry.scopes) identity.scopes = [...entry.scopes];
-      if (entry.claims) identity.claims = structuredClone(entry.claims);
-      return identity;
+      const caller: Caller = { id: entry.subject, kind: entry.kind ?? 'user', roles: [...entry.roles ?? []], scopes: [...entry.scopes ?? []], credential };
+      if (entry.name) caller.name = entry.name;
+      if (entry.claims) caller.ext = { [CLAIMS_KEY]: structuredClone(entry.claims) };
+      return caller;
     },
   };
 }
@@ -75,6 +79,7 @@ export const identityAdapter = defineAdapter<'IdentityPort', StaticIdentityOptio
             kind: { enum: ['user', 'agent'] },
             roles: strings,
             scopes: strings,
+            name: { type: 'string', minLength: 1 },
             claims: { type: 'object' },
           },
           required: ['subject'],
@@ -85,6 +90,7 @@ export const identityAdapter = defineAdapter<'IdentityPort', StaticIdentityOptio
     required: ['tokens'],
     additionalProperties: false,
   },
+  ext: { produces: [CLAIMS_KEY] },
   create: (options, ctx) => createStaticIdentity(options, ctx.name),
 });
 
@@ -105,6 +111,7 @@ export const credentialAdapter = defineAdapter<'CredentialPort', StaticCredentia
     },
     additionalProperties: false,
   },
+  ext: { produces: [] },
   create: (options, ctx) => createStaticCredentials(options, ctx.name),
 });
 

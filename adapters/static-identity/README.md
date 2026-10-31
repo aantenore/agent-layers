@@ -3,8 +3,9 @@
 Maps **static token table (development only)** → **IdentityPort** and **CredentialPort** (layer `identity`). Tier: prototype.
 
 Development only: never use with real credentials. The package registers two adapters under the same name. The
-identity adapter verifies an inbound credential against a fixed table and returns the matching identity; unknown or
-empty credentials are rejected with `invalid credential`. The credential adapter hands out a fixed token per downstream
+identity adapter verifies an inbound credential against a fixed table and returns the matching `Caller` (`subject`
+becomes `id`, `roles` and `scopes` are always lists, the credential is kept in memory as `credential`); unknown or empty
+credentials are rejected with `invalid credential`. The credential adapter hands out a fixed token per downstream
 audience, or a default one.
 
 ## Options
@@ -13,7 +14,9 @@ Identity adapter (`identity` slot):
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `tokens` | object | required | Credential → `{ subject, kind?, roles?, scopes?, claims? }`; `kind` is `user` or `agent` (default `user`) |
+| `tokens` | object | required | Credential → `{ subject, kind?, roles?, scopes?, name?, claims? }`; `kind` is `user` or `agent` (default `user`) |
+
+`claims` are returned under `ext["static-identity.claims"]` (declared in the descriptor's `ext.produces`).
 
 Credential adapter (`credentials` slot):
 

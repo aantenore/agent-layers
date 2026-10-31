@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { sampleAccess } from '@agent-layers/conformance';
+import { sampleQuestion } from '@agent-layers/conformance';
 import { createMemoryApproval } from '../src/index.ts';
 
-const req = { access: sampleAccess({ risk: 'write' }), agent: 'a', runId: 'r' };
+const req = { question: sampleQuestion({ risk: 'write' }), agent: 'a', runId: 'r' };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test('request creates a pending approval with a unique id', async () => {
@@ -58,4 +58,14 @@ test('ttl expires pending approvals', async () => {
   assert.equal((await port.get(a.id))?.status, 'expired');
   await sleep(0);
   await assert.rejects(port.decide(a.id, { approved: true }), /already expired/);
+});
+
+test('the stored question never carries a caller credential', async () => {
+  const port = createMemoryApproval();
+  const q = sampleQuestion({ risk: 'write' });
+  const leaked = { ...req, question: { ...q, caller: Object.assign({ ...q.caller }, { credential: 'raw-token' }) } };
+  const a = await port.request(leaked);
+  assert.ok(!JSON.stringify(a).includes('raw-token'));
+  assert.ok(!JSON.stringify(await port.get(a.id)).includes('raw-token'));
+  assert.equal((leaked.question.caller as { credential?: string }).credential, 'raw-token', 'the caller object is not changed');
 });

@@ -5,8 +5,8 @@ import { credentialAdapter, identityAdapter } from '../src/index.ts';
 
 test('static-identity passes IdentityPort conformance', async () => {
   const report = await checkAdapter(identityAdapter, {
-    options: { tokens: { 'dev-token': { subject: 'alice', roles: ['staff'] } } },
-    fixtures: { valid: 'dev-token', expectSubject: 'alice', invalid: ['', 'nope'] },
+    options: { tokens: { 'dev-token': { subject: 'alice', roles: ['staff'], claims: { team: 'a' } } } },
+    fixtures: { valid: 'dev-token', expectId: 'alice', invalid: ['', 'nope'] },
   });
   assert.deepEqual(report.failures, []);
 });

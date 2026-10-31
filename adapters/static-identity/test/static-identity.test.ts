@@ -4,16 +4,16 @@ import { createStaticCredentials, createStaticIdentity } from '../src/index.ts';
 
 const identity = createStaticIdentity({
   tokens: {
-    'user-tok': { subject: 'alice', roles: ['staff'], scopes: ['docs:read'], claims: { team: 'a' } },
+    'user-tok': { subject: 'alice', roles: ['staff'], scopes: ['docs:read'], name: 'Alice', claims: { team: 'a' } },
     'bot-tok': { subject: 'bot', kind: 'agent' },
   },
 });
 
-test('verify maps a known credential to an identity carrying the token', async () => {
+test('verify maps a known credential to a caller carrying the credential', async () => {
   assert.deepEqual(await identity.verify('user-tok'), {
-    subject: 'alice', kind: 'user', roles: ['staff'], scopes: ['docs:read'], claims: { team: 'a' }, token: 'user-tok',
+    id: 'alice', kind: 'user', roles: ['staff'], scopes: ['docs:read'], name: 'Alice', ext: { 'static-identity.claims': { team: 'a' } }, credential: 'user-tok',
   });
-  assert.equal((await identity.verify('bot-tok')).kind, 'agent');
+  assert.deepEqual(await identity.verify('bot-tok'), { id: 'bot', kind: 'agent', roles: [], scopes: [], credential: 'bot-tok' }, 'lists always present');
 });
 
 test('verify rejects unknown and empty credentials without echoing them', async () => {

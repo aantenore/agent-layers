@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type Approval, type ApprovalPort, type LimitValue } from '@agent-layers/core';
+import { defineAdapter, limitProperties, limitValue, PORT_VERSIONS, type Approval, type ApprovalPort, type ApprovalRequest, type LimitValue } from '@agent-layers/core';
 import { LIMITS } from './limits.ts';
 
 export interface MemoryApprovalOptions {
@@ -8,6 +8,14 @@ export interface MemoryApprovalOptions {
 }
 
 interface Entry { approval: Approval; expiresAt: number | undefined; listeners: Set<() => void> }
+
+/** A copy of the request whose caller never carries a credential, even when one slips in: approvals are shown to people. */
+function stored(req: ApprovalRequest): ApprovalRequest {
+  const request = structuredClone(req);
+  const caller = request.question?.caller as { credential?: unknown } | undefined;
+  if (caller && typeof caller === 'object') delete caller.credential;
+  return request;
+}
 
 /** Approval store kept in memory; `wait` is driven by listeners, not polling. */
 export function createMemoryApproval(options: MemoryApprovalOptions = {}, name = 'memory-approval'): ApprovalPort {
@@ -29,7 +37,7 @@ export function createMemoryApproval(options: MemoryApprovalOptions = {}, name =
     native: () => entries,
     async request(req) {
       const expiresAt = req.expiresAt ? Date.parse(req.expiresAt) : Number.isFinite(ttlMs) ? Date.now() + ttlMs : undefined;
-      const request = structuredClone(req);
+      const request = stored(req);
       if (expiresAt !== undefined && !request.expiresAt) request.expiresAt = new Date(expiresAt).toISOString();
       const entry: Entry = { approval: { id: randomUUID(), status: 'pending', request }, expiresAt, listeners: new Set() };
       entries.set(entry.approval.id, entry);
@@ -96,6 +104,7 @@ export const adapter = defineAdapter<'ApprovalPort', MemoryApprovalOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
+  ext: { produces: [] },
   create: (options, ctx) => createMemoryApproval(options, ctx.name),
 });
 
