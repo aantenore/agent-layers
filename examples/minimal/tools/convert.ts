@@ -7,7 +7,7 @@ export const tools: ToolDef[] = [
     name: 'convert_temperature',
     description: 'Converts a temperature from degrees Celsius to degrees Fahrenheit.',
     risk: 'read',
-    inputSchema: {
+    params: {
       type: 'object',
       properties: { celsius: { type: ['number', 'string'], description: 'Degrees Celsius' } },
       required: ['celsius'],
@@ -15,8 +15,8 @@ export const tools: ToolDef[] = [
     },
     run: async ({ celsius }) => {
       const c = Number(celsius);
-      if (!Number.isFinite(c)) return { content: 'celsius must be a number', isError: true };
-      return `${c} °C is ${Math.round((c * 9 / 5 + 32) * 10) / 10} °F`;
+      if (!Number.isFinite(c)) return { ok: false, text: 'celsius must be a number' };
+      return { ok: true, text: `${c} °C is ${Math.round((c * 9 / 5 + 32) * 10) / 10} °F` };
     },
   },
 ];

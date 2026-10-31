@@ -6,7 +6,7 @@ export const tools: ToolDef[] = [
     name: 'convert_temperature',
     description: 'Converts a temperature from degrees Celsius to degrees Fahrenheit.',
     risk: 'read',
-    inputSchema: {
+    params: {
       type: 'object',
       properties: { celsius: { type: ['number', 'string'], description: 'Degrees Celsius' } },
       required: ['celsius'],
@@ -14,8 +14,8 @@ export const tools: ToolDef[] = [
     },
     run: async ({ celsius }) => {
       const c = Number(celsius);
-      if (!Number.isFinite(c)) return { content: 'celsius must be a number', isError: true };
-      return `${c} °C is ${Math.round((c * 9 / 5 + 32) * 10) / 10} °F`;
+      if (!Number.isFinite(c)) return { ok: false, text: 'celsius must be a number' };
+      return { ok: true, text: `${c} °C is ${Math.round((c * 9 / 5 + 32) * 10) / 10} °F` };
     },
   },
   {
@@ -24,17 +24,17 @@ export const tools: ToolDef[] = [
     description: 'Saves a short note for the caller.',
     risk: 'write',
     audience: 'tools-api',
-    inputSchema: {
+    params: {
       type: 'object',
       properties: { text: { type: 'string', description: 'The note' } },
       required: ['text'],
       additionalProperties: false,
     },
     run: async ({ text }, ctx) => {
-      if (!ctx.credentials) return { content: 'no credentials for this run', isError: true };
+      if (!ctx.credentials) return { ok: false, text: 'no credentials for this run' };
       // The token is requested to prove the caller can obtain one; it is never returned or logged.
       await ctx.credentials.token('tools-api');
-      return `Saved a note of ${String(text).length} characters for ${ctx.identity?.subject ?? 'nobody'}.`;
+      return { ok: true, text: `Saved a note of ${String(text).length} characters for ${ctx.caller?.id ?? 'nobody'}.` };
     },
   },
 ];
