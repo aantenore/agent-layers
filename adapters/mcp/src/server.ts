@@ -16,8 +16,10 @@ export interface McpServerChannelOptions {
   sse?: boolean;
   /** Idle time after which a session is forgotten (default 1800000). */
   sessionTtlMs?: number;
-  /** Most sessions kept; the least recently used is dropped first (default 1000). */
+  /** Most sessions in total (default 1000). When reached, a new session is refused (429); no caller can evict another's. */
   maxSessions?: number;
+  /** Most sessions per caller (default 10); a caller's own least recently used session makes room for its new one. */
+  maxSessionsPerCaller?: number;
 }
 
 const SUPPORTED_VERSIONS = [MCP_PROTOCOL_VERSION, '2025-03-26', '2024-11-05'];
@@ -58,6 +60,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
   const path = options.path ?? '/mcp';
   const ttl = options.sessionTtlMs ?? 30 * 60_000;
   const max = options.maxSessions ?? 1000;
+  const perCaller = options.maxSessionsPerCaller ?? 10;
   const visible = (tool: string) => (!options.include || matchesAny(options.include, tool)) && !(options.exclude && matchesAny(options.exclude, tool));
 
   return {
@@ -67,13 +70,23 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
       // A host without tools (for example a test host) serves an empty tool list.
       const tools: ToolPort = host.tools?.() ?? { listTools: async () => [], callTool: async () => ({ content: 'no tools', isError: true }) };
 
-      const sweep = () => {
+      const drop = (id: string) => {
+        const s = sessions.get(id);
+        if (!s) return;
+        for (const c of s.inflight.values()) c.abort();
+        sessions.delete(id);
+      };
+
+      /**
+       * Makes room for a new session of `owner`: forgets expired sessions, then the owner's own least recently used ones
+       * over the per-caller cap. False when the global cap is still reached: other callers' sessions are never evicted.
+       */
+      const makeRoom = (owner: string): boolean => {
         const now = Date.now();
-        for (const [id, s] of sessions) if (now - s.seen > ttl) { for (const c of s.inflight.values()) c.abort(); sessions.delete(id); }
-        while (sessions.size >= max) {
-          const [oldest] = sessions.keys();
-          sessions.delete(oldest!);
-        }
+        for (const [id, s] of sessions) if (now - s.seen > ttl) drop(id);
+        const own = [...sessions].filter(([, s]) => s.owner === owner).map(([id]) => id);
+        for (const id of own.slice(0, Math.max(0, own.length - perCaller + 1))) drop(id);
+        return sessions.size < max;
       };
 
       const callContext = (ctx: InboundContext, signal: AbortSignal): CallContext => ({
@@ -119,6 +132,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
       }
 
       async function post(req: Request, ctx: InboundContext): Promise<Response> {
+        if (!/^application\/json\s*(;|$)/i.test(req.headers.get('content-type') ?? '')) return jsonError(415, -32600, 'Content-Type must be application/json');
         let msg: unknown;
         try { msg = JSON.parse(await req.text()); } catch { return jsonError(400, -32700, 'parse error'); }
         if (Array.isArray(msg)) return jsonError(400, -32600, 'batches are not supported');
@@ -130,7 +144,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
 
         if (m.method === 'initialize') {
           if (!isRequest) return jsonError(400, -32600, 'initialize must be a request');
-          sweep();
+          if (!makeRoom(ownerOf(ctx))) return jsonError(429, -32000, 'too many sessions, try again later', m.id);
           const asked = typeof m.params?.protocolVersion === 'string' ? m.params.protocolVersion : '';
           const protocol = SUPPORTED_VERSIONS.includes(asked) ? asked : MCP_PROTOCOL_VERSION;
           const id = randomUUID();
@@ -145,7 +159,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
         if (!id) return jsonError(400, -32600, 'missing Mcp-Session-Id: initialize first', m.id ?? null);
         const session = sessions.get(id);
         // A session of another caller looks exactly like an unknown one.
-        if (session && Date.now() - session.seen > ttl) sessions.delete(id);
+        if (session && Date.now() - session.seen > ttl) drop(id);
         if (!session || !sessions.has(id) || session.owner !== ownerOf(ctx)) return jsonError(404, -32001, 'session not found', m.id ?? null);
         session.seen = Date.now();
         // Re-insert: the map order is the least-recently-used order.
@@ -178,8 +192,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
           const id = req.headers.get('mcp-session-id');
           const session = id ? sessions.get(id) : undefined;
           if (!session || session.owner !== ownerOf(ctx)) return jsonError(404, -32001, 'session not found');
-          for (const c of session.inflight.values()) c.abort();
-          sessions.delete(id!);
+          drop(id!);
           return new Response(null, { status: 204 });
         },
       };

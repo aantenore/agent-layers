@@ -45,6 +45,10 @@ export interface GatewayConfig {
   publicOrigin?: string;
   /** Cross-origin access; off when omitted. */
   cors?: { origins: string[] };
+  /** Origins accepted besides the gateway's own when a request carries an `Origin` header (the `cors` origins count too). */
+  allowedOrigins?: string[];
+  /** Accepted `Host` names (`name` or `name:port`); default: the loopback names when bound to loopback, any otherwise. */
+  allowedHosts?: string[];
 }
 
 export interface AgentConfig { file?: string; instructions?: string; model?: string; tools?: string[]; knowledge?: string[]; params?: Record<string, unknown> }

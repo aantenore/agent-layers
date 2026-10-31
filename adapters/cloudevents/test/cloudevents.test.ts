@@ -214,3 +214,15 @@ test('production tier: no caller credential and no configured credential is a 40
     await t.close();
   }
 });
+
+test('a foreign Origin is refused by the gateway before any event is read', async () => {
+  const t = await setup({ routes });
+  try {
+    const res = await fetch(t.url, { method: 'POST', headers: { ...structured, origin: 'http://evil.test' }, body: JSON.stringify(event) });
+    assert.equal(res.status, 403);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(t.seen.length, 0);
+  } finally {
+    await t.close();
+  }
+});

@@ -107,6 +107,10 @@ to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge
 - Methods: `initialize` (returns `Mcp-Session-Id`; protocol versions 2025-06-18, 2025-03-26, 2024-11-05), `ping`,
   `tools/list`, `tools/call`, `notifications/cancelled` (aborts the call in flight). Other methods answer `-32601`;
   batches are refused. `DELETE /mcp` ends a session; `GET /mcp` (server-initiated streams) is not offered (405).
+- Sessions are capped per caller and in total. A caller over its cap loses its own oldest session (calls running in
+  it are aborted); a full server refuses new sessions with 429 and never evicts another caller's session.
+- Requests must be `Content-Type: application/json` (415 otherwise). The gateway refuses foreign `Origin` headers and,
+  on loopback, unknown `Host` names, as the MCP transport requires against DNS rebinding.
 - Answers are JSON, or a one-event SSE stream when the client accepts only `text/event-stream` (or `sse: true`).
 - Tool names are the stack's `<source>__<tool>`; the risk becomes `readOnlyHint` and `destructiveHint`. A denied or
   blocked call is a tool result with `isError: true`, so the client's model can react; an unknown tool is `-32602`.
@@ -119,7 +123,8 @@ to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge
 | `serverName` | string | `agent-layers` | `serverInfo.name` |
 | `sse` | boolean | `false` | Always answer with an SSE stream |
 | `sessionTtlMs` | integer | `1800000` | Idle time before a session is forgotten |
-| `maxSessions` | integer | `1000` | Sessions kept; the least recently used goes first |
+| `maxSessions` | integer | `1000` | Sessions in total; when reached, `initialize` answers 429 |
+| `maxSessionsPerCaller` | integer | `10` | Sessions per caller; the caller's own least recently used one makes room |
 
 ```json
 { "layers": { "channels": [{ "adapter": "mcp", "options": { "exclude": ["admin__*"] } }] } }

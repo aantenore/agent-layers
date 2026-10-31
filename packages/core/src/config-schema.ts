@@ -93,6 +93,8 @@ const gateway: JsonSchema = {
     maxBodyBytes: { type: 'integer', minimum: 1 },
     requestTimeoutMs: { type: 'integer', minimum: 1 },
     publicOrigin: { type: 'string', minLength: 1 },
+    allowedOrigins: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Origins accepted besides the gateway\'s own; other Origin headers get 403.' },
+    allowedHosts: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Accepted Host names (name or name:port); default: loopback names when bound to loopback.' },
     cors: {
       type: 'object',
       properties: { origins: { type: 'array', items: { type: 'string', minLength: 1 } } },

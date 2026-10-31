@@ -24,6 +24,8 @@ const AGENT_PREFIX = 'agent:';
 
 class BadRequest extends Error {}
 
+const isJson = (req: Request) => /^application\/json\s*(;|$)/i.test(req.headers.get('content-type') ?? '');
+
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => Response.json(body, { status, headers });
 const error = (status: number, message: string, type: string, code?: string) => json({ error: { message, type, param: null, code: code ?? null } }, status);
 const now = () => Math.floor(Date.now() / 1000);
@@ -216,6 +218,7 @@ export function createOpenAICompatibleChannel(options: OpenAICompatibleChannelOp
         path: `${base}/chat/completions`,
         methods: ['POST'],
         async handle(req, ctx) {
+          if (!isJson(req)) return error(415, 'Content-Type must be application/json', 'invalid_request_error');
           let parsed: Parsed;
           try {
             parsed = parseChatBody(await req.json().catch(() => { throw new BadRequest('the body is not valid JSON'); }));

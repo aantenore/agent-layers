@@ -20,13 +20,17 @@ From the command line: `agent-layers gateway --profile <name> [--port <n>] [--ho
 ## What every request goes through
 
 1. A request id (`x-request-id` when the client sends a valid one, otherwise a new one), echoed in the response.
-2. Route lookup: exact paths before prefixes, longer before shorter; 404 or 405 with `Allow`.
-3. Authentication, unless the route is `public` (discovery documents): `Authorization: Bearer <credential>` verified
+2. Origin and Host: a request with an `Origin` header must come from the gateway's own origin, from
+   `allowedOrigins` or from a `cors` origin; otherwise 403 (cross-site calls and DNS rebinding). When the gateway is
+   bound to loopback, the `Host` must be a loopback name (`localhost`, `127.0.0.1`, `[::1]`); with `allowedHosts` it
+   must be one of those names. `/healthz` and `/readyz` are exempt.
+3. Route lookup: exact paths before prefixes, longer before shorter; 404 or 405 with `Allow`.
+4. Authentication, unless the route is `public` (discovery documents): `Authorization: Bearer <credential>` verified
    through the identity port, and the identity passed to the route. No credential: 401 with
    `WWW-Authenticate: Bearer realm="agent-layers"`, unless the config sets `anonymous: true`. A credential that does not
    verify: always 401 with `error="invalid_token"`; the adapter's error text is never returned.
-4. Body limit (413) and time limit (504); an error inside a route is a 500 without its message.
-5. One span `gateway.request` on the `interface` layer, with method, path (never the query string), route, inbound
+5. Body limit (413) and time limit (504); an error inside a route is a 500 without its message.
+6. One span `gateway.request` on the `interface` layer, with method, path (never the query string), route, inbound
    instance, status, duration and whether the caller was authenticated, plus a `gateway.requests` metric.
 
 `GET /healthz` answers 200 while the process runs. `GET /readyz` answers 200 when the profile passes the readiness
@@ -55,6 +59,8 @@ The `gateway` block of the stack config, overridable per profile; `serveStack` t
 | `requestTimeoutMs` | integer | `300000` | Time limit of one request, streams included |
 | `publicOrigin` | string | the listen address | Origin used in absolute URLs, behind a proxy |
 | `cors` | `{ origins }` | off | Origins allowed to call from a browser (`*` for any) |
+| `allowedOrigins` | string[] | `[]` | Origins accepted besides the gateway's own, without CORS headers (desktop clients) |
+| `allowedHosts` | string[] | loopback names when bound to loopback, any otherwise | Accepted `Host` names (`name` or `name:port`) |
 | `closeGraceMs` | integer | `10000` | Code only: how long `close` waits for work in flight |
 
 ```json

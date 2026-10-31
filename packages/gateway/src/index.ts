@@ -34,6 +34,7 @@ const DEFAULTS = { port: 8787, host: '127.0.0.1', maxBodyBytes: 1024 * 1024, req
 const RESERVED = ['/healthz', '/readyz'];
 const REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
 const REALM = 'agent-layers';
+const LOOPBACK = ['127.0.0.1', 'localhost', '::1'];
 
 interface Mounted { route: InboundRoute; instance: string }
 
@@ -129,6 +130,9 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   }
 
   const ready = await readiness(stack.config, stack.registry);
+  const ownOrigins = new Set<string>();
+  const extraOrigins = new Set([...(opts.allowedOrigins ?? []), ...(opts.cors?.origins ?? [])]);
+  let allowedHosts: Set<string> | undefined;
   const routes = mounted.map((m) => m.route);
   let origin = '';
 
@@ -156,10 +160,29 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     return { 'access-control-allow-origin': from, vary: 'Origin', 'access-control-expose-headers': 'mcp-session-id, x-request-id' };
   }
 
+  /**
+   * DNS rebinding and cross-site requests: a request that carries an `Origin` must come from the gateway's own origin,
+   * an allowed origin or a CORS origin; when bound to loopback (or with `allowedHosts`), the `Host` must be a known name.
+   */
+  function checkOriginAndHost(req: IncomingMessage): Response | undefined {
+    const from = req.headers.origin;
+    if (from !== undefined && !ownOrigins.has(from) && !extraOrigins.has(from) && !extraOrigins.has('*')) {
+      return errorResponse(403, 'origin not allowed', 'permission_error');
+    }
+    if (allowedHosts) {
+      const hostHeader = String(req.headers.host ?? '').toLowerCase();
+      const name = hostHeader.startsWith('[') ? hostHeader.slice(0, hostHeader.indexOf(']') + 1) : hostHeader.replace(/:\d+$/, '');
+      if (!allowedHosts.has(hostHeader) && !allowedHosts.has(name)) return errorResponse(403, 'host not allowed', 'permission_error');
+    }
+    return undefined;
+  }
+
   async function exchange(req: IncomingMessage, requestId: string, signal: AbortSignal, attrs: Record<string, string | number | boolean>): Promise<Response> {
     const path = new URL(req.url ?? '/', 'http://gateway').pathname;
     const method = (req.method ?? 'GET').toUpperCase();
     const corsHeaders = cors(req);
+    const preflightRefused = method === 'OPTIONS' ? checkOriginAndHost(req) : undefined;
+    if (preflightRefused) return preflightRefused;
     if (method === 'OPTIONS' && req.headers['access-control-request-method'] && Object.keys(corsHeaders).length) {
       return new Response(null, {
         status: 204,
@@ -175,6 +198,8 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
       const ok = ready.ok && !draining;
       return Response.json({ status: draining ? 'draining' : ok ? 'ready' : 'not-ready', tier, problems: ready.problems.length }, { status: ok ? 200 : 503 });
     }
+    const refused = checkOriginAndHost(req);
+    if (refused) return refused;
     const { route, allowed } = findRoute(routes, method, path);
     if (!route) {
       return allowed.length
@@ -249,6 +274,14 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   const shown = hostName === '0.0.0.0' || hostName === '::' ? 'localhost' : hostName.includes(':') ? `[${hostName}]` : hostName;
   const url = `http://${shown}:${port}`;
   origin = (opts.publicOrigin ?? url).replace(/\/+$/, '');
+  const loopback = LOOPBACK.includes(hostName.toLowerCase());
+  ownOrigins.add(origin);
+  ownOrigins.add(url);
+  if (loopback) for (const n of ['localhost', '127.0.0.1', '[::1]']) ownOrigins.add(`http://${n}:${port}`);
+  const publicHost = opts.publicOrigin ? new URL(origin).host.toLowerCase() : undefined;
+  allowedHosts = opts.allowedHosts
+    ? new Set([...opts.allowedHosts.map((h) => h.toLowerCase()), ...(publicHost ? [publicHost] : [])])
+    : loopback ? new Set(['localhost', '127.0.0.1', '[::1]', ...(publicHost ? [publicHost] : [])]) : undefined;
 
   let closing: Promise<void> | undefined;
   return {

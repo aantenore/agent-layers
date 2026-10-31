@@ -51,6 +51,7 @@ model endpoint: `base_url = <gateway>/v1`, `api_key = <a credential the identity
     "content_filter"`.
 - `stream: true` answers with Server-Sent Events in the Chat Completions chunk format, ending with `data: [DONE]`;
   `stream_options.include_usage` adds a final usage chunk.
+- Requests must be `Content-Type: application/json` (415 otherwise).
 - Errors use the OpenAI error shape: 400 for an invalid body or a guard block on input (`code: "content_filter"`),
   404 `model_not_found`, 502 when the upstream model fails. Error text from upstream is never returned.
 

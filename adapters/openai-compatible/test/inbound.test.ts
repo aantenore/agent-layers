@@ -112,3 +112,9 @@ test('unknown models, agents not exposed and bad bodies are refused', async () =
   assert.equal((await post({ model: 'fast', messages: [] })).status, 400);
   assert.equal((await fetch(`${gw.url}/v1/chat/completions`, { method: 'POST', headers: auth, body: '{nope' })).status, 400);
 });
+
+test('JSON content type is required and foreign browser origins are refused by the gateway', async () => {
+  assert.equal((await fetch(`${gw.url}/v1/chat/completions`, { method: 'POST', headers: { authorization: auth.authorization, 'content-type': 'text/plain' }, body: '{}' })).status, 415);
+  const foreign = await fetch(`${gw.url}/v1/chat/completions`, { method: 'POST', headers: { ...auth, origin: 'http://evil.test' }, body: JSON.stringify({ model: 'fast', messages: [{ role: 'user', content: 'ping' }] }) });
+  assert.equal(foreign.status, 403);
+});

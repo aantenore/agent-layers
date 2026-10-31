@@ -135,10 +135,16 @@ test('the inbound descriptor passes ChannelPort conformance', async () => {
   const report = await checkAdapter(channelAdapter, {
     fixtures: {
       async exerciseMount(mount: Parameters<typeof inboundFetch>[0]) {
-        const res = await inboundFetch(mount, new Request('http://gateway.test/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) }));
+        const res = await inboundFetch(mount, new Request('http://gateway.test/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) }));
         assert.ok(res.headers.get('mcp-session-id'));
       },
     },
   });
   assert.deepEqual(report.failures, []);
+});
+
+test('a foreign Origin is refused before the MCP server sees the request (DNS rebinding)', async () => {
+  const res = await fetch(url(), { method: 'POST', headers: { ...headers(), origin: 'http://evil.test' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) });
+  assert.equal(res.status, 403);
+  assert.equal(res.headers.get('mcp-session-id'), null);
 });

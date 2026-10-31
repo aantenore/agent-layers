@@ -223,3 +223,29 @@ test('close is graceful: a request in flight completes, new ones are refused', a
   await assert.rejects(fetch(`${gw.url}/healthz`));
   await stack.close();
 });
+
+test('Origin and Host checks: foreign origins and unknown host names get 403', async () => {
+  const stack = await stackFor('prototype');
+  const gw = await serveStack(stack, { port: 0, anonymous: true, allowedOrigins: ['http://ide.test'] });
+  const named = await serveStack(stack, { port: 0, anonymous: true, host: '127.0.0.1', allowedHosts: ['agents.internal'] });
+  const send = (url: string, headers: Record<string, string>) => new Promise<number>((resolve, reject) => {
+    const req = request(`${url}/echo`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers } }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+    req.on('error', reject);
+    req.end('{"text":"ping"}');
+  });
+  try {
+    assert.equal(await send(gw.url, { origin: 'http://evil.test' }), 403);
+    assert.equal(await send(gw.url, { origin: 'http://ide.test' }), 200);
+    assert.equal(await send(gw.url, { origin: gw.url }), 200);
+    assert.equal(await send(gw.url, {}), 200, 'no Origin: not a browser, allowed');
+    assert.equal(await send(gw.url, { host: 'evil.test' }), 403, 'DNS rebinding: a loopback gateway answers only loopback names');
+    assert.equal(await send(gw.url, { host: `localhost:${gw.port}` }), 200);
+    assert.equal(await send(named.url, { host: 'agents.internal' }), 200);
+    assert.equal(await send(named.url, { host: `127.0.0.1:${named.port}` }), 403);
+    assert.equal((await fetch(`${gw.url}/healthz`, { headers: { origin: 'http://evil.test' } })).status, 200, 'health stays reachable');
+  } finally {
+    await gw.close();
+    await named.close();
+    await stack.close();
+  }
+});

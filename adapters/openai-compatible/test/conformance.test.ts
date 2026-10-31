@@ -26,7 +26,7 @@ test('the inbound descriptor passes ChannelPort conformance through its mounted 
       expectInput: 'messages',
       async exerciseMount(mount: Parameters<typeof inboundFetch>[0]) {
         const res = await inboundFetch(mount, new Request('http://gateway.test/v1/chat/completions', {
-          method: 'POST', body: JSON.stringify({ model: 'agent:conformance', messages: [{ role: 'user', content: 'hello' }] }),
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'agent:conformance', messages: [{ role: 'user', content: 'hello' }] }),
         }));
         assert.equal(res.status, 200);
       },
