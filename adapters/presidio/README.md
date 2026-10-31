@@ -4,8 +4,9 @@ Maps **Microsoft Presidio** → **GuardPort** (layer `guardrail`). Tiers: protot
 
 Finds PII with the Presidio analyzer (`POST /analyze`) and rewrites it with the anonymizer (`POST /anonymize`), or blocks
 the text. Verdict reasons name entity types (`PII redacted: EMAIL_ADDRESS`), never the matched values. If Presidio cannot
-be reached or answers badly the guard fails closed: the verdict is `block` with the reason `presidio unavailable: <cause>`.
-Response bodies are never copied into reasons, because services often echo the text they were sent.
+be reached or answers badly the guard fails closed: the verdict is `block` with the reason `presidio unavailable: <cause>`, where the cause is one of
+`HTTP <status>`, `timeout`, `invalid response`, `network error`. Error text and response bodies are never copied into
+reasons: they can echo URLs, headers or the text that was sent. URLs with credentials are rejected at creation.
 
 Tested live against Presidio 2.2.362 (`reference/guardrail`).
 

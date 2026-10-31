@@ -1,5 +1,5 @@
 import { defineAdapter, GUARD_STAGES, PORT_VERSIONS, type GuardInput, type GuardPort, type GuardStage, type GuardVerdict } from '@agent-layers/core';
-import { failure, postJson, type FetchLike, type HttpOptions } from './http.ts';
+import { assertPlainUrl, failure, InvalidResponseError, postJson, type FetchLike, type HttpOptions } from './http.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface HttpGuardOptions {
@@ -23,8 +23,8 @@ const ACTIONS: ReadonlySet<string> = new Set(['allow', 'block', 'redact']);
 /** Throws unless `value` is a GuardVerdict; returns it without unknown fields. */
 export function parseVerdict(value: unknown): GuardVerdict {
   const v = value as Partial<GuardVerdict> | null;
-  if (!v || typeof v !== 'object' || !ACTIONS.has(v.action as string)) throw new Error('guard service returned an invalid verdict');
-  if (v.action === 'redact' && typeof v.text !== 'string') throw new Error('guard service returned a redact verdict without text');
+  if (!v || typeof v !== 'object' || !ACTIONS.has(v.action as string)) throw new InvalidResponseError('guard service');
+  if (v.action === 'redact' && typeof v.text !== 'string') throw new InvalidResponseError('guard service');
   return {
     action: v.action!,
     ...(typeof v.text === 'string' ? { text: v.text } : {}),
@@ -42,6 +42,7 @@ function requestBody(input: GuardInput): GuardInput {
 
 /** Factory: a guard backed by any HTTP service that speaks the guard contract. */
 export function createHttpGuard(options: HttpGuardOptions, deps: HttpGuardDeps = {}): GuardPort {
+  assertPlainUrl(options.url, 'http-guard url');
   const http: HttpOptions = {
     timeoutMs: options.timeoutMs ?? 10_000,
     headers: { ...(options.token ? { authorization: `Bearer ${options.token}` } : {}), ...options.headers },

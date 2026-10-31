@@ -10,7 +10,8 @@ planted in tool results.
 
 Fails closed: an unreachable service, a timeout, an unexpected body or a rejected token gives a `block` with the reason
 `llm-guard unavailable: <cause>`. A missing token answers HTTP 403 and a wrong one HTTP 401; both read
-`authentication failed`. The token never appears in reasons.
+`authentication failed`. The cause is one of `HTTP <status>`, `timeout`, `invalid response`, `network error`;
+error text and the token never appear in reasons, and URLs with credentials are rejected at creation.
 
 Some scanners (`Secrets`, `Anonymize`) report the result as invalid but return the text with the finding replaced. List
 them in `sanitizeScanners` to apply that text instead of blocking; if any other scanner fails too, the text is blocked.

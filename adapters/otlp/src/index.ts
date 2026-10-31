@@ -58,6 +58,28 @@ interface FinishedSpan {
 const STATUS_ERROR = 2;
 const hex = (bytes: number) => randomBytes(bytes).toString('hex');
 
+/** Throws unless the endpoint is an absolute URL without credentials: those belong in `headers`. */
+function assertPlainEndpoint(endpoint: string): void {
+  let url: URL;
+  try { url = new URL(endpoint); } catch { throw new Error('otlp: endpoint is not a valid http(s) URL'); }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('otlp: endpoint is not a valid http(s) URL');
+  if (url.username || url.password) throw new Error('otlp: the endpoint must not carry credentials; use headers');
+}
+
+/** Why an export failed, from a fixed set. Error text can echo URLs, headers or payloads, so it is never used. */
+function failureReason(err: unknown): string {
+  if (err instanceof ExportStatusError) return `HTTP ${err.status}`;
+  if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) return 'timeout';
+  if (err instanceof InvalidResponse) return 'invalid response';
+  return 'network error';
+}
+
+class ExportStatusError extends Error {
+  readonly status: number;
+  constructor(status: number) { super('export failed'); this.status = status; }
+}
+class InvalidResponse extends Error {}
+
 function errorInfo(err: unknown): { type: string; message: string } {
   if (err instanceof Error) return { type: err.name || 'Error', message: err.message };
   return { type: 'Error', message: typeof err === 'string' ? err : 'error' };
@@ -74,6 +96,7 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
   const semconvNames = options.semconvNames !== false;
   const post = deps.fetch ?? fetch;
   const endpoint = options.endpoint ?? env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318';
+  assertPlainEndpoint(endpoint);
   const base = endpoint.replace(/\/+$/, '').replace(/\/v1\/(traces|metrics)$/, '');
   const tracesUrl = `${base}/v1/traces`;
   const metricsUrl = `${base}/v1/metrics`;
@@ -97,14 +120,15 @@ export function createOtlpTelemetry(options: OtlpOptions = {}, deps: OtlpDeps = 
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
       });
+      if (typeof res?.ok !== 'boolean') throw new InvalidResponse();
       await res.body?.cancel().catch(() => {});
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new ExportStatusError(res.status);
       return true;
     } catch (err) {
       if (!warned.has(what)) {
         warned.add(what);
-        // The URL's origin only: the path and any credentials in it stay out of the message.
-        process.emitWarning(`OTLP ${what} export to ${new URL(url).origin} failed: ${err instanceof Error ? err.message : String(err)}`);
+        // The origin and a fixed reason only: the path, headers and error text stay out of the message.
+        process.emitWarning(`OTLP ${what} export to ${new URL(url).origin} failed: ${failureReason(err)}`);
       }
       return false;
     }

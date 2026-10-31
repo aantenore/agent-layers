@@ -9,6 +9,12 @@ export interface HttpOptions {
   fetch?: FetchLike;
 }
 
+/** The service answered, but not with what the contract says (not JSON, wrong shape). */
+export class InvalidResponseError extends Error {
+  override name = 'InvalidResponseError';
+  constructor(what: string) { super(`${what} returned an invalid response`); }
+}
+
 export class HttpStatusError extends Error {
   override name = 'HttpStatusError';
   readonly status: number;
@@ -37,15 +43,27 @@ export async function postJson(url: string, body: unknown, what: string, o: Http
   try {
     return await res.json();
   } catch {
-    throw new Error(`${what} did not return JSON`);
+    throw new InvalidResponseError(what);
   }
 }
 
 export const trimSlash = (url: string) => url.replace(/\/+$/, '');
 
-/** Short, safe description of a failure for a verdict reason. */
+/**
+ * Why a call failed, from a fixed set: `HTTP <status>`, `timeout`, `invalid response`, `network error`. Error text is
+ * never used: it can echo URLs with credentials, headers or the text that was sent.
+ */
 export function failure(err: unknown): string {
   if (err instanceof HttpStatusError) return `HTTP ${err.status}`;
+  if (err instanceof InvalidResponseError) return 'invalid response';
   if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) return 'timeout';
-  return err instanceof Error ? err.message.slice(0, 120) : 'error';
+  return 'network error';
+}
+
+/** Throws unless `url` is an absolute URL without credentials: those belong in `headers` or `token`. */
+export function assertPlainUrl(url: string, what: string): void {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { throw new Error(`${what}: not a valid http(s) URL`); }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error(`${what}: not a valid http(s) URL`);
+  if (parsed.username || parsed.password) throw new Error(`${what}: the URL must not carry credentials; use headers or token`);
 }

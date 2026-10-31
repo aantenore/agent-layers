@@ -75,3 +75,17 @@ test('stages are exposed when configured', () => {
   assert.deepEqual(guard({ stages: ['output'] }).stages, ['output']);
   assert.equal(guard().stages, undefined);
 });
+
+test('failure reasons come from a fixed set and never from error text', async () => {
+  const reasonOf = async (fetch: (u: string, i: RequestInit) => Promise<Response>) => (await createHttpGuard({ url: 'http://x', timeoutMs: 20 }, { fetch }).check(input)).reason;
+  assert.equal(await reasonOf(async () => { throw new Error('connect ECONNREFUSED https://admin:hunter2@internal.example/analyze authorization: Bearer abc123 text: jane.doe@example.com'); }), 'guard service unavailable: network error');
+  assert.equal(await reasonOf(async () => new Response('<html>hello</html>')), 'guard service unavailable: invalid response');
+  assert.equal(await reasonOf(async () => new Response(JSON.stringify({ action: 'maybe', reason: 'hello' }))), 'guard service unavailable: invalid response');
+  assert.equal(await reasonOf(async () => new Response('echo hello', { status: 429 })), 'guard service unavailable: HTTP 429');
+  assert.equal(await reasonOf((_u, init) => new Promise((_r, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)))), 'guard service unavailable: timeout');
+});
+
+test('URLs with credentials are rejected at creation', () => {
+  assert.throws(() => createHttpGuard({ url: 'https://user:pw@guard.example/check' }), /must not carry credentials/);
+  assert.throws(() => createHttpGuard({ url: 'guard.example/check' }), /not a valid http\(s\) URL/);
+});

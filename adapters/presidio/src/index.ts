@@ -1,5 +1,5 @@
 import { defineAdapter, GUARD_STAGES, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict } from '@agent-layers/core';
-import { failure, postJson, trimSlash, type FetchLike, type HttpOptions } from './http.ts';
+import { assertPlainUrl, failure, InvalidResponseError, postJson, trimSlash, type FetchLike, type HttpOptions } from './http.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface PresidioOptions {
@@ -36,6 +36,8 @@ const entityTypes = (found: readonly Finding[]) => [...new Set(found.map((f) => 
 export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps = {}): GuardPort {
   const action = options.action ?? 'redact';
   if (action === 'redact' && !options.anonymizerUrl) throw new Error('presidio: action "redact" needs anonymizerUrl');
+  assertPlainUrl(options.analyzerUrl, 'presidio analyzerUrl');
+  if (options.anonymizerUrl) assertPlainUrl(options.anonymizerUrl, 'presidio anonymizerUrl');
   const name = deps.name ?? 'presidio';
   const analyzer = `${trimSlash(options.analyzerUrl)}/analyze`;
   const anonymizer = options.anonymizerUrl ? `${trimSlash(options.anonymizerUrl)}/anonymize` : undefined;
@@ -52,7 +54,7 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
       ...(options.entities ? { entities: options.entities } : {}),
       ...(options.scoreThreshold !== undefined ? { score_threshold: options.scoreThreshold } : {}),
     }, 'presidio analyzer', http, signal);
-    if (!Array.isArray(found)) throw new Error('presidio analyzer returned an unexpected body');
+    if (!Array.isArray(found)) throw new InvalidResponseError('presidio analyzer');
     const findings = found as Finding[];
     if (!findings.length) return { action: 'allow' };
     if (action === 'block') return { action: 'block', reason: `PII detected: ${entityTypes(findings)}` };
@@ -61,7 +63,7 @@ export function createPresidioGuard(options: PresidioOptions, deps: PresidioDeps
       analyzer_results: findings.map(({ entity_type, start, end, score }) => ({ entity_type, start, end, score })),
       ...(options.operators ? { anonymizers: options.operators } : {}),
     }, 'presidio anonymizer', http, signal) as { text?: unknown } | null;
-    if (typeof res?.text !== 'string') throw new Error('presidio anonymizer returned an unexpected body');
+    if (typeof res?.text !== 'string') throw new InvalidResponseError('presidio anonymizer');
     return { action: 'redact', text: res.text, reason: `PII redacted: ${entityTypes(findings)}` };
   }
 

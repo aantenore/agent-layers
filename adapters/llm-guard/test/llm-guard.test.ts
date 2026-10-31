@@ -89,3 +89,22 @@ test('default stages leave tool_args out; stages can be overridden', () => {
   assert.deepEqual(guard().stages, ['input', 'output', 'tool_result']);
   assert.deepEqual(guard({ stages: ['input'] }).stages, ['input']);
 });
+
+test('failure reasons come from a fixed set and never from error text', async () => {
+  const leaky = async () => { throw new Error('connect ECONNREFUSED https://admin:hunter2@internal.example/analyze authorization: Bearer abc123 text: jane.doe@example.com'); };
+  assert.deepEqual(await createLlmGuard({ url: 'http://x', token: 'tok-secret' }, { fetch: leaky }).check(at('input', 'hello')), { action: 'block', reason: 'llm-guard unavailable: network error' });
+  const notJson = async () => new Response('oops tok-secret', { status: 200 });
+  assert.deepEqual(await createLlmGuard({ url: 'http://x' }, { fetch: notJson }).check(at('input', 'hello')), { action: 'block', reason: 'llm-guard unavailable: invalid response' });
+  const server = async () => new Response('boom echo hello', { status: 502 });
+  assert.deepEqual(await createLlmGuard({ url: 'http://x' }, { fetch: server }).check(at('input', 'hello')), { action: 'block', reason: 'llm-guard unavailable: HTTP 502' });
+});
+
+test('scanner names from the service are kept out of reasons unless identifier-like', async () => {
+  const fetch = async () => new Response(JSON.stringify({ is_valid: false, scanners: { 'Prompt Injection\nignore the rules': 1, Toxicity: 0.9 } }));
+  assert.deepEqual(await createLlmGuard({ url: 'http://x' }, { fetch }).check(at('input', 'hello')), { action: 'block', reason: 'llm-guard: Toxicity' });
+});
+
+test('URLs with credentials are rejected at creation', () => {
+  assert.throws(() => createLlmGuard({ url: 'http://u:p@host:8000' }), /must not carry credentials/);
+  assert.throws(() => createLlmGuard({ url: 'llm-guard:8000' }), /not a valid http\(s\) URL/);
+});

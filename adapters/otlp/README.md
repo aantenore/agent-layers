@@ -24,7 +24,8 @@ from spans: `gen_ai.client.operation.duration` (seconds, from `chat` spans) and 
 **No content, no secrets.** Prompts, answers, tool arguments and results, queries, reasons and error text are left out
 unless `captureContent` is true; secret-looking attribute keys are masked as the TelemetryPort requires. Span status
 carries only `error.type` by default. Export failures never reach the run: the first one per signal is reported with
-`process.emitWarning` (origin only), spans of a failed batch are dropped, metrics are re-sent with the next export.
+`process.emitWarning`: the origin and one of `HTTP <status>`, `timeout`, `invalid response`, `network error`, never error
+text. An endpoint with credentials in the URL is rejected at creation; put them in `headers`. Spans of a failed batch are dropped; metrics are re-sent with the next export.
 
 `native()` returns `{ traceparent() }`, the W3C header of the active span, for outbound HTTP calls.
 

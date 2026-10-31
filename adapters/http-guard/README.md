@@ -29,7 +29,9 @@ Response, [`guard-verdict.json`](../../spec/schemas/guard-verdict.json), HTTP 20
 object, otherwise the stack blocks the call.
 
 Fails closed: a non-2xx answer, a timeout, a body that is not JSON, an unknown `action` or a `redact` without `text`
-becomes a `block` with the reason `guard service unavailable: <cause>`. Response bodies are not copied into reasons.
+becomes a `block` with the reason `guard service unavailable: <cause>`, where the cause is one of `HTTP <status>`,
+`timeout`, `invalid response`, `network error`. Error text and response bodies are not copied into reasons. URLs with
+credentials are rejected at creation: use `token` or `headers`.
 
 A minimal service in Node, as a template for other languages:
 

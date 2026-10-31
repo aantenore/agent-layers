@@ -1,5 +1,5 @@
 import { defineAdapter, GUARD_STAGES, PORT_VERSIONS, type GuardPort, type GuardStage, type GuardVerdict } from '@agent-layers/core';
-import { failure, HttpStatusError, postJson, trimSlash, type FetchLike, type HttpOptions } from './http.ts';
+import { assertPlainUrl, failure, HttpStatusError, InvalidResponseError, postJson, trimSlash, type FetchLike, type HttpOptions } from './http.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface LlmGuardOptions {
@@ -33,8 +33,10 @@ interface Analysis { is_valid?: unknown; scanners?: unknown; sanitized_prompt?: 
  */
 function failingScanners(scanners: unknown): string[] {
   const entries = Object.entries((scanners && typeof scanners === 'object' ? scanners : {}) as Record<string, unknown>);
-  const failing = entries.filter(([, score]) => typeof score === 'number' && score >= 0).map(([name]) => name);
-  return failing.length ? failing : entries.map(([name]) => name);
+  // Names come from the service and end up in a reason: keep only identifier-like ones.
+  const names = (list: [string, unknown][]) => list.map(([name]) => name).filter((n) => /^[\w.-]{1,64}$/.test(n));
+  const failing = names(entries.filter(([, score]) => typeof score === 'number' && score >= 0));
+  return failing.length ? failing : names(entries);
 }
 
 /**
@@ -43,6 +45,7 @@ function failingScanners(scanners: unknown): string[] {
  * An invalid verdict blocks and names the failing scanners; a valid one whose sanitized text differs redacts.
  */
 export function createLlmGuard(options: LlmGuardOptions, deps: LlmGuardDeps = {}): GuardPort {
+  assertPlainUrl(options.url, 'llm-guard url');
   const base = trimSlash(options.url);
   const http: HttpOptions = {
     timeoutMs: options.timeoutMs ?? 30_000,
@@ -59,7 +62,7 @@ export function createLlmGuard(options: LlmGuardOptions, deps: LlmGuardDeps = {}
       output ? { prompt: '', output: text, ...suppress } : { prompt: text, ...suppress },
       'llm-guard', http, signal,
     ) as Analysis | null;
-    if (typeof res?.is_valid !== 'boolean') throw new Error('llm-guard returned an unexpected body');
+    if (typeof res?.is_valid !== 'boolean') throw new InvalidResponseError('llm-guard');
     const sanitized = output ? res.sanitized_output : res.sanitized_prompt;
     if (!res.is_valid) {
       const failed = failingScanners(res.scanners);

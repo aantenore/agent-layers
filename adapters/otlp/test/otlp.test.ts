@@ -285,3 +285,34 @@ test('native().traceparent() names the active span', async () => {
   const run = sink.spans()[0]!;
   assert.equal(seen, `00-${run.traceId}-${run.spanId}-01`);
 });
+
+test('warnings carry the origin and a fixed reason, never error text', async () => {
+  const warnings: string[] = [];
+  const onWarning = (w: Error) => { warnings.push(w.message); };
+  process.on('warning', onWarning);
+  const leak = 'connect ECONNREFUSED https://admin:hunter2@internal.example/v1/traces authorization: Bearer abc123';
+  const reasons: [string, (u: string, i: RequestInit) => Promise<Response>][] = [
+    ['network error', async () => { throw new Error(leak); }],
+    ['HTTP 502', async () => new Response(leak, { status: 502 })],
+    ['invalid response', async () => undefined as unknown as Response],
+    ['timeout', (_u, init) => new Promise((_r, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)))],
+  ];
+  try {
+    for (const [, fetch] of reasons) {
+      const t = createOtlpTelemetry({ endpoint: 'https://collector.example:4318/prefix', headers: { authorization: 'Bearer abc123' }, timeoutMs: 20 }, { fetch });
+      await t.span('x', L('telemetry'), async () => {});
+      await t.flush!();
+    }
+    await new Promise((r) => setImmediate(r));
+  } finally { process.off('warning', onWarning); }
+  assert.equal(warnings.length, 4);
+  reasons.forEach(([reason], i) => assert.equal(warnings[i], `OTLP trace export to https://collector.example:4318 failed: ${reason}`));
+  assert.ok(warnings.every((w) => !/hunter2|abc123|ECONNREFUSED|internal\.example/.test(w)));
+});
+
+test('endpoints with credentials or that are not URLs are rejected at creation', () => {
+  assert.throws(() => createOtlpTelemetry({ endpoint: 'https://user:pw@collector.example' }), /must not carry credentials/);
+  assert.throws(() => createOtlpTelemetry({ endpoint: 'https://user@collector.example' }), /must not carry credentials/);
+  assert.throws(() => createOtlpTelemetry({}, { env: { OTEL_EXPORTER_OTLP_ENDPOINT: 'http://u:p@host:4318' } }), /must not carry credentials/);
+  assert.throws(() => createOtlpTelemetry({ endpoint: 'collector:4318' }), /not a valid http\(s\) URL/);
+});

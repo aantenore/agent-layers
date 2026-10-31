@@ -83,3 +83,21 @@ test('redact needs an anonymizer URL; stages are exposed when configured', () =>
   assert.deepEqual(createPresidioGuard({ analyzerUrl: 'http://x', action: 'block', stages: ['input', 'output'] }).stages, ['input', 'output']);
   assert.equal(createPresidioGuard({ analyzerUrl: 'http://x', action: 'block' }).stages, undefined);
 });
+
+test('failure reasons come from a fixed set and never from error text', async () => {
+  const leaky = async () => { throw new Error('connect ECONNREFUSED https://admin:hunter2@internal.example/analyze authorization: Bearer abc123 text: jane.doe@example.com'); };
+  const v = await createPresidioGuard({ analyzerUrl: 'http://x', anonymizerUrl: 'http://x' }, { fetch: leaky }).check(input('hello'));
+  assert.deepEqual(v, { action: 'block', reason: 'presidio unavailable: network error' });
+  const notJson = async () => new Response('<html>jane.doe@example.com</html>', { status: 200 });
+  const w = await createPresidioGuard({ analyzerUrl: 'http://x', anonymizerUrl: 'http://x' }, { fetch: notJson }).check(input('hello'));
+  assert.deepEqual(w, { action: 'block', reason: 'presidio unavailable: invalid response' });
+  const slow = async (_u: string, init: RequestInit) => new Promise<Response>((_r, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)));
+  const t = await createPresidioGuard({ analyzerUrl: 'http://x', anonymizerUrl: 'http://x', timeoutMs: 20 }, { fetch: slow }).check(input('hello'));
+  assert.deepEqual(t, { action: 'block', reason: 'presidio unavailable: timeout' });
+});
+
+test('URLs with credentials are rejected at creation', () => {
+  assert.throws(() => createPresidioGuard({ analyzerUrl: 'http://u:p@host', anonymizerUrl: 'http://x' }), /must not carry credentials/);
+  assert.throws(() => createPresidioGuard({ analyzerUrl: 'http://x', anonymizerUrl: 'http://u:p@host' }), /must not carry credentials/);
+  assert.throws(() => createPresidioGuard({ analyzerUrl: 'not a url', action: 'block' }), /not a valid http\(s\) URL/);
+});
