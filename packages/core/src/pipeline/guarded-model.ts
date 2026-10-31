@@ -1,6 +1,6 @@
 import { GuardrailBlocked } from '../errors.ts';
 import { boundExt } from '../ext.ts';
-import { assembleDeltas, newUserMessageIndexes, partsText, replyToDeltas } from '../messages.ts';
+import { assembleDeltas, newUserMessageIndexes, replyToDeltas } from '../messages.ts';
 import { ATTR, EVENT, METRIC, SPAN } from '../names.ts';
 import type { CallContext } from '../ports/base.ts';
 import type { CachePort, RouterPort } from '../ports/cache.ts';
@@ -30,6 +30,7 @@ export interface GuardedModelOptions {
  * Wraps a ModelPort with the layers around a model call, in this order:
  * input guards (new user content) → cache lookup → router → model → cache store → output guards.
  * The cache stores the raw model reply, so output guards also run on cache hits.
+ * Output guards see every text a caller can be shown: text parts and reasoning parts.
  * A block throws GuardrailBlocked; a redact rewrites the text. Every step is a span with its `agent.layer`.
  * Streaming with output guards buffers the stream, because the full text is needed before it can be released.
  */
@@ -134,11 +135,16 @@ async function guardText(text: string, stage: GuardStage, guards: readonly Guard
   return out.text;
 }
 
-/** Guards the text parts of a list of parts, one by one. */
+/** Parts whose text a guard reads: text and reasoning. */
+const GUARDED_PARTS: ReadonlySet<string> = new Set(['text', 'reasoning']);
+const guardedText = (part: Part): string | undefined =>
+  GUARDED_PARTS.has(part.type) && typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : undefined;
+
+/** Guards the text and reasoning parts of a list of parts, one by one. */
 async function guardParts(parts: readonly Part[], stage: GuardStage, guards: readonly GuardPort[], ctx: CallContext, t: TelemetryPort): Promise<Part[]> {
   const out: Part[] = [];
   for (const part of parts) {
-    if (part.type === 'text' && typeof (part as { text?: unknown }).text === 'string') {
+    if (guardedText(part) !== undefined) {
       const text = (part as { text: string }).text;
       const guarded = await guardText(text, stage, guards, ctx, t);
       out.push(guarded === text ? part : { ...part, text: guarded } as Part);
@@ -158,6 +164,6 @@ async function guardInput(req: ModelRequest, guards: readonly GuardPort[], ctx: 
 }
 
 async function guardOutput(reply: ModelReply, guards: readonly GuardPort[], ctx: CallContext, t: TelemetryPort): Promise<ModelReply> {
-  if (!guardsFor(guards, 'output').length || !partsText(reply.message.parts)) return reply;
+  if (!guardsFor(guards, 'output').length || !reply.message.parts.some((p) => guardedText(p))) return reply;
   return { ...reply, message: { ...reply.message, parts: await guardParts(reply.message.parts, 'output', guards, ctx, t) } };
 }

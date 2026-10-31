@@ -306,3 +306,16 @@ test('trace context: the active span of the run telemetry, else the run context,
     await mock.close();
   }
 });
+
+test('a redirect is refused: the prompt and the key never reach the redirect target', async () => {
+  const target = await startMock();
+  for (const status of [307, 308]) {
+    const mock = await startMock((_s, res) => { res.writeHead(status, { location: `${target.url}/chat/completions` }); res.end(); });
+    try {
+      const model = createOpenAICompatibleModel({ baseUrl: mock.url, apiKey: 'k-123' });
+      await assert.rejects(model.chat(req, ctx), (e: Error) => e.message.includes(`HTTP ${status}`) && e.message.includes('redirects are not followed') && !e.message.includes('k-123'));
+    } finally { await mock.close(); }
+  }
+  assert.equal(target.seen.length, 0);
+  await target.close();
+});

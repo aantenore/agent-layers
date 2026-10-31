@@ -4,7 +4,7 @@ import {
   type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type ModelDelta, type ModelReply, type ModelRequest, type RunEvent,
   type RunResult, type Usage, type Vocabularies,
 } from '@agent-layers/core';
-import { ChunkWriter, defaultRole, replyOut, requestIn, usageOut, WireError } from './wire.ts';
+import { ChunkWriter, defaultRole, INBOUND_REFUSED, replyToCaller, requestIn, usageOut, WireError } from './wire.ts';
 
 /** Options of the inbound descriptor. */
 export interface OpenAICompatibleChannelOptions {
@@ -16,6 +16,8 @@ export interface OpenAICompatibleChannelOptions {
   agents?: boolean | string[];
   /** `owned_by` in the model list (default `agent-layers`). */
   ownedBy?: string;
+  /** Return the model's reasoning (`reasoning_content`) on model routes, after the output guards (default false). */
+  reasoning?: boolean;
 }
 
 const AGENT_PREFIX = 'agent:';
@@ -33,7 +35,8 @@ interface Parsed { model: string; stream: boolean; includeUsage: boolean; req: O
 /**
  * Validates a Chat Completions body and translates it into a language request. Only known fields cross: the
  * passthrough fields become `ext["openai.*"]`; anything else is dropped, so a caller cannot replace the guarded
- * messages or the model. `resolveRole` maps wire roles to language roles (`developer` → `system`, configured aliases).
+ * messages or the model. `n` other than 1 is refused and `n`, `logprobs`, `top_logprobs` are dropped: one guarded
+ * choice is all a caller gets. `resolveRole` maps wire roles to language roles (`developer` → `system`, configured aliases).
  */
 export function parseChatBody(body: unknown, resolveRole: (role: string) => string = defaultRole): Parsed {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new BadRequest('the body must be a JSON object');
@@ -44,12 +47,17 @@ export function parseChatBody(body: unknown, resolveRole: (role: string) => stri
     if (!m || typeof m !== 'object' || typeof (m as { role?: unknown }).role !== 'string') throw new BadRequest(`messages[${i}]: unknown role`);
     if (!('content' in m) && (m as { role: string }).role !== 'assistant') throw new BadRequest(`messages[${i}]: content is required`);
   }
+  if (b.n !== undefined && b.n !== null && b.n !== 1) throw new BadRequest('n must be 1: one choice is returned');
   let req: ModelRequest;
   try {
     req = requestIn(b, resolveRole);
   } catch (err) {
     if (err instanceof WireError) throw new BadRequest(err.message);
     throw err;
+  }
+  if (req.ext) {
+    for (const k of INBOUND_REFUSED) delete req.ext[`openai.${k}`];
+    if (!Object.keys(req.ext).length) delete req.ext;
   }
   const { model: _model, ...rest } = req;
   const opts = b.stream_options as { include_usage?: unknown } | undefined;
@@ -146,12 +154,12 @@ export function createOpenAICompatibleChannel(
         if (!p.stream) {
           let reply: ModelReply;
           try { reply = await model.chat(req, call); } catch (err) { return failure(err); }
-          return json(replyOut(reply, { id, object: 'chat.completion', created, model: alias }, coreFinish));
+          return json(replyToCaller(reply, { id, object: 'chat.completion', created, model: alias }, { reasoning: options.reasoning === true, core: coreFinish }));
         }
         const source = model.stream ? model.stream(req, call) : (async function* () { yield* replyToDeltas(await model.chat(req, call)); })();
         let start: { first: ModelDelta[]; rest: AsyncIterable<ModelDelta> };
         try { start = await primed(source); } catch (err) { return failure(err); }
-        const writer = new ChunkWriter({ id, created, model: alias }, { includeUsage: p.includeUsage, core: coreFinish });
+        const writer = new ChunkWriter({ id, created, model: alias }, { includeUsage: p.includeUsage, core: coreFinish, reasoning: options.reasoning === true });
         async function* frames(): AsyncGenerator<unknown> {
           for (const d of start.first) yield* writer.write(d);
           for await (const d of start.rest) yield* writer.write(d);

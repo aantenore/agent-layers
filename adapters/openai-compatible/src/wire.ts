@@ -37,6 +37,12 @@ export const PASSTHROUGH = [
   'logprobs', 'top_logprobs',
 ] as const;
 
+/**
+ * Passthrough fields a caller of the inbound channel may not set: they ask the backend for content the output guards
+ * never read (extra choices, log probabilities). `n` other than 1 is refused; the others are dropped.
+ */
+export const INBOUND_REFUSED = ['n', 'logprobs', 'top_logprobs'] as const;
+
 /** Every ext key the package may write. */
 export const EXT_KEYS: readonly string[] = [...Object.values(EXT), ...PASSTHROUGH.map((k) => `openai.${k}`)];
 
@@ -179,14 +185,22 @@ export function messageIn(m: unknown, resolveRole: (role: string) => string = de
 
 const callOut = (c: CallPart): Json => ({ id: c.id, type: 'function', function: { name: c.tool, arguments: c.invalid ?? JSON.stringify(c.args ?? {}) } });
 
+export interface MessageOutOptions {
+  /** Send reasoning parts (default false). */
+  reasoning?: boolean;
+  /** Restore the wire role and the extra message fields kept in ext (default true). */
+  restore?: boolean;
+}
+
 /**
  * One language message as wire messages: a `tool` message gives one wire message per result part (`ok` has no wire
  * field). Reasoning parts are sent only with `reasoning: true`, under `reasoning_content` (or `reasoning` when the part
  * came from that field).
  */
-export function messageOut(m: Message, opts: { reasoning?: boolean } = {}): Json[] {
-  const role = str(m.ext?.[EXT.role]) ?? m.role;
-  const fields = isRecord(m.ext?.[EXT.fields]) ? m.ext![EXT.fields] as Json : {};
+export function messageOut(m: Message, opts: MessageOutOptions = {}): Json[] {
+  const restore = opts.restore !== false;
+  const role = (restore ? str(m.ext?.[EXT.role]) : undefined) ?? m.role;
+  const fields = restore && isRecord(m.ext?.[EXT.fields]) ? m.ext![EXT.fields] as Json : {};
   if (m.role === 'tool') {
     return m.parts.filter((p): p is ResultPart => p.type === 'result').map((p) => ({ ...fields, role, tool_call_id: p.callId, content: p.text }));
   }
@@ -340,6 +354,23 @@ export function replyOut(reply: ModelReply, envelope: Envelope = {}, core?: (f: 
   };
 }
 
+/**
+ * A language reply as the inbound channel answers it: one choice built from the guarded message only. Nothing kept in
+ * ext is re-emitted (other choices, log probabilities, extra message or response fields), since output guards never
+ * read it; reasoning only with `reasoning: true`.
+ */
+export function replyToCaller(reply: ModelReply, envelope: Envelope, opts: { reasoning?: boolean; core?: (f: string) => string | undefined } = {}): Json {
+  const message = { ...messageOut(reply.message, { reasoning: opts.reasoning === true, restore: false })[0], role: 'assistant' };
+  const usage = usageOut(reply.usage);
+  return {
+    ...(reply.id ? { id: reply.id } : {}),
+    model: reply.model,
+    ...bag({ ...envelope }),
+    choices: [{ index: 0, message, finish_reason: finishOut(reply.finish, reply.ext, opts.core), logprobs: null }],
+    ...(usage ? { usage } : {}),
+  };
+}
+
 // ---- streams ------------------------------------------------------------------------------------------------
 
 /**
@@ -405,11 +436,14 @@ export class ChunkWriter {
   #first = true;
   #includeUsage: boolean;
   #core: ((f: string) => string | undefined) | undefined;
+  #reasoning: boolean;
 
-  constructor(envelope: Envelope & Json, opts: { includeUsage?: boolean; core?: (f: string) => string | undefined } = {}) {
+  /** `reasoning: false` leaves reasoning deltas out (default true). */
+  constructor(envelope: Envelope & Json, opts: { includeUsage?: boolean; core?: (f: string) => string | undefined; reasoning?: boolean } = {}) {
     this.#envelope = { object: 'chat.completion.chunk', ...envelope };
     this.#includeUsage = opts.includeUsage === true;
     this.#core = opts.core;
+    this.#reasoning = opts.reasoning !== false;
   }
 
   #chunk(delta: Json, finish: string | null): Json {
@@ -421,7 +455,7 @@ export class ChunkWriter {
   write(d: ModelDelta): Json[] {
     switch (d.type) {
       case 'text': return [this.#chunk({ content: d.text }, null)];
-      case 'reasoning': return [this.#chunk({ reasoning_content: d.text }, null)];
+      case 'reasoning': return this.#reasoning ? [this.#chunk({ reasoning_content: d.text }, null)] : [];
       case 'call': {
         const fn = { ...(d.tool !== undefined ? { name: d.tool } : {}), ...(d.argsText !== undefined ? { arguments: d.argsText } : {}) };
         return [this.#chunk({ tool_calls: [{ index: d.index, ...(d.id ? { id: d.id, type: 'function' } : {}), function: fn }] }, null)];

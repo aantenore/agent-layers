@@ -60,14 +60,14 @@ test('model route: the wire request becomes a language request; the reply goes b
   const body = await res.json() as Record<string, any>;
   assert.equal(body.object, 'chat.completion');
   assert.equal(body.model, 'fast');
-  assert.deepEqual(body.choices, [{ index: 0, message: { role: 'assistant', content: 'pong' }, finish_reason: 'stop' }]);
+  assert.deepEqual(body.choices, [{ index: 0, message: { role: 'assistant', content: 'pong' }, finish_reason: 'stop', logprobs: null }]);
   assert.deepEqual(body.usage, { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 });
 });
 
 test('model route: calls and a configured finish value; a guard block is a 400 without the guard name', async () => {
   nextReply = { model: 'mock', message: { role: 'assistant', parts: [{ type: 'call', id: 'c1', tool: 'look', args: { q: 'x' } }] }, finish: 'tools' };
   const calls = await (await post({ model: 'fast', messages: [{ role: 'user', content: 'go' }] })).json() as Record<string, any>;
-  assert.deepEqual(calls.choices[0], { index: 0, message: { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'look', arguments: '{"q":"x"}' } }] }, finish_reason: 'tool_calls' });
+  assert.deepEqual(calls.choices[0], { index: 0, message: { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'look', arguments: '{"q":"x"}' } }] }, finish_reason: 'tool_calls', logprobs: null });
   nextReply = { model: 'mock', message: { role: 'assistant', parts: [{ type: 'text', text: '' }] }, finish: 'safety' };
   assert.equal((await (await post({ model: 'fast', messages: [{ role: 'user', content: 'go' }] })).json() as any).choices[0].finish_reason, 'content_filter');
   const blocked = await post({ model: 'fast', messages: [{ role: 'user', content: 'forbidden' }] });
@@ -119,4 +119,32 @@ test('bad bodies are 400: unknown roles, empty messages, missing content', async
   assert.equal((await post({ model: 'fast', messages: [] })).status, 400);
   assert.equal((await post({ model: 'fast', messages: [{ role: 'user' }] })).status, 400);
   assert.equal((await post({ model: 'nope', messages: [{ role: 'user', content: 'x' }] })).status, 404);
+});
+
+test('model route returns one guarded choice: n > 1 is refused, logprobs and ext-carried content are never echoed', async () => {
+  assert.equal((await post({ model: 'fast', n: 2, messages: [{ role: 'user', content: 'x' }] })).status, 400);
+  nextReply = {
+    model: 'mock', finish: 'end',
+    message: { role: 'assistant', parts: [{ type: 'reasoning', text: 'think a@b.co' }, { type: 'text', text: 'pong' }], ext: { 'openai.fields': { refusal: 'unguarded', audio: { data: 'x' } }, 'openai.role': 'system' } },
+    ext: { 'openai.choices': [{ index: 1, message: { role: 'assistant', content: 'other choice' } }], 'openai.choice_logprobs': { content: [{ token: 'p' }] }, 'openai.response': { system_fingerprint: 'fp', extra: 'unguarded' } },
+  };
+  const res = await post({ model: 'fast', n: 1, logprobs: true, top_logprobs: 3, messages: [{ role: 'user', content: 'ping' }] });
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen.req?.ext, undefined, 'n, logprobs and top_logprobs never reach the model');
+  const body = await res.json() as Record<string, any>;
+  assert.deepEqual(body.choices, [{ index: 0, message: { role: 'assistant', content: 'pong' }, finish_reason: 'stop', logprobs: null }]);
+  assert.doesNotMatch(JSON.stringify(body), /other choice|unguarded|a@b\.co|fp/);
+  const chunks = (await frames(await post({ model: 'fast', stream: true, messages: [{ role: 'user', content: 'ping' }] }))).slice(0, -1) as Record<string, any>[];
+  assert.ok(chunks.every((c) => c.choices.length <= 1 && !('reasoning_content' in (c.choices[0]?.delta ?? {}))), 'no reasoning streamed by default');
+  assert.doesNotMatch(JSON.stringify(chunks), /a@b\.co|other choice/);
+});
+
+test('reasoning: true returns the (guarded) reasoning on model routes', async () => {
+  const withReasoning = await createOpenAICompatibleChannel({ models: { fast: 'mock' }, reasoning: true }).mount!(host);
+  nextReply = { model: 'mock', finish: 'end', message: { role: 'assistant', parts: [{ type: 'reasoning', text: 'think' }, { type: 'text', text: 'pong' }] } };
+  const send = (body: unknown) => inboundFetch(withReasoning, new Request('http://gw.test/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+  const body = await (await send({ model: 'fast', messages: [{ role: 'user', content: 'ping' }] })).json() as Record<string, any>;
+  assert.deepEqual(body.choices[0].message, { role: 'assistant', content: 'pong', reasoning_content: 'think' });
+  const chunks = (await frames(await send({ model: 'fast', stream: true, messages: [{ role: 'user', content: 'ping' }] }))).slice(0, -1) as Record<string, any>[];
+  assert.ok(chunks.some((c) => c.choices[0]?.delta.reasoning_content === 'think'));
 });

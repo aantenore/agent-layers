@@ -110,3 +110,21 @@ test('a guard that throws blocks with the fixed reason "guard error", never the 
   const out = await runGuards([boom], 'tool_args', '{}', ctx(), telemetry, 'util__x');
   assert.deepEqual(out, { action: 'block', text: '{}', guard: 'flaky', reason: 'guard error', labels: ['other'] });
 });
+
+test('output guards also read reasoning parts: redacted in a reply and in a buffered stream, blocked when a guard blocks', async () => {
+  const withReasoning = { ...reply('done'), message: { role: 'assistant' as const, parts: [{ type: 'reasoning' as const, text: 'mail a@b.co first' }, { type: 'text' as const, text: 'done' }] } };
+  const { model } = fakeModel(() => withReasoning);
+  const redact = fakeGuard('r', (t) => ({ action: 'redact', text: t.replace('a@b.co', '[EMAIL]') }));
+  const res = await guardedModel(model, { guards: [redact] }).chat({ model: 'x', messages: [textMessage('user', 'hi')] }, ctx());
+  assert.deepEqual(res.message.parts[0], { type: 'reasoning', text: 'mail [EMAIL] first' });
+  const onlyReasoning = { ...reply(null), message: { role: 'assistant' as const, parts: [{ type: 'reasoning' as const, text: 'a@b.co' }] } };
+  const block = fakeGuard('b', (t, s) => (s === 'output' && t.includes('a@b.co') ? { action: 'block' } : { action: 'allow' }));
+  await assert.rejects(guardedModel(fakeModel(() => onlyReasoning).model, { guards: [block] }).chat({ model: 'x', messages: [textMessage('user', 'hi')] }, ctx()), /blocked by guard b at output/);
+  const streaming = { name: 's', chat: async () => reply('unused'), async *stream(): AsyncGenerator<ModelDelta> {
+    yield { type: 'reasoning', text: 'a@b' }; yield { type: 'reasoning', text: '.co' }; yield { type: 'text', text: 'ok' }; yield { type: 'end', finish: 'end' };
+  } };
+  const out: ModelDelta[] = [];
+  for await (const d of guardedModel(streaming, { guards: [redact] }).stream!({ model: 'x', messages: [textMessage('user', 'hi')] }, ctx())) out.push(d);
+  assert.ok(!JSON.stringify(out).includes('a@b.co'), 'the buffered stream releases only guarded reasoning');
+  assert.deepEqual(assembleDeltas(out).message.parts.find((p) => p.type === 'reasoning'), { type: 'reasoning', text: '[EMAIL]' });
+});

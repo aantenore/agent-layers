@@ -72,7 +72,13 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleOptions, na
         ...(options.maxTokensField ? { maxTokensField: options.maxTokensField } : {}), sendReasoning: options.sendReasoning === true,
       })),
       signal: anySignal(timeoutSignal(timeoutMs), ctx.signal),
+      // The body carries the prompt and the headers the API key: a redirect is refused, never followed.
+      redirect: 'manual',
     });
+    if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+      await res.body?.cancel().catch(() => {});
+      throw new Error(`HTTP ${res.status} from ${url}: redirects are not followed`);
+    }
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       throw new Error(scrub(`HTTP ${res.status} from ${url}: ${body.slice(0, errorBodyChars)}`));
@@ -164,6 +170,7 @@ export const channelAdapter = defineAdapter<'ChannelPort', OpenAICompatibleChann
       models: { type: 'object', additionalProperties: { type: 'string', minLength: 1 } },
       agents: { anyOf: [{ type: 'boolean' }, { type: 'array', items: { type: 'string', minLength: 1 } }] },
       ownedBy: { type: 'string', minLength: 1 },
+      reasoning: { type: 'boolean' },
     },
     additionalProperties: false,
   },

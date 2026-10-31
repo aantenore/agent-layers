@@ -8,7 +8,8 @@ both named `openai-compatible`.
 
 Talks to any endpoint that serves `POST {baseUrl}/chat/completions`: Ollama, vLLM, LM Studio, llama.cpp, or a hosted
 API. It supports plain and streamed completions, tool calls and reasoning output. Errors report the HTTP status and the
-first 300 characters of the body, never the API key. `native()` returns `{ baseUrl, model }`. The active trace goes out
+first 300 characters of the body, never the API key. Redirects are refused, never followed, so the prompt and the key
+reach only `baseUrl`. `native()` returns `{ baseUrl, model }`. The active trace goes out
 as `traceparent` / `tracestate`.
 
 ### Translation
@@ -80,6 +81,10 @@ model endpoint: `base_url = <gateway>/v1`, `api_key = <a credential the identity
     caller's own agent loop keeps working. Only known request fields cross (`temperature`, `max_tokens`,
     `max_completion_tokens`, `stop`, and the passthrough fields as `ext["openai.*"]`); a caller cannot replace the
     model or the guarded messages. Role aliases and finish values added to the stack's vocabularies are resolved here.
+    The answer is one choice built from the guarded message only: `n` other than 1 is a 400, `logprobs` and
+    `top_logprobs` are dropped, and nothing the model adapter kept in `ext` (other choices, log probabilities, extra
+    message or response fields) is returned. Reasoning is returned only with `reasoning: true`, after the output
+    guards, which read reasoning parts as well as text.
   - **`agent:<name>`**: runs that agent through the runtime with the caller and the request's trace context, and
     returns its answer. The run id is in the `x-agent-run-id` header. `completed` ends with `finish_reason: "stop"`;
     `waiting` (the run stopped for an approval or input and can be resumed) also answers `stop`, with the output so
@@ -98,6 +103,7 @@ model endpoint: `base_url = <gateway>/v1`, `api_key = <a credential the identity
 | `models` | object | `{}` | Alias callers use → model id sent to the governed model |
 | `agents` | boolean or string[] | `true` | Agents exposed as `agent:<name>`: all, none, or a list |
 | `ownedBy` | string | `agent-layers` | `owned_by` in the model list |
+| `reasoning` | boolean | `false` | Return the model's reasoning (`reasoning_content`) on alias routes, after the output guards |
 
 ```json
 {
