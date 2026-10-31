@@ -1,5 +1,8 @@
-import { limitValue, matchesAny, type BoundCredentials, type ToolOutcome, type ToolPort, type ToolRisk, type ToolSpec, type TelemetryPort } from '@agent-layers/core';
-import { bearer, McpSession, type McpToolInfo } from './client.ts';
+import {
+  createMappings, limitValue, matchesAny, withExt, type BoundCredentials, type Ext, type LimitValue, type Mappings, type MappingRule, type Risk, type TelemetryPort,
+  type ToolPort, type ToolResult, type ToolSpec,
+} from '@agent-layers/core';
+import { bearer, McpSession } from './client.ts';
 import { interpolate } from './env.ts';
 import { CONNECTION_LIMITS, TOOLS_LIMITS } from './limits.ts';
 import { redact, redactStructured, scrubError, secretForms, staticSecrets } from './redact.ts';
@@ -8,7 +11,7 @@ import { McpRpcError, type McpServerOptions } from './transport.ts';
 /** Options, validated against `optionsSchema` before `create` runs. */
 export interface McpToolsOptions extends McpServerOptions {
   /** Force a risk level for every tool; otherwise derived from `readOnly` and the MCP tool annotations. */
-  risk?: ToolRisk;
+  risk?: Risk;
   /** Globs of tools known to be read-only when the server does not annotate them (risk `read`). */
   readOnly?: string[];
   /** Globs of tool names to expose (default: all). */
@@ -17,6 +20,8 @@ export interface McpToolsOptions extends McpServerOptions {
   exclude?: string[];
   /** How long the tool list is cached (default 60000). */
   toolsTtlMs?: number;
+  /** Pages of `tools/list` read before the server is refused (default 100). */
+  maxToolPages?: LimitValue;
 }
 
 export interface McpDeps {
@@ -26,24 +31,32 @@ export interface McpDeps {
   credentials?: BoundCredentials;
   /** The stack's telemetry: its active span's trace context goes with each HTTP request. */
   telemetry?: TelemetryPort;
+  /** `in` rules on `ToolSpec` run over each MCP tool (default: {@link TOOL_RULES}). */
+  mappings?: Mappings;
 }
 
 const SAFE_NAME = /[^A-Za-z0-9_.-]/g;
 
-/** Risk of a tool: forced value, then the `readOnly` globs, then the MCP annotations; unknown means exec. */
-export function riskOf(info: McpToolInfo, forced?: ToolRisk, readOnly?: readonly string[]): ToolRisk {
-  if (forced) return forced;
-  if (readOnly?.length && matchesAny(readOnly, info.name)) return 'read';
-  if (info.annotations?.readOnlyHint) return 'read';
-  if (info.annotations?.destructiveHint === false) return 'write';
-  return 'exec';
-}
+/** Ext keys of the tool adapter. */
+export const TOOL_EXT = { annotations: 'mcp.annotations', meta: 'mcp.meta', name: 'mcp.name', content: 'mcp.content' } as const;
+
+/**
+ * Default `in` rules from an MCP tool to its spec: the risk from the annotations. `exec` unless `destructiveHint` is
+ * false (`write`) or `readOnlyHint` is true (`read`). Replaceable by the `mappings` block of the stack config. The
+ * constant comes first because a `map` table also applies to a rule's `default`.
+ */
+export const TOOL_RULES: readonly MappingRule[] = [
+  { to: '/risk', default: 'exec' },
+  { from: '/annotations/destructiveHint', to: '/risk', map: { true: 'exec', false: 'write' } },
+  { from: '/annotations/readOnlyHint', to: '/risk', map: { true: 'read' } },
+];
 
 interface Entry { spec: ToolSpec; mcpName: string }
 
 /** ToolPort over one MCP server. The stack prefixes the tool names with the source name. */
 export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): ToolPort {
   const env = deps.env ?? process.env;
+  const mappings = deps.mappings ?? createMappings(deps.name ?? 'mcp', { in: TOOL_RULES });
   const cfg = interpolate(options, env, 'mcp');
   const session = new McpSession(cfg, { env, ...(deps.credentials ? { credentials: deps.credentials } : {}), ...(deps.telemetry ? { telemetry: deps.telemetry } : {}) });
   const ttl = limitValue(TOOLS_LIMITS.toolsTtlMs, cfg.toolsTtlMs);
@@ -66,30 +79,34 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
       if (cfg.exclude && matchesAny(cfg.exclude, info.name)) continue;
       let name = info.name.replace(SAFE_NAME, '_');
       for (let n = 2; tools.has(name); n++) name = `${info.name.replace(SAFE_NAME, '_')}_${n}`;
-      tools.set(name, {
-        mcpName: info.name,
-        spec: {
-          name,
-          description: info.description ?? info.title ?? info.name,
-          inputSchema: info.inputSchema ?? { type: 'object', properties: {} },
-          risk: riskOf(info, cfg.risk, cfg.readOnly),
-          ...(auth ? { audience: auth.audience } : {}),
-          meta: { mcp: { name: info.name, ...(info.annotations ? { annotations: info.annotations } : {}) } },
-        },
+      const ext = withExt(undefined, {
+        [TOOL_EXT.annotations]: info.annotations,
+        [TOOL_EXT.meta]: info._meta,
+        [TOOL_EXT.name]: name !== info.name ? info.name : undefined,
       });
+      const mapped: ToolSpec = mappings.in(info, {
+        name,
+        description: info.description ?? info.title ?? info.name,
+        params: info.inputSchema && typeof info.inputSchema === 'object' ? info.inputSchema : { type: 'object', properties: {} },
+        ...(auth ? { audience: auth.audience } : {}),
+        ...(ext ? { ext } : {}),
+      } satisfies ToolSpec);
+      // The `readOnly` globs and a forced risk win over the annotations; the name stays the one calls are routed by.
+      const risk = cfg.risk ?? (cfg.readOnly?.length && matchesAny(cfg.readOnly, info.name) ? 'read' : mapped.risk);
+      tools.set(name, { mcpName: info.name, spec: { ...mapped, name, ...(risk ? { risk } : {}) } });
     }
     cache = { at: Date.now(), tools };
     return tools;
   }
 
-  const failure = (content: string): ToolOutcome => ({ content, isError: true });
+  const failure = (text: string): ToolResult => ({ ok: false, text });
 
   return {
     name: deps.name ?? 'mcp',
     async listTools(ctx) {
       return [...(await load(ctx.credentials)).values()].map((e) => e.spec);
     },
-    async callTool(name, args, ctx): Promise<ToolOutcome> {
+    async callTool(name, args, ctx): Promise<ToolResult> {
       const entry = (await load(ctx.credentials)).get(name);
       if (!entry) return failure(`Unknown tool: ${name}`);
       let headers: Record<string, string> | undefined;
@@ -107,14 +124,20 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
       const forms = token ? secretForms([token, ...staticSecrets(cfg.headers)], minSecretChars) : staticForms;
       try {
         const res = await session.run((c) => c.callTool(entry.mcpName, args, ctx.signal, headers), ctx.credentials);
-        let content = redact(res.content, forms);
+        let text = redact(res.text, forms);
         let data: unknown;
+        let ext: Ext | undefined;
         if (res.structured !== undefined) {
           const clean = redactStructured(res.structured, forms);
-          if (clean.dropped) content += '\n[structured content dropped: it contained a secret]';
+          if (clean.dropped) text += '\n[structured content dropped: it contained a secret]';
           else data = clean.value;
         }
-        return { content, ...(res.isError ? { isError: true } : {}), ...(data !== undefined ? { data } : {}) };
+        if (res.items?.length) {
+          const clean = redactStructured(res.items, forms);
+          if (clean.dropped) text += '\n[non-text content dropped: it contained a secret]';
+          else ext = { [TOOL_EXT.content]: clean.value };
+        }
+        return { ok: !res.isError, text, ...(data !== undefined ? { data } : {}), ...(ext ? { ext } : {}) };
       } catch (err) {
         // Every error leaving this call carries a masked message, whatever raised it.
         const clean = scrubError(err, forms);

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createMcpKnowledge, parseMcpResult } from '../src/index.ts';
+import { createMappings } from '@agent-layers/core';
+import { createMcpKnowledge, parseMcpResult, PASSAGE_RULES } from '../src/index.ts';
 import { startMcpMock } from './mock.ts';
 
-const res = (content: string) => ({ content, isError: false });
+const res = (text: string) => ({ text, isError: false });
 
 test('parse: JSON array of passages, wrapped lists and plain strings', () => {
-  const array = parseMcpResult(res(JSON.stringify([{ id: 'a', text: 'one', score: 0.9, metadata: { k: 1 }, extra: 'dropped' }, 'two', { nothing: true }])), 'src');
-  assert.deepEqual(array[0], { id: 'a', text: 'one', source: 'src', score: 0.9, metadata: { k: 1 } });
+  const array = parseMcpResult(res(JSON.stringify([{ id: 'a', text: 'one', score: 0.9, metadata: { k: 1, title: 'T', url: 'https://x.test', deep: { n: 1 } }, extra: 'dropped' }, 'two', { nothing: true }])), 'src');
+  assert.deepEqual(array[0], { id: 'a', text: 'one', source: 'src', title: 'T', url: 'https://x.test', score: 0.9, attrs: { k: 1 }, ext: { 'mcp.metadata': { deep: { n: 1 } } } });
   assert.equal(array[1]!.text, 'two');
   assert.equal(array.length, 2);
   assert.deepEqual(parseMcpResult(res(JSON.stringify({ results: [{ content: 'x', id: 7 }] })), 's'), [{ id: '7', text: 'x', source: 's' }]);
@@ -16,7 +17,7 @@ test('parse: JSON array of passages, wrapped lists and plain strings', () => {
 test('parse: mcp-server-qdrant entries, as plain text and as a JSON array of strings', () => {
   const entry = '<entry><content>The gate closes.</content><metadata>{"id":"tide","file":"t.md"}</metadata></entry>';
   const plain = parseMcpResult(res(`Results for the query 'x'\n${entry}`), 'docs');
-  assert.deepEqual(plain, [{ id: 'tide', text: 'The gate closes.', source: 'docs', metadata: { id: 'tide', file: 't.md' } }]);
+  assert.deepEqual(plain, [{ id: 'tide', text: 'The gate closes.', source: 'docs', attrs: { id: 'tide', file: 't.md' } }]);
   assert.deepEqual(parseMcpResult(res(JSON.stringify([`Results`, entry])), 'docs'), plain);
   const noMeta = parseMcpResult(res('<entry><content>bare</content><metadata>null</metadata></entry>'), 'd');
   assert.equal(noMeta[0]!.text, 'bare');
@@ -29,16 +30,16 @@ test('parse: empty, "no information found" and free text', () => {
   assert.equal(parseMcpResult(res('just some text'), 's')[0]!.text, 'just some text');
 });
 
-test('search: query goes to the tool, k limits, filter applies to metadata, no match is empty', async () => {
+test('search: query text goes to the tool, k limits, filter applies to attrs, no match is empty', async () => {
   const mock = await startMcpMock();
   const source = createMcpKnowledge({ url: mock.url, tool: 'search' }, { name: 'docs' });
   try {
-    const all = await source.search({ query: 'the vault tide quay', k: 5 });
+    const all = await source.search({ text: 'the vault tide quay', k: 5 });
     assert.deepEqual(all.map((p) => p.id), ['tide', 'vault', 'quay']);
     assert.ok(all.every((p) => p.source === 'docs'));
-    assert.equal((await source.search({ query: 'the vault tide quay', k: 1 })).length, 1);
-    assert.deepEqual((await source.search({ query: 'the vault tide quay', filter: { file: 'vault.md' } })).map((p) => p.id), ['vault']);
-    assert.deepEqual(await source.search({ query: 'zzz' }), []);
+    assert.equal((await source.search({ text: 'the vault tide quay', k: 1 })).length, 1);
+    assert.deepEqual((await source.search({ text: 'the vault tide quay', filter: { file: 'vault.md' } })).map((p) => p.id), ['vault']);
+    assert.deepEqual(await source.search({ text: 'zzz' }), []);
   } finally {
     await source.close?.();
     await mock.close();
@@ -49,11 +50,11 @@ test('search: a failing tool rejects, custom argument names and parser are used'
   const mock = await startMcpMock();
   try {
     const failing = createMcpKnowledge({ url: mock.url, tool: 'fail' });
-    await assert.rejects(failing.search({ query: 'x' }), /MCP tool fail failed: it broke/);
+    await assert.rejects(failing.search({ text: 'x' }), /MCP tool fail failed: it broke/);
     await failing.close?.();
 
-    const custom = createMcpKnowledge({ url: mock.url, tool: 'echo', queryArg: 'text', toolArgs: { extra: 1 }, parse: (r) => [{ id: 'e', text: r.content }] });
-    assert.deepEqual(await custom.search({ query: 'ping' }), [{ id: 'e', text: 'echo: ping' }]);
+    const custom = createMcpKnowledge({ url: mock.url, tool: 'echo', queryArg: 'text', toolArgs: { extra: 1 }, parse: (r) => [{ id: 'e', text: r.text, source: 'echo' }] });
+    assert.deepEqual(await custom.search({ text: 'ping' }), [{ id: 'e', text: 'echo: ping', source: 'echo' }]);
     await custom.close?.();
     const sent = mock.requests.filter((r) => r.rpc === 'tools/call').at(-1)!;
     assert.deepEqual(sent.params, { name: 'echo', arguments: { extra: 1, text: 'ping' } });
@@ -66,9 +67,15 @@ test('search: errors that echo static header secrets are masked, also across the
   const mock = await startMcpMock({ echoErrors: 'long' });
   const source = createMcpKnowledge({ url: mock.url, tool: 'search', headers: { 'x-api-key': 'key-from-env-123' } });
   try {
-    await assert.rejects(source.search({ query: 'x' }), (err: Error) => /MCP HTTP 500/.test(err.message) && !/key/.test(`${err.message}\n${err.stack}`));
+    await assert.rejects(source.search({ text: 'x' }), (err: Error) => /MCP HTTP 500/.test(err.message) && !/key/.test(`${err.message}\n${err.stack}`));
   } finally {
     await source.close?.();
     await mock.close();
   }
+});
+
+test('parse: the in mapping rules run over each item; the default keeps an item source as an attribute', () => {
+  const mappings = createMappings('knowledge.docs', { in: [...PASSAGE_RULES, { from: '/payload/lang', to: '/attrs/lang', default: 'en' }] });
+  const [p] = parseMcpResult(res(JSON.stringify([{ id: 'a', text: 'one', source: 'a.md', payload: { owner: 'ops' } }])), 'docs', mappings);
+  assert.deepEqual(p, { id: 'a', text: 'one', source: 'docs', attrs: { owner: 'ops', source: 'a.md', lang: 'en' } });
 });

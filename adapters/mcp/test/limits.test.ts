@@ -21,7 +21,7 @@ test('errorBodyChars cuts HTTP error bodies and knowledge error results', async 
   const plain = await startMcpMock();
   const source = createMcpKnowledge({ url: plain.url, tool: 'fail', errorBodyChars: 2 });
   try {
-    await assert.rejects(source.search({ query: 'q' }), (err: Error) => err.message === 'MCP tool fail failed: it');
+    await assert.rejects(source.search({ text: 'q' }), (err: Error) => err.message === 'MCP tool fail failed: it');
   } finally {
     await source.close?.();
     await plain.close();
@@ -34,8 +34,8 @@ test('minSecretChars decides which header values are masked in errors', async ()
   const kept = make();
   const masked = make(3);
   try {
-    assert.match((await kept.callTool('echo', { text: 'x' }, ctx)).content, /abc/);
-    assert.equal((await masked.callTool('echo', { text: 'x' }, ctx)).content.includes('abc'), false);
+    assert.match((await kept.callTool('echo', { text: 'x' }, ctx)).text, /abc/);
+    assert.equal((await masked.callTool('echo', { text: 'x' }, ctx)).text.includes('abc'), false);
   } finally {
     await kept.close?.();
     await masked.close?.();
@@ -82,8 +82,8 @@ test('k limits the passages when the query has no k', async () => {
   const all = createMcpKnowledge({ url: mock.url, tool: 'search' });
   const one = createMcpKnowledge({ url: mock.url, tool: 'search', k: 1 });
   try {
-    assert.equal((await all.search({ query: 'tide vault quay' })).length, 3);
-    assert.equal((await one.search({ query: 'tide vault quay' })).length, 1);
+    assert.equal((await all.search({ text: 'tide vault quay' })).length, 3);
+    assert.equal((await one.search({ text: 'tide vault quay' })).length, 1);
   } finally {
     await all.close?.();
     await one.close?.();
@@ -128,4 +128,53 @@ test('limits from ${env:...} are coerced to numbers; out-of-range values are rej
   await assert.rejects(channel({ sessionTtlMs: 999 }), /sessionTtlMs/);
   await assert.rejects(channel({ maxSessions: 0 }), /maxSessions/);
   await assert.rejects(channel({ maxSessionsPerCaller: -1 }), /maxSessionsPerCaller/);
+});
+
+/** An MCP server over HTTP whose `tools/list` and `tools/call` answers come from `answer`. */
+async function scripted(answer: (method: string, params: any) => unknown): Promise<{ url: string; lists: () => number; close(): Promise<void> }> {
+  const { createServer } = await import('node:http');
+  let lists = 0;
+  const server = createServer(async (req, res) => {
+    let raw = '';
+    for await (const c of req) raw += c;
+    if (!raw) { res.writeHead(204).end(); return; }
+    const msg = JSON.parse(raw) as { id?: number; method: string; params?: unknown };
+    if (msg.id === undefined) { res.writeHead(202).end(); return; }
+    if (msg.method === 'tools/list') lists++;
+    const result = msg.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 't', version: '1' } } : answer(msg.method, msg.params);
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as import('node:net').AddressInfo;
+  return { url: `http://127.0.0.1:${port}/mcp`, lists: () => lists, close: () => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }) };
+}
+
+test('maxToolPages caps tools/list pagination; a repeated cursor is refused', async () => {
+  let n = 0;
+  const endless = await scripted(() => ({ tools: [{ name: `t${n}`, inputSchema: { type: 'object' } }], nextCursor: `c${++n}` }));
+  const capped = createMcpTools({ url: endless.url, maxToolPages: 3 });
+  try {
+    await assert.rejects(capped.listTools(ctx), /more than 3 pages \(maxToolPages\)/);
+    assert.equal(endless.lists(), 3);
+  } finally {
+    await capped.close?.();
+    await endless.close();
+  }
+  const looping = await scripted(() => ({ tools: [], nextCursor: 'same' }));
+  const tools = createMcpTools({ url: looping.url });
+  try {
+    await assert.rejects(tools.listTools(ctx), /repeated a page cursor/);
+  } finally {
+    await tools.close?.();
+    await looping.close();
+  }
+});
+
+test('maxToolPages: default 100, ${env:...} coerced, out-of-range rejected, unbounded accepted', async () => {
+  const registry = new AdapterRegistry().register(toolAdapter);
+  const make = (maxToolPages: unknown) => registry.create('ToolPort', 'mcp', { url: 'http://127.0.0.1:9/mcp', maxToolPages }, actx);
+  await make('5');
+  await make('unbounded');
+  await assert.rejects(make(0), /maxToolPages/);
+  assert.equal(toolAdapter.limits?.maxToolPages?.default, 100);
 });

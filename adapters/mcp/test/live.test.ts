@@ -53,7 +53,7 @@ test('live: the OpenAPI bridge over streamable HTTP', { timeout: 60_000 }, async
     assert.deepEqual(specs.map((s) => s.name).sort(), ['checkBearer', 'decodeBase64', 'echoJson', 'echoQuery', 'getStatus']);
     assert.deepEqual(Object.fromEntries(specs.map((s) => [s.name, s.risk])), { checkBearer: 'read', decodeBase64: 'read', echoJson: 'exec', echoQuery: 'read', getStatus: 'exec' });
     const echoed = await tools.callTool('echoJson', { title: 'hi', tags: ['a'] }, ctx());
-    assert.match(echoed.content, /"title": ?"hi"/);
+    assert.match(echoed.text, /"title": ?"hi"/);
   } finally {
     await tools.close?.();
   }
@@ -69,8 +69,8 @@ test('live: @modelcontextprotocol/server-everything@2.1.0 over stdio', { timeout
     assert.ok(names.includes('echo'), `echo not in ${names.join(', ')}`);
     assert.ok(specs.every((s) => /^[A-Za-z0-9_.-]+$/.test(s.name)));
     const out = await tools.callTool('echo', { message: 'ping' }, ctx());
-    assert.equal(out.isError, undefined);
-    assert.match(out.content, /ping/);
+    assert.equal(out.ok, true);
+    assert.match(out.text, /ping/);
   } finally {
     await tools.close?.();
   }
@@ -98,7 +98,7 @@ async function ensureIngested(server: McpServerOptions): Promise<void> {
       for (const section of text.split(/^## /m).slice(1)) {
         const [heading = '', ...body] = section.split('\n');
         const res = await session.run((c) => c.callTool('qdrant-store', { information: `${title} > ${heading}\n${body.join('\n').trim()}`, metadata: { id: `${file}#${heading.toLowerCase().replace(/\W+/g, '-')}`, path: file } }));
-        assert.equal(res.isError, false, res.content);
+        assert.equal(res.isError, false, res.text);
       }
     }
   } finally {

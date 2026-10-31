@@ -12,10 +12,10 @@ const slowTools = defineAdapter<'ToolPort'>({
   layer: 'tool', port: 'ToolPort', name: 'slow-tools', direction: 'outbound', maps: { technology: 'test double' },
   portVersion: PORT_VERSIONS.ToolPort, tiers: ['prototype'], optionsSchema: { type: 'object' },
   create: (): ToolPort => ({
-    listTools: async () => [{ name: 'wait', description: 'Waits until cancelled', inputSchema: { type: 'object' }, risk: 'read' }],
+    listTools: async () => [{ name: 'wait', description: 'Waits until cancelled', params: { type: 'object' }, risk: 'read' }],
     callTool: (_name, _args, ctx) => new Promise((resolve) => {
       started();
-      ctx.signal?.addEventListener('abort', () => { aborted++; resolve({ content: 'cancelled', isError: true }); }, { once: true });
+      ctx.signal?.addEventListener('abort', () => { aborted++; resolve({ ok: false, text: 'cancelled' }); }, { once: true });
     }),
   }),
 });

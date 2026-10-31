@@ -14,16 +14,30 @@ Lists the tools of the server and calls them. Tool names are the server's own, w
 `[A-Za-z0-9_.-]` replaced by `_`; the stack adds the source name, so a tool `search` of the source `docs` is
 `docs__search`.
 
-- **Risk**: `risk` forces a level for every tool; otherwise a tool matching `readOnly` is `read`, `readOnlyHint` gives
-  `read`, `destructiveHint: false` gives `write`, anything else `exec`.
-- **Results**: text content, with resources and other parts summarized; `structuredContent` goes to `data`. A tool
-  that reports `isError`, or a JSON-RPC error answering a call, is an error result. An unreachable server, an HTTP
-  error status and a cancelled call reject.
+- **Spec**: `inputSchema` becomes `params`; `annotations` and `_meta` are kept in `ext["mcp.annotations"]` and
+  `ext["mcp.meta"]`, and the server's own name in `ext["mcp.name"]` when it had to be changed.
+- **Risk**: `risk` forces a level for every tool; otherwise a tool matching `readOnly` is `read`; otherwise the `in`
+  mapping rules on `ToolSpec` decide, by default `exec`, `write` when `destructiveHint` is false, `read` when
+  `readOnlyHint` is true:
+
+  ```json
+  [{ "to": "/risk", "default": "exec" },
+   { "from": "/annotations/destructiveHint", "to": "/risk", "map": { "true": "exec", "false": "write" } },
+   { "from": "/annotations/readOnlyHint", "to": "/risk", "map": { "true": "read" } }]
+  ```
+
+  A `mappings` entry for `tools.<name>` replaces them (or adds to them with `$merge: "append"`); the rule source is the
+  MCP tool as listed, so `{ "from": "/_meta/owner", "to": "/attrs/owner" }` gives policies an attribute.
+- **Results**: `{ ok, text, data? }`: the text items of `content[]` joined, `ok` = `!isError`, `structuredContent` in
+  `data`. Images, audio and resources go to `ext["mcp.content"]` (without any text item the text is the structured
+  content as JSON, or a marker such as `[image]`). Secrets are masked in all three. A JSON-RPC error answering a call is
+  a result with `ok: false`. An unreachable server, an HTTP error status and a cancelled call reject.
 - **Auth**: with `auth: { audience, scopes }` (HTTP only) every call carries `Authorization: Bearer <token>` from
   `ctx.credentials`, which replaces a static `authorization` header. Without credentials nothing is sent and the call
   is an error result. A token echoed back by the server is redacted. The connection requests (initialize, tool list)
   use the `credentials` given to the factory, or else those of the call that opens the connection.
-- The tool list is cached for `toolsTtlMs`.
+- The tool list is cached for `toolsTtlMs`. `tools/list` is read page by page up to `maxToolPages` pages; a server
+  that answers with more, or repeats a cursor, is refused instead of being read forever.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
@@ -35,13 +49,14 @@ Lists the tools of the server and calls them. Tool names are the server's own, w
 | `errorBodyChars` | integer | 300 | Characters of an error body kept in the error message, after masking |
 | `minSecretChars` | integer | 4 | Header and token values shorter than this are not masked in errors |
 | `stderrChars` | integer | 2000 | stdio: characters of the server's stderr kept for error messages |
-| `risk` | `read`, `write`, `exec` | derived | Risk of every tool |
+| `risk` | string | derived | Risk of every tool: a core value or one added to the `risk` vocabulary |
 | `readOnly` | string[] | `[]` | Globs of tools that are read-only |
 | `include`, `exclude` | string[] | all, none | Globs of tool names to expose or hide |
 | `toolsTtlMs` | integer | 60000 | How long the tool list is cached |
+| `maxToolPages` | integer | 100 | Pages of `tools/list` read before the server is refused |
 
-Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production
-tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
+Limits accept `${env:NAME}`; `timeoutMs` and `maxToolPages` also accept `"unbounded"`, which `agent-layers check` fails
+on the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
 
 `${env:NAME}` and `${env:NAME:-default}` in the options are resolved when the instance is created.
 
@@ -66,8 +81,15 @@ Calls one retrieval tool of the server and turns its output into passages. The d
    `id` becomes the passage id.
 3. Anything else is one passage ("No information found…" is none).
 
-The query goes to `queryArg`; `k` goes to `kArg` and the filter to `filterArg` when set. Without `filterArg` the filter
-is applied to the metadata of the returned passages. The result is cut to `k`. In code, `parse` replaces the parser.
+Passages: `source` is the instance name; item metadata (`attrs`, `metadata` or `payload`) becomes `attrs` (plain values;
+a string `title` or `url` becomes the field of that name, other values `ext["mcp.metadata"]`); `score` is the backend's
+raw score (the core fuses scores across sources). The `in` mapping rules on `Passage` run over each item (the JSON
+item, `{ content, metadata }` for an entry, `{ text }` for plain text); the default rule keeps an item's own `source`
+as `attrs.source`.
+
+The query text goes to `queryArg`; `k` goes to `kArg` and the filter to `filterArg` when set. Without `filterArg` the
+filter is applied to the `attrs` of the returned passages (equality; a list means any of). The result is cut to `k`. In
+code, `parse` (`({ text, isError }, query) => Passage[]`) replaces the parser.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
@@ -112,8 +134,8 @@ Mounted by the gateway at `/mcp` (streamable HTTP), so any MCP client, in any la
 the enforcement of the stack: policy, approval, authorization, `tool_args` and `tool_result` guards, credentials bound
 to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge__<source>` with a `query` argument.
 
-- The gateway authenticates every request (`Authorization: Bearer ...`); the MCP session belongs to that caller, and
-  a session id presented by another caller is answered like an unknown one (404).
+- The gateway authenticates every request (`Authorization: Bearer ...`); the MCP session belongs to that caller
+  (`caller.kind` and `caller.id`), and a session id presented by another caller is answered like an unknown one (404).
 - Two eras on the same endpoint. Legacy (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05): `initialize` (returns
   `Mcp-Session-Id`; it answers the asked revision when served, else 2025-11-25, never an error), `ping`, `tools/list`,
   `tools/call`, `notifications/cancelled` (aborts the call in flight). Modern (2026-07-28, stateless, no session):
@@ -129,8 +151,11 @@ to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge
 - Requests must be `Content-Type: application/json` (415 otherwise). The gateway refuses foreign `Origin` headers and,
   on loopback, unknown `Host` names, as the MCP transport requires against DNS rebinding.
 - Answers are JSON, or a one-event SSE stream when the client accepts only `text/event-stream` (or `sse: true`).
-- Tool names are the stack's `<source>__<tool>`; the risk becomes `readOnlyHint` and `destructiveHint`. A denied or
-  blocked call is a tool result with `isError: true`, so the client's model can react; an unknown tool is `-32602`.
+- Tool names are the stack's `<source>__<tool>`, `params` is served as `inputSchema`; the risk (a value added to the
+  vocabulary counts as the core value it is `like`, an unknown one as `exec`) becomes `readOnlyHint` (`read`) and
+  `destructiveHint` (`exec`). A result is `{ content: [{ type: "text", text }], structuredContent: data, isError: !ok }`;
+  a denied or blocked call is a tool result with `isError: true`, so the client's model can react; an unknown tool is
+  `-32602`.
   Errors outside the protocol answer `internal error`, never the error text.
 
 | Option | Type | Default | Meaning |

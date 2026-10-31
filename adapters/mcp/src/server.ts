@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { limitValue, matchesAny, type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type ToolPort, type ToolSpec } from '@agent-layers/core';
+import {
+  limitValue, matchesAny, type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type Risk, type ToolPort,
+  type ToolSpec,
+} from '@agent-layers/core';
 
 import { SERVER_LIMITS } from './limits.ts';
 
@@ -79,15 +82,21 @@ function decodeHeaderValue(value: string | null): string | null {
  * The owner a request acts for: an authenticated caller's kind and subject. Anonymous callers cannot be told apart, so an
  * anonymous session is its own owner (keyed by its id) and is never usable by an authenticated caller.
  */
-const ownerOf = (ctx: InboundContext, sessionId: string) => (ctx.identity ? `id:${ctx.identity.kind}:${ctx.identity.subject}` : `anon:${sessionId}`);
+/** A core risk value as is; any other value is served as `exec`. */
+export const coreRisk = (risk: Risk): string => (risk === 'read' || risk === 'write' || risk === 'exec' ? risk : 'exec');
 
-/** MCP tool description of a governed tool: risk becomes the read-only and destructive hints. */
-function toMcpTool(spec: ToolSpec) {
-  const risk = spec.risk ?? 'exec';
+const ownerOf = (ctx: InboundContext, sessionId: string) => (ctx.caller ? `id:${ctx.caller.kind}:${ctx.caller.id}` : `anon:${sessionId}`);
+
+/**
+ * MCP tool description of a governed tool: `params` becomes `inputSchema`, the core risk (after resolving a value added
+ * `like` a core one) becomes the read-only and destructive hints.
+ */
+function toMcpTool(spec: ToolSpec, coreRisk: (risk: Risk) => string) {
+  const risk = coreRisk(spec.risk ?? 'exec');
   return {
     name: spec.name,
     description: spec.description,
-    inputSchema: spec.inputSchema && typeof spec.inputSchema === 'object' ? { type: 'object', ...spec.inputSchema } : { type: 'object' },
+    inputSchema: spec.params && typeof spec.params === 'object' ? { type: 'object', ...spec.params } : { type: 'object' },
     annotations: { readOnlyHint: risk === 'read', destructiveHint: risk === 'exec' },
   };
 }
@@ -96,7 +105,7 @@ function toMcpTool(spec: ToolSpec) {
  * Serves the stack's governed tools (authorization, approval, guards, credentials on behalf of the caller, telemetry)
  * and its knowledge sources as an MCP server over streamable HTTP. Mounted by the gateway, which authenticates callers.
  */
-export function createMcpServerChannel(options: McpServerChannelOptions = {}, name = 'mcp'): ChannelPort {
+export function createMcpServerChannel(options: McpServerChannelOptions = {}, name = 'mcp', riskOf: (risk: Risk) => string = coreRisk): ChannelPort {
   const path = options.path ?? '/mcp';
   const ttl = limitValue(SERVER_LIMITS.sessionTtlMs, options.sessionTtlMs);
   const max = limitValue(SERVER_LIMITS.maxSessions, options.maxSessions);
@@ -110,7 +119,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
     mount(host: ChannelHost) {
       const sessions = new Map<string, Session>();
       // A host without tools (for example a test host) serves an empty tool list.
-      const tools: ToolPort = host.tools?.() ?? { listTools: async () => [], callTool: async () => ({ content: 'no tools', isError: true }) };
+      const tools: ToolPort = host.tools?.() ?? { listTools: async () => [], callTool: async () => ({ ok: false, text: 'no tools' }) };
 
       const drop = (id: string) => {
         const s = sessions.get(id);
@@ -149,7 +158,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
       };
 
       const callContext = (ctx: InboundContext, signal: AbortSignal): CallContext => ({
-        runId: randomUUID(), agent: name, signal, ...(ctx.identity ? { identity: ctx.identity } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
+        runId: randomUUID(), agent: name, signal, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
       });
 
       async function dispatch(msg: RpcRequest, inflight: Session['inflight'], ctx: InboundContext): Promise<unknown> {
@@ -158,7 +167,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
             return {};
           case 'tools/list': {
             const specs = await tools.listTools(callContext(ctx, ctx.signal));
-            return { tools: specs.filter((s) => visible(s.name)).map(toMcpTool) };
+            return { tools: specs.filter((s) => visible(s.name)).map((s) => toMcpTool(s, riskOf)) };
           }
           case 'tools/call': {
             const tool = msg.params?.name;
@@ -173,7 +182,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
             try {
               const out = await tools.callTool(tool, args as Record<string, unknown>, callContext(ctx, AbortSignal.any([ctx.signal, controller.signal])));
               const structured = out.data && typeof out.data === 'object' && !Array.isArray(out.data) ? { structuredContent: out.data } : {};
-              return { content: [{ type: 'text', text: out.content }], isError: !!out.isError, ...structured };
+              return { content: [{ type: 'text', text: out.text }], isError: !out.ok, ...structured };
             } finally {
               inflight.delete(key);
             }
@@ -250,12 +259,12 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
         if (m.method === 'initialize') {
           if (!isRequest) return jsonError(400, -32600, 'initialize must be a request');
           const id = randomUUID();
-          if (!makeRoom(!ctx.identity, ownerOf(ctx, id))) return jsonError(429, -32000, 'too many sessions, try again later', m.id);
+          if (!makeRoom(!ctx.caller, ownerOf(ctx, id))) return jsonError(429, -32000, 'too many sessions, try again later', m.id);
           const asked = typeof m.params?.protocolVersion === 'string' ? m.params.protocolVersion : '';
           // The server answers the asked revision when it serves it, else its latest legacy one; it never refuses a handshake.
           const protocol = isLegacy(asked) ? asked : LATEST_LEGACY;
           const now = Date.now();
-          sessions.set(id, { owner: ownerOf(ctx, id), anonymous: !ctx.identity, protocol, created: now, seen: now, inflight: new Map() });
+          sessions.set(id, { owner: ownerOf(ctx, id), anonymous: !ctx.caller, protocol, created: now, seen: now, inflight: new Map() });
           return reply(req, {
             jsonrpc: '2.0', id: m.id,
             result: { protocolVersion: protocol, capabilities: { tools: { listChanged: false } }, serverInfo: { name: options.serverName ?? 'agent-layers', version: SERVER_VERSION } },

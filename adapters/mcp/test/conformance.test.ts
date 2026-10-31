@@ -11,8 +11,8 @@ test('mcp passes ToolPort conformance', async () => {
       options: { url: mock.url },
       fixtures: {
         calls: [
-          { name: 'echo', args: { text: 'hi' }, expect: 'echo: hi', isError: false },
-          { name: 'fail', args: {}, expect: 'it broke', isError: true },
+          { name: 'echo', args: { text: 'hi' }, expect: 'echo: hi', ok: true },
+          { name: 'fail', args: {}, expect: 'it broke', ok: false },
         ],
       },
     });

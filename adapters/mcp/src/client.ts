@@ -1,5 +1,5 @@
-import { limitValue, traceHeaders, type BoundCredentials, type TelemetryPort } from '@agent-layers/core';
-import { CONNECTION_LIMITS } from './limits.ts';
+import { activeTrace, limitValue, type BoundCredentials, type LimitValue, type TelemetryPort } from '@agent-layers/core';
+import { CONNECTION_LIMITS, TOOLS_LIMITS } from './limits.ts';
 import { HttpTransport, McpHttpError, StdioTransport, type HeaderMap, type McpServerOptions, type Transport, type TransportLimits } from './transport.ts';
 
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -14,11 +14,22 @@ export interface McpToolInfo {
   description?: string;
   inputSchema?: Record<string, unknown>;
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; [k: string]: unknown };
+  _meta?: Record<string, unknown>;
 }
 
-export interface McpCallResult { content: string; isError: boolean; structured?: unknown }
+/**
+ * A `tools/call` result: the text items of `content[]` joined (or, without any, the structured content as JSON, or a
+ * marker per other item), `isError`, `structuredContent`, and the items that are not text (images, audio, resources).
+ */
+export interface McpCallResult { text: string; isError: boolean; structured?: unknown; items?: unknown[] }
 
 export const bearer = (token: string): HeaderMap => ({ authorization: `Bearer ${token}` });
+
+/** W3C trace context headers of the active span, when there is one. */
+export function traceHeaders(telemetry: TelemetryPort | undefined): HeaderMap {
+  const t = activeTrace(telemetry);
+  return t?.parent ? { traceparent: t.parent, ...(t.state ? { tracestate: t.state } : {}) } : {};
+}
 
 /** Validates the transport choice of a server config; returns a message or undefined. */
 export function serverProblem(cfg: McpServerOptions): string | undefined {
@@ -39,14 +50,16 @@ export const connectionLimits = (cfg: McpServerOptions): TransportLimits => ({
 export class McpClient {
   readonly serverInfo: unknown;
   #transport: Transport;
+  #maxToolPages: number;
 
-  private constructor(transport: Transport, serverInfo: unknown) {
+  private constructor(transport: Transport, serverInfo: unknown, maxToolPages: number) {
     this.#transport = transport;
     this.serverInfo = serverInfo;
+    this.#maxToolPages = maxToolPages;
   }
 
   /** `credentials` authorize the connection requests (initialize, tools/list, session close) when `auth` is set. */
-  static async connect(cfg: McpServerOptions, deps: McpConnectDeps = {}): Promise<McpClient> {
+  static async connect(cfg: McpServerOptions & { maxToolPages?: LimitValue }, deps: McpConnectDeps = {}): Promise<McpClient> {
     const problem = serverProblem(cfg);
     if (problem) throw new Error(`MCP server: ${problem}`);
     const limits = connectionLimits(cfg);
@@ -56,7 +69,7 @@ export class McpClient {
       const init = await transport.request('initialize', { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: CLIENT_INFO });
       if (transport instanceof HttpTransport) transport.setProtocol(init?.protocolVersion ?? MCP_PROTOCOL_VERSION);
       await transport.notify('notifications/initialized');
-      return new McpClient(transport, init?.serverInfo);
+      return new McpClient(transport, init?.serverInfo, limitValue(TOOLS_LIMITS.maxToolPages, cfg.maxToolPages));
     } catch (err) {
       await transport.close();
       throw err;
@@ -66,25 +79,35 @@ export class McpClient {
   get alive(): boolean { return this.#transport.alive; }
   get hasSession(): boolean { return this.#transport.hasSession; }
 
+  /**
+   * Every page of `tools/list`. A server that keeps answering with a next cursor beyond `maxToolPages` pages (option of
+   * the same name), or repeats a cursor, is refused: the list would never end.
+   */
   async listTools(): Promise<McpToolInfo[]> {
     const tools: McpToolInfo[] = [];
+    const seen = new Set<string>();
     let cursor: string | undefined;
-    do {
+    for (let pages = 0; ; pages++) {
+      if (pages >= this.#maxToolPages) throw new Error(`MCP tools/list: more than ${this.#maxToolPages} pages (maxToolPages)`);
       const page = await this.#transport.request('tools/list', cursor ? { cursor } : {});
-      tools.push(...(page?.tools ?? []));
-      cursor = page?.nextCursor;
-    } while (cursor);
-    return tools;
+      if (Array.isArray(page?.tools)) tools.push(...page.tools);
+      cursor = typeof page?.nextCursor === 'string' && page.nextCursor ? page.nextCursor : undefined;
+      if (!cursor) return tools;
+      if (seen.has(cursor)) throw new Error('MCP tools/list: the server repeated a page cursor');
+      seen.add(cursor);
+    }
   }
 
   /** `headers` (HTTP only) replace the connection credentials for this call, for example a per-run Authorization. */
   async callTool(name: string, args: unknown, signal?: AbortSignal, headers?: HeaderMap): Promise<McpCallResult> {
     const res = await this.#transport.request('tools/call', { name, arguments: args ?? {} }, signal, headers);
-    const text = (res?.content ?? [])
-      .map((c: any) => (c.type === 'text' ? c.text : c.type === 'resource' ? (c.resource?.text ?? `[resource ${c.resource?.uri}]`) : `[${c.type}]`))
-      .join('\n');
+    const content: any[] = Array.isArray(res?.content) ? res.content : [];
+    const texts = content.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text as string);
+    const items = content.filter((c) => !(c?.type === 'text' && typeof c.text === 'string'));
     const structured = res?.structuredContent;
-    return { content: text || (structured !== undefined ? JSON.stringify(structured) : ''), isError: Boolean(res?.isError), ...(structured !== undefined ? { structured } : {}) };
+    const marker = (c: any) => (c?.type === 'resource' || c?.type === 'resource_link' ? `[${c.type} ${c.resource?.uri ?? c.uri ?? ''}]`.replace(' ]', ']') : `[${String(c?.type)}]`);
+    const text = texts.join('\n') || (structured !== undefined ? JSON.stringify(structured) : items.map(marker).join('\n'));
+    return { text, isError: Boolean(res?.isError), ...(structured !== undefined ? { structured } : {}), ...(items.length ? { items } : {}) };
   }
 
   close(): Promise<void> {
@@ -97,11 +120,11 @@ export class McpClient {
  * HTTP session has expired (404), and retries the connection after a failure.
  */
 export class McpSession {
-  #cfg: McpServerOptions;
+  #cfg: McpServerOptions & { maxToolPages?: LimitValue };
   #deps: McpConnectDeps;
   #client: Promise<McpClient> | undefined;
 
-  constructor(cfg: McpServerOptions, deps: McpConnectDeps = {}) {
+  constructor(cfg: McpServerOptions & { maxToolPages?: LimitValue }, deps: McpConnectDeps = {}) {
     this.#cfg = cfg;
     this.#deps = deps;
   }

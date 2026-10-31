@@ -24,13 +24,13 @@ test('HTTP requests to an MCP server carry the trace context of the active span'
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
   let active = true;
-  const telemetry = { span: (_n, _a, fn) => fn({} as never), event() {}, metric() {}, current: () => (active ? { traceparent } : undefined) } as TelemetryPort;
+  const telemetry = { span: (_n, _a, fn) => fn({} as never), event() {}, metric() {}, current: () => (active ? { parent: traceparent } : undefined) } as TelemetryPort;
   const tools = createMcpTools({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp` }, { telemetry });
   try {
     const ctx = { runId: 'r', agent: 'a' };
     await tools.listTools(ctx);
     active = false;
-    assert.equal((await tools.callTool('echo', {}, ctx)).content, 'ok');
+    assert.equal((await tools.callTool('echo', {}, ctx)).text, 'ok');
     assert.ok(seen.filter((s) => s.method !== 'tools/call').every((s) => s.headers.traceparent === traceparent));
     assert.equal(seen.find((s) => s.method === 'tools/call')?.headers.traceparent, undefined, 'no span, no header');
   } finally {

@@ -12,6 +12,7 @@ export const CONNECTION_LIMITS = defineLimits({
 export const TOOLS_LIMITS = defineLimits({
   ...CONNECTION_LIMITS,
   toolsTtlMs: { path: 'options.toolsTtlMs', default: 60_000, unit: 'ms', min: 0, safe: { max: 3_600_000 } },
+  maxToolPages: { path: 'options.maxToolPages', default: 100, unit: 'count', min: 1, unbounded: 'fail', safe: { max: 1000 } },
 });
 
 /** Limits of the `mcp` KnowledgePort. */

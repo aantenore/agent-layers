@@ -14,12 +14,12 @@ const utilTools = defineAdapter<'ToolPort'>({
   portVersion: PORT_VERSIONS.ToolPort, tiers: ['prototype'], optionsSchema: { type: 'object' },
   create: (): ToolPort => ({
     listTools: async () => [
-      { name: 'echo', description: 'Echo the text', inputSchema: { type: 'object', properties: { text: { type: 'string' } } }, risk: 'read', audience: 'api' },
-      { name: 'wipe', description: 'Delete everything', inputSchema: { type: 'object' }, risk: 'exec' },
+      { name: 'echo', description: 'Echo the text', params: { type: 'object', properties: { text: { type: 'string' } } }, risk: 'read', audience: 'api' },
+      { name: 'wipe', description: 'Delete everything', params: { type: 'object' }, risk: 'exec' },
     ],
     async callTool(name, args, ctx) {
-      seen.push({ tool: name, ...(ctx.identity ? { subject: ctx.identity.subject } : {}), ...(ctx.credentials ? { token: await ctx.credentials.token('api') } : {}) });
-      return { content: `echo: ${String(args.text)}`, data: { text: args.text } };
+      seen.push({ tool: name, ...(ctx.caller ? { subject: ctx.caller.id } : {}), ...(ctx.credentials ? { token: await ctx.credentials.token('api') } : {}) });
+      return { ok: true, text: `echo: ${String(args.text)}`, data: { text: args.text } };
     },
   }),
 });
