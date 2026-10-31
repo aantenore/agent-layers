@@ -6,7 +6,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
-const SKIP_DIRS = new Set(['node_modules', '.git', '.terraform', '.claude', 'dist', '.agent-layers', '.venv', '__pycache__', '.pytest_cache']);
+// Hidden folders (local tool state, caches, .git) are skipped too, except .github.
+const SKIP_DIRS = new Set(['node_modules', 'dist', '__pycache__']);
+const skipDir = (name) => SKIP_DIRS.has(name) || (name.startsWith('.') && name !== '.github');
 
 /** Adapter packages ship TypeScript behind the `source` export condition. Re-run under it when it is missing. */
 export function ensureSourceCondition(scriptUrl) {
@@ -25,10 +27,9 @@ export function walk(dir, out = []) {
   let entries;
   try { entries = readdirSync(dir); } catch { return out; }
   for (const name of entries.sort()) {
-    if (SKIP_DIRS.has(name)) continue;
     const full = join(dir, name);
     const st = statSync(full);
-    if (st.isDirectory()) walk(full, out);
+    if (st.isDirectory()) { if (!skipDir(name)) walk(full, out); }
     else out.push(full);
   }
   return out;
