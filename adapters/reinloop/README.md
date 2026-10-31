@@ -91,7 +91,7 @@ others. Without `budget`, reinloop's default `{ maxTurns: 50 }` applies; a `budg
 ```
 
 The dependency is `reinloop` from GitHub, pinned by commit
-(`github:aantenore/reinloop#eb2db66617a612a3987e008dfa14b8d5eef7f5e1`) so an install never picks up code that was not
+(`github:aantenore/reinloop#d3b0396649d117ad0ef8ff07bd2887b2660ab48e`) so an install never picks up code that was not
 reviewed; its `prepare` script builds it on install. Once reinloop is published to npm, the pin becomes an exact
 version.
 

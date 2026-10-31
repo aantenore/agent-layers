@@ -37,7 +37,7 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "dependencies": {
-    "reinloop": "github:aantenore/reinloop#85d04d99f89804056d51ace7fd27903670e11554"
+    "reinloop": "github:aantenore/reinloop#d3b0396649d117ad0ef8ff07bd2887b2660ab48e"
   },
   "peerDependencies": {
     "@agent-layers/core": "^0.1.0"
