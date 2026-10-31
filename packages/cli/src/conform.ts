@@ -46,8 +46,11 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
         reports.push({ entry, status: 'skip', detail: [`on behalf of a caller only: ${NEEDS_CALLER}`] });
         continue;
       }
-      const fixtures = entry.port === 'RuntimePort' && stack.agents().length
-        ? { stack, agent: await agentSpec(p.config, stack.agents()[0]!), input: 'hello' }
+      const firstAgent = stack.agents().length ? await agentSpec(p.config, stack.agents()[0]!) : undefined;
+      // The model probe asks for the model the agents ask for, so a gateway that serves only named models answers it.
+      const fixtures = entry.port === 'RuntimePort' && firstAgent
+        ? { stack, agent: firstAgent, input: 'hello' }
+        : entry.port === 'ModelPort' && firstAgent ? { model: firstAgent.model }
         : entry.port === 'CredentialPort' ? { ...(audience ? { audience } : {}), ...(caller ? { identity: caller } : {}) }
           : entry.port === 'IdentityPort' && caller ? { valid: opts.token }
             : undefined;
