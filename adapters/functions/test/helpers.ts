@@ -18,13 +18,13 @@ export const tools = [
     name: 'add',
     description: 'Add two numbers',
     risk: 'read',
-    inputSchema: { type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } }, required: ['a', 'b'], additionalProperties: false },
+    params: { type: 'object', properties: { a: { type: 'number' }, b: { type: 'number' } }, required: ['a', 'b'], additionalProperties: false },
     run: ({ a, b }) => String(a + b),
   },
   {
     name: 'boom',
     description: 'Always fails',
-    inputSchema: { type: 'object' },
+    params: { type: 'object' },
     run: () => { throw new Error('kaboom'); },
   },
 ];

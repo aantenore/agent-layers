@@ -12,9 +12,9 @@ test('functions passes ToolPort conformance', async () => {
       ctx: { cwd: dir },
       fixtures: {
         calls: [
-          { name: 'add', args: { a: 1, b: 2 }, expect: '3', isError: false },
-          { name: 'add', args: { a: 'x' }, isError: true },
-          { name: 'boom', args: {}, expect: 'kaboom', isError: true },
+          { name: 'add', args: { a: 1, b: 2 }, expect: '3', ok: true },
+          { name: 'add', args: { a: 'x' }, ok: false },
+          { name: 'boom', args: {}, expect: 'kaboom', ok: false },
         ],
       },
     });
