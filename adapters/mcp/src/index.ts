@@ -108,6 +108,7 @@ export const channelAdapter = defineAdapter<'ChannelPort', McpServerChannelOptio
       sessionTtlMs: { type: 'integer', minimum: 1000 },
       maxSessions: { type: 'integer', minimum: 1 },
       maxSessionsPerCaller: { type: 'integer', minimum: 1 },
+      maxSessionAgeMs: { type: 'integer', minimum: 1000 },
     },
     additionalProperties: false,
   },

@@ -16,17 +16,24 @@ export interface McpServerChannelOptions {
   sse?: boolean;
   /** Idle time after which a session is forgotten (default 1800000). */
   sessionTtlMs?: number;
-  /** Most sessions in total (default 1000). When reached, a new session is refused (429); no caller can evict another's. */
+  /** Absolute lifetime of a session, however active (default 3600000). */
+  maxSessionAgeMs?: number;
+  /**
+   * Most sessions in total (default 1000). When reached, the least recently used session of the authenticated caller
+   * holding the most sessions makes room; anonymous sessions are never evicted for a new one.
+   */
   maxSessions?: number;
-  /** Most sessions per caller (default 10); a caller's own least recently used session makes room for its new one. */
+  /**
+   * Most sessions per authenticated caller, and of all anonymous callers together (default 10; at most a quarter of
+   * `maxSessions`). A caller's own least recently used session makes room for its new one; a full anonymous pool answers 429.
+   */
   maxSessionsPerCaller?: number;
 }
 
 const SUPPORTED_VERSIONS = [MCP_PROTOCOL_VERSION, '2025-03-26', '2024-11-05'];
 const SERVER_VERSION = '0.1.0';
-const ANONYMOUS = '\u0000anonymous';
 
-interface Session { owner: string; protocol: string; seen: number; inflight: Map<string | number, AbortController> }
+interface Session { owner: string; anonymous: boolean; protocol: string; created: number; seen: number; inflight: Map<string | number, AbortController> }
 interface RpcRequest { jsonrpc: '2.0'; id?: string | number | null; method: string; params?: Record<string, unknown> }
 
 class RpcError extends Error {
@@ -38,8 +45,11 @@ const rpcHeaders = { 'content-type': 'application/json' };
 const jsonError = (status: number, code: number, message: string, id: RpcRequest['id'] = null) =>
   new Response(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }), { status, headers: rpcHeaders });
 
-/** The caller a session belongs to: a session opened by one caller is not usable by another. */
-const ownerOf = (ctx: InboundContext) => (ctx.identity ? `${ctx.identity.kind}:${ctx.identity.subject}` : ANONYMOUS);
+/**
+ * The owner a request acts for: an authenticated caller's kind and subject. Anonymous callers cannot be told apart, so an
+ * anonymous session is its own owner (keyed by its id) and is never usable by an authenticated caller.
+ */
+const ownerOf = (ctx: InboundContext, sessionId: string) => (ctx.identity ? `id:${ctx.identity.kind}:${ctx.identity.subject}` : `anon:${sessionId}`);
 
 /** MCP tool description of a governed tool: risk becomes the read-only and destructive hints. */
 function toMcpTool(spec: ToolSpec) {
@@ -61,6 +71,8 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
   const ttl = options.sessionTtlMs ?? 30 * 60_000;
   const max = options.maxSessions ?? 1000;
   const perCaller = options.maxSessionsPerCaller ?? 10;
+  const maxAge = options.maxSessionAgeMs ?? 60 * 60_000;
+  if (perCaller > max / 4) throw new Error('maxSessionsPerCaller must be at most a quarter of maxSessions');
   const visible = (tool: string) => (!options.include || matchesAny(options.include, tool)) && !(options.exclude && matchesAny(options.exclude, tool));
 
   return {
@@ -77,16 +89,33 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
         sessions.delete(id);
       };
 
+      const expired = (s: Session, now = Date.now()) => now - s.seen > ttl || now - s.created > maxAge;
+
       /**
-       * Makes room for a new session of `owner`: forgets expired sessions, then the owner's own least recently used ones
-       * over the per-caller cap. False when the global cap is still reached: other callers' sessions are never evicted.
+       * Makes room for a new session: forgets expired sessions; an authenticated caller over its cap loses its own least
+       * recently used session; when the server is full, the authenticated caller holding the most sessions loses its least
+       * recently used one. Anonymous sessions are never evicted for a new session: a full anonymous pool, or a server full
+       * of anonymous sessions, answers false (429).
        */
-      const makeRoom = (owner: string): boolean => {
+      const makeRoom = (anonymous: boolean, owner: string): boolean => {
         const now = Date.now();
-        for (const [id, s] of sessions) if (now - s.seen > ttl) drop(id);
-        const own = [...sessions].filter(([, s]) => s.owner === owner).map(([id]) => id);
-        for (const id of own.slice(0, Math.max(0, own.length - perCaller + 1))) drop(id);
-        return sessions.size < max;
+        for (const [id, s] of sessions) if (expired(s, now)) drop(id);
+        // Map order is least recently used first.
+        if (anonymous) {
+          if ([...sessions.values()].filter((s) => s.anonymous).length >= perCaller) return false;
+        } else {
+          const own = [...sessions].filter(([, s]) => s.owner === owner).map(([id]) => id);
+          for (const id of own.slice(0, Math.max(0, own.length - perCaller + 1))) drop(id);
+        }
+        if (sessions.size < max) return true;
+        if (anonymous) return false;
+        const counts = new Map<string, number>();
+        for (const s of sessions.values()) if (!s.anonymous) counts.set(s.owner, (counts.get(s.owner) ?? 0) + 1);
+        const top = Math.max(0, ...counts.values());
+        const victim = [...sessions].find(([, s]) => !s.anonymous && counts.get(s.owner) === top);
+        if (!victim) return false;
+        drop(victim[0]);
+        return true;
       };
 
       const callContext = (ctx: InboundContext, signal: AbortSignal): CallContext => ({
@@ -144,11 +173,12 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
 
         if (m.method === 'initialize') {
           if (!isRequest) return jsonError(400, -32600, 'initialize must be a request');
-          if (!makeRoom(ownerOf(ctx))) return jsonError(429, -32000, 'too many sessions, try again later', m.id);
+          const id = randomUUID();
+          if (!makeRoom(!ctx.identity, ownerOf(ctx, id))) return jsonError(429, -32000, 'too many sessions, try again later', m.id);
           const asked = typeof m.params?.protocolVersion === 'string' ? m.params.protocolVersion : '';
           const protocol = SUPPORTED_VERSIONS.includes(asked) ? asked : MCP_PROTOCOL_VERSION;
-          const id = randomUUID();
-          sessions.set(id, { owner: ownerOf(ctx), protocol, seen: Date.now(), inflight: new Map() });
+          const now = Date.now();
+          sessions.set(id, { owner: ownerOf(ctx, id), anonymous: !ctx.identity, protocol, created: now, seen: now, inflight: new Map() });
           return reply(req, {
             jsonrpc: '2.0', id: m.id,
             result: { protocolVersion: protocol, capabilities: { tools: { listChanged: false } }, serverInfo: { name: options.serverName ?? 'agent-layers', version: SERVER_VERSION } },
@@ -159,8 +189,8 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
         if (!id) return jsonError(400, -32600, 'missing Mcp-Session-Id: initialize first', m.id ?? null);
         const session = sessions.get(id);
         // A session of another caller looks exactly like an unknown one.
-        if (session && Date.now() - session.seen > ttl) drop(id);
-        if (!session || !sessions.has(id) || session.owner !== ownerOf(ctx)) return jsonError(404, -32001, 'session not found', m.id ?? null);
+        if (session && expired(session)) drop(id);
+        if (!session || !sessions.has(id) || session.owner !== ownerOf(ctx, id)) return jsonError(404, -32001, 'session not found', m.id ?? null);
         session.seen = Date.now();
         // Re-insert: the map order is the least-recently-used order.
         sessions.delete(id);
@@ -191,7 +221,7 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
           if (req.method === 'GET') return new Response(null, { status: 405, headers: { allow: 'POST, DELETE' } });
           const id = req.headers.get('mcp-session-id');
           const session = id ? sessions.get(id) : undefined;
-          if (!session || session.owner !== ownerOf(ctx)) return jsonError(404, -32001, 'session not found');
+          if (!session || session.owner !== ownerOf(ctx, id!)) return jsonError(404, -32001, 'session not found');
           drop(id!);
           return new Response(null, { status: 204 });
         },
