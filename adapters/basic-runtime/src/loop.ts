@@ -1,6 +1,6 @@
 import {
-  defineLimits, GuardrailBlocked, limitValue, toChatTools, type AgentSpec, type CallContext, type ChatMessage, type RunEvent, type RunInput, type RunResult,
-  type Stack, type Usage,
+  addUsage, callsOf, defineLimits, limitValue, replyText, stopReasonOf, textMessage, toolInfos,
+  type AgentSpec, type CallContext, type Message, type RunEvent, type RunInput, type RunResult, type StopReason, type Stack, type ToolResult, type Usage,
 } from '@agent-layers/core';
 
 /** Price of a model in US dollars per million tokens. */
@@ -9,7 +9,7 @@ export interface ModelPrice { inputPerMTok?: number; outputPerMTok?: number }
 export interface LoopOptions {
   /** Model calls per run (default 8). */
   maxTurns?: number;
-  /** Prices by model id, matched on the model the response names, else the agent's model. Runs report `costUsd` when every call is priced. */
+  /** Prices by model id, matched on the model the reply names, else the agent's model. Runs report `costUsd` when every call is priced. */
   pricing?: Record<string, ModelPrice>;
 }
 
@@ -18,78 +18,68 @@ export const LIMITS = defineLimits({
   maxTurns: { path: 'options.maxTurns', default: 8, unit: 'count', min: 1, max: 100, safe: { max: 25 } },
 });
 
-const PARAM_KEYS = ['temperature', 'max_tokens', 'stop'] as const;
+/** Why the run stopped when the caller aborted or a timeout fired; a signal with a plain reason is an abort. */
+function abortReason(signal: AbortSignal): StopReason {
+  const reason = stopReasonOf(signal.reason);
+  return reason.code === 'error' ? { code: 'aborted' } : reason;
+}
 
-/** Runs one agent: model call → tool calls → model call … until a final answer or the turn limit. */
+/** Runs one agent: model call → tool calls → model call … until a final answer, the turn limit or a call waiting for a person. */
 export async function* runLoop(stack: Stack, agent: AgentSpec, input: RunInput, ctx: CallContext, opts: LoopOptions): AsyncGenerator<RunEvent, RunResult> {
   const maxTurns = limitValue(LIMITS.maxTurns, opts.maxTurns);
   const model = stack.modelFor(agent);
   const tools = stack.toolsFor(agent);
-  const messages: ChatMessage[] = [
-    ...(agent.instructions ? [{ role: 'system' as const, content: agent.instructions }] : []),
-    ...(typeof input === 'string' ? [{ role: 'user' as const, content: input }] : input.messages),
+  const messages: Message[] = [
+    ...(agent.instructions ? [textMessage('system', agent.instructions)] : []),
+    ...(typeof input === 'string' ? [textMessage('user', input)] : input.messages),
   ];
-  const usage: Usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+  let usage: Usage = { inputTokens: 0, outputTokens: 0 };
   // Undefined once a call has no price: a partial sum would look like a real total.
   let costUsd: number | undefined = opts.pricing ? 0 : undefined;
-  const params = Object.fromEntries(PARAM_KEYS.filter((k) => agent.params?.[k] !== undefined).map((k) => [k, agent.params![k]]));
-  const extra = Object.fromEntries(Object.entries(agent.params ?? {}).filter(([k]) => !(PARAM_KEYS as readonly string[]).includes(k)));
-  const end = (status: RunResult['status'], output: string, reason?: string): RunResult =>
+  const end = (status: RunResult['status'], output: string, reason?: StopReason): RunResult =>
     ({ runId: ctx.runId, status, output, usage, ...(costUsd !== undefined ? { costUsd } : {}), ...(reason ? { reason } : {}) });
 
-  yield { type: 'run_start', runId: ctx.runId, agent: agent.name };
+  yield { type: 'run.start', runId: ctx.runId, agent: agent.name };
   try {
     const specs = agent.tools.length ? await tools.listTools(ctx) : [];
     for (let turn = 1; turn <= maxTurns; turn++) {
-      if (ctx.signal?.aborted) return end('stopped', '', 'aborted');
-      const res = await model.chat({
-        model: agent.model, messages, ...(specs.length ? { tools: toChatTools(specs) } : {}), ...params,
-        ...(Object.keys(extra).length ? { extra } : {}),
+      if (ctx.signal?.aborted) return end('stopped', '', abortReason(ctx.signal));
+      const reply = await model.chat({
+        model: agent.model, messages, ...(specs.length ? { tools: toolInfos(specs) } : {}),
+        ...(agent.settings ? { settings: agent.settings } : {}), ...(agent.ext ? { ext: agent.ext } : {}),
       }, ctx);
-      usage.prompt_tokens += res.usage?.prompt_tokens ?? 0;
-      usage.completion_tokens += res.usage?.completion_tokens ?? 0;
-      usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+      usage = addUsage(usage, reply.usage)!;
       if (costUsd !== undefined) {
-        const price = opts.pricing?.[res.model] ?? opts.pricing?.[agent.model];
-        costUsd = price ? costUsd + ((res.usage?.prompt_tokens ?? 0) * (price.inputPerMTok ?? 0) + (res.usage?.completion_tokens ?? 0) * (price.outputPerMTok ?? 0)) / 1e6 : undefined;
+        const price = opts.pricing?.[reply.model] ?? opts.pricing?.[agent.model];
+        costUsd = price ? costUsd + ((reply.usage?.inputTokens ?? 0) * (price.inputPerMTok ?? 0) + (reply.usage?.outputTokens ?? 0) * (price.outputPerMTok ?? 0)) / 1e6 : undefined;
       }
-      const msg = res.choices[0]?.message ?? { role: 'assistant' as const, content: '' };
-      const calls = msg.tool_calls ?? [];
-      yield { type: 'model_response', turn, model: res.model, finish_reason: res.choices[0]?.finish_reason ?? null, toolCalls: calls.length };
-      messages.push({ role: 'assistant', content: msg.content, ...(calls.length ? { tool_calls: calls } : {}) });
-      if (!calls.length) {
-        const output = msg.content ?? '';
+      const calls = callsOf(reply.message);
+      yield { type: 'model.reply', turn, model: reply.model, finish: reply.finish, calls: calls.length };
+      messages.push(reply.message);
+      if (reply.finish !== 'tools' || !calls.length) {
+        const output = replyText(reply);
         if (output) yield { type: 'text', text: output };
         return end('completed', output);
       }
       for (const call of calls) {
-        yield { type: 'tool_call', id: call.id, name: call.function.name };
-        let args: Record<string, unknown>;
-        try {
-          args = call.function.arguments ? JSON.parse(call.function.arguments) as Record<string, unknown> : {};
-        } catch {
-          args = {};
+        yield { type: 'tool.call', id: call.id, tool: call.tool };
+        const started = Date.now();
+        const out: ToolResult = call.invalid !== undefined
+          ? { ok: false, text: 'Arguments must be a JSON object' }
+          : await tools.callTool(call.tool, call.args, ctx);
+        yield { type: 'tool.result', id: call.id, tool: call.tool, ok: out.ok, durationMs: Date.now() - started };
+        messages.push({ role: 'tool', parts: [{ type: 'result', callId: call.id, ok: out.ok, text: out.text, ...(out.data !== undefined ? { data: out.data } : {}) }] });
+        const approval = out.ext?.['sdk.approval'];
+        if (typeof approval === 'string') {
+          const by = stack.ports.approval?.name;
+          return end('waiting', '', { code: 'needs_input', layer: 'identity', ...(by ? { by } : {}), detail: approval });
         }
-        const out = call.function.arguments && !isJsonObject(call.function.arguments)
-          ? { content: 'Arguments must be a JSON object', isError: true }
-          : await tools.callTool(call.function.name, args, ctx);
-        yield { type: 'tool_result', id: call.id, name: call.function.name, isError: !!out.isError };
-        messages.push({ role: 'tool', tool_call_id: call.id, content: out.content });
       }
     }
-    return end('stopped', '', 'max_turns');
+    return end('stopped', '', { code: 'limit', layer: 'harness', detail: 'turns' });
   } catch (err) {
-    if (err instanceof GuardrailBlocked) return end('stopped', '', err.message);
-    if (ctx.signal?.aborted) return end('stopped', '', 'aborted');
-    return end('failed', '', err instanceof Error ? err.message : String(err));
-  }
-}
-
-function isJsonObject(text: string): boolean {
-  try {
-    const v: unknown = JSON.parse(text);
-    return !!v && typeof v === 'object' && !Array.isArray(v);
-  } catch {
-    return false;
+    if (ctx.signal?.aborted) return end('stopped', '', abortReason(ctx.signal));
+    const reason = stopReasonOf(err);
+    return end(reason.code === 'error' ? 'failed' : 'stopped', '', reason);
   }
 }

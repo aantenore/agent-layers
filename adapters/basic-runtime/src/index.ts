@@ -1,7 +1,12 @@
-import { defineAdapter, limitProperties, PORT_VERSIONS, type RunEvent, type RuntimePort } from '@agent-layers/core';
+import { defineAdapter, limitProperties, PORT_VERSIONS, type RunEvent, type RunResult, type RuntimePort } from '@agent-layers/core';
 import { LIMITS, runLoop, type LoopOptions, type ModelPrice } from './loop.ts';
 
 export { LIMITS, runLoop, type LoopOptions, type ModelPrice };
+
+/** The core `run.end` event of a result. */
+const endEvent = (r: RunResult): RunEvent => ({
+  type: 'run.end', status: r.status, ...(r.reason ? { reason: r.reason } : {}), ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}),
+});
 
 /** Factory: an in-process loop over the stack's model and tools. */
 export function createBasicRuntime(options: LoopOptions = {}, name = 'basic-runtime'): RuntimePort {
@@ -17,7 +22,7 @@ export function createBasicRuntime(options: LoopOptions = {}, name = 'basic-runt
           for (;;) {
             const step = await it.next();
             if (step.done) {
-              events.push({ type: 'run_end', status: step.value.status, ...(step.value.reason ? { reason: step.value.reason } : {}), ...(step.value.costUsd !== undefined ? { costUsd: step.value.costUsd } : {}) });
+              events.push(endEvent(step.value));
               return { ...step.value, events };
             }
             events.push(step.value);
@@ -29,7 +34,7 @@ export function createBasicRuntime(options: LoopOptions = {}, name = 'basic-runt
           for (;;) {
             const step = await it.next();
             if (step.done) {
-              yield { type: 'run_end', status: step.value.status, output: step.value.output, usage: step.value.usage, ...(step.value.costUsd !== undefined ? { costUsd: step.value.costUsd } : {}), ...(step.value.reason ? { reason: step.value.reason } : {}) };
+              yield endEvent(step.value);
               return;
             }
             yield step.value;
@@ -65,6 +70,7 @@ export const adapter = defineAdapter<'RuntimePort', LoopOptions>({
     additionalProperties: false,
   },
   limits: LIMITS,
+  ext: { reads: ['sdk.approval'] },
   create: (options, ctx) => createBasicRuntime(options, ctx.name),
 });
 
