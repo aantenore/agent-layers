@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "qdrant": {
+      "command": "uvx",
+      "args": ["--python", "3.12", "mcp-server-qdrant==0.8.1"],
+      "env": {
+        "QDRANT_URL": "${env:QDRANT_URL:-http://localhost:6333}",
+        "COLLECTION_NAME": "${env:QDRANT_COLLECTION:-docs}",
+        "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2"
+      },
+      "readOnly": ["qdrant-find"],
+      "timeoutMs": 300000
+    }
+  },
+  "knowledge": {
+    "k": 3,
+    "maxChars": 4000,
+    "mode": "first-turn",
+    "timeoutMs": 30000,
+    "sources": {
+      "docs": { "type": "mcp", "server": "qdrant", "tool": "qdrant-find" },
+      "wiki": { "type": "wiki", "dir": "wiki" }
+    }
+  }
+}
