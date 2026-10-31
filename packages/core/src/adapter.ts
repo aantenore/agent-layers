@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { AdapterError, errorMessage } from './errors.ts';
 import type { Layer } from './layers.ts';
+import { coerceLimits, validateLimits, type LimitSpec } from './limits.ts';
 import { compatibleVersion, isPortName, PORTS, type PortName, type PortTypes } from './ports/catalog.ts';
 import type { ServiceSpec } from './ports/deploy.ts';
 import type { TelemetryPort } from './ports/telemetry.ts';
@@ -44,6 +45,12 @@ export interface AdapterDescriptor<P extends PortName = PortName, O = any> {
   tiers: readonly Tier[];
   description?: string;
   optionsSchema?: JsonSchema;
+  /**
+   * Configurable limits of the adapter (timeouts, sizes, counts), each an `options.*` path with its default, accepted
+   * range and production check. Values are coerced from `${env:...}` strings and validated before `create`, and the
+   * readiness gate reports unsafe ones on the production tier. Listed in docs/limits.md.
+   */
+  limits?: Readonly<Record<string, LimitSpec>>;
   /** Reference services this adapter needs running (started through the DeployPort by `up` / `dev`). */
   services?(options: O): ServiceSpec[];
   create(options: O, ctx: AdapterContext): PortTypes[P] | Promise<PortTypes[P]>;
@@ -64,6 +71,7 @@ export function defineAdapter<P extends PortName, O = Record<string, unknown>>(d
   if (!compatibleVersion(d.portVersion, info.version)) fail(`implements ${d.port} ${d.portVersion}, core has ${info.version}`);
   if (!Array.isArray(d.tiers) || d.tiers.length === 0 || d.tiers.some((t) => !TIERS.includes(t))) fail(`tiers must be a non-empty subset of ${TIERS.join(', ')}`);
   if (typeof d.create !== 'function') fail('create must be a function');
+  for (const l of Object.values(d.limits ?? {})) if (!l.path.startsWith('options.')) fail(`limit ${l.path} must be an options.* path`);
   return Object.freeze({ ...d, tiers: Object.freeze([...d.tiers]) });
 }
 
@@ -123,8 +131,12 @@ export class AdapterRegistry {
     const layer = PORTS[port].layer;
     const adapter = await this.resolve(port, name);
     if (!adapter) throw new AdapterError(layer, name, `not installed: no ${port} adapter named "${name}"`);
-    const opts = options ?? {};
-    const errors = adapter.optionsSchema ? validate(adapter.optionsSchema, opts, 'options') : [];
+    const limits = Object.values(adapter.limits ?? {});
+    const opts = (coerceLimits(limits, { options: options ?? {} }) as { options: Record<string, unknown> }).options;
+    // Limit messages first: they say what a limit accepts, where the schema only says the value matches no shape.
+    const errors = validateLimits(limits, { options: opts });
+    const seen = new Set(errors.map((e) => e.split(':')[0]));
+    if (adapter.optionsSchema) errors.push(...validate(adapter.optionsSchema, opts, 'options').filter((e) => !seen.has(e.split(':')[0])));
     if (errors.length) throw new AdapterError(layer, name, `invalid options: ${errors.join('; ')}`);
     try {
       return await adapter.create(opts, ctx);

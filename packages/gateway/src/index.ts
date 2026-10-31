@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
-  configuredAdapters, ConfigError, findRoute, InboundRejected, readiness, traceContext,
+  coerceLimits, configuredAdapters, ConfigError, findRoute, GATEWAY_LIMITS, InboundRejected, limitList, limitValue, readiness, traceContext, validateLimits,
   type ChannelPort, type GatewayConfig, type Identity, type TraceContext, type InboundContext, type InboundRoute, type Stack, type TelemetryPort,
   type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
@@ -16,8 +16,6 @@ export type InboundAdapterInstance = ChannelPort | TriggerPort;
 export interface GatewayOptions extends Omit<GatewayConfig, 'inbound'> {
   /** What to mount; default: every mountable channel and trigger of the stack, or those named in `stack.config.gateway.inbound`. */
   inbound?: InboundAdapterInstance[];
-  /** How long `close` waits for requests and trigger runs in flight (default 10000 ms). */
-  closeGraceMs?: number;
 }
 
 export interface GatewayHandle {
@@ -30,9 +28,9 @@ export interface GatewayHandle {
   close(): Promise<void>;
 }
 
-const DEFAULTS = { port: 8787, host: '127.0.0.1', maxBodyBytes: 1024 * 1024, requestTimeoutMs: 300_000, closeGraceMs: 10_000 } as const;
+const DEFAULTS = { port: 8787, host: '127.0.0.1' } as const;
 const RESERVED = ['/healthz', '/readyz'];
-const REQUEST_ID = /^[A-Za-z0-9._-]{1,64}$/;
+const REQUEST_ID_CHARS = /^[A-Za-z0-9._-]+$/;
 const REALM = 'agent-layers';
 const LOOPBACK = ['127.0.0.1', 'localhost', '::1'];
 
@@ -70,8 +68,19 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   const tier = stack.config.tier;
   // Anonymous callers only when the config says so; never on the production tier.
   const anonymous = opts.anonymous === true;
-  const maxBodyBytes = opts.maxBodyBytes ?? DEFAULTS.maxBodyBytes;
-  const requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULTS.requestTimeoutMs;
+  // Options may come from code as well as from the stack config: same coercion and ranges (docs/limits.md).
+  const raw = Object.fromEntries(Object.keys(GATEWAY_LIMITS).map((k) => [k, (opts as Record<string, unknown>)[k]]).filter(([, v]) => v !== undefined));
+  const { gateway: limits } = coerceLimits(limitList(GATEWAY_LIMITS), { gateway: raw as GatewayConfig });
+  const limitErrors = validateLimits(limitList(GATEWAY_LIMITS), { gateway: limits });
+  if (limitErrors.length) throw new ConfigError(limitErrors);
+  const L = GATEWAY_LIMITS;
+  const maxBodyBytes = limitValue(L.maxBodyBytes, limits.maxBodyBytes);
+  const requestTimeoutMs = limitValue(L.requestTimeoutMs, limits.requestTimeoutMs);
+  const headersTimeoutMs = limitValue(L.headersTimeoutMs, limits.headersTimeoutMs);
+  const bodyTimeoutMs = Math.min(requestTimeoutMs, limitValue(L.bodyTimeoutMs, limits.bodyTimeoutMs));
+  const closeGraceMs = limitValue(L.closeGraceMs, limits.closeGraceMs);
+  const corsMaxAgeS = limitValue(L.corsMaxAgeS, limits.corsMaxAgeS);
+  const maxRequestIdChars = limitValue(L.maxRequestIdChars, limits.maxRequestIdChars);
   const telemetry: TelemetryPort = stack.telemetry;
   if (tier === 'production' && anonymous) throw new ConfigError(['gateway: anonymous requests are not allowed on the production tier (remove gateway.anonymous)']);
   if (tier === 'production' && !stack.ports.identity) throw new ConfigError(['gateway: the production tier needs an identity adapter (layers.identity) to authenticate requests']);
@@ -189,7 +198,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
         headers: {
           'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
           'access-control-allow-headers': String(req.headers['access-control-request-headers'] ?? 'authorization, content-type'),
-          'access-control-max-age': '600',
+          'access-control-max-age': String(corsMaxAgeS),
         },
       });
     }
@@ -231,10 +240,10 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const given = req.headers['x-request-id'];
-    const requestId = typeof given === 'string' && REQUEST_ID.test(given) ? given : randomUUID();
+    const requestId = typeof given === 'string' && given.length <= maxRequestIdChars && REQUEST_ID_CHARS.test(given) ? given : randomUUID();
     const client = new AbortController();
     res.once('close', () => { if (!res.writableFinished) client.abort(); });
-    const signal = AbortSignal.any([client.signal, AbortSignal.timeout(requestTimeoutMs)]);
+    const signal = Number.isFinite(requestTimeoutMs) ? AbortSignal.any([client.signal, AbortSignal.timeout(requestTimeoutMs)]) : client.signal;
     const started = Date.now();
     // The path only: query strings can carry credentials.
     const attrs: Record<string, string | number | boolean> = {
@@ -263,8 +272,9 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   }
 
   const server = createServer((req, res) => { track(handle(req, res)); });
-  server.headersTimeout = 30_000;
-  server.requestTimeout = Math.min(requestTimeoutMs, 120_000);
+  // 0 turns the Node timeouts off: only reachable with an explicit "unbounded".
+  server.headersTimeout = Number.isFinite(headersTimeoutMs) ? headersTimeoutMs : 0;
+  server.requestTimeout = Number.isFinite(bodyTimeoutMs) ? bodyTimeoutMs : 0;
   const hostName = opts.host ?? DEFAULTS.host;
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -296,7 +306,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
         draining = true;
         const stopped = new Promise<void>((r) => server.close(() => r()));
         server.closeIdleConnections();
-        const grace = new Promise<void>((r) => setTimeout(r, opts.closeGraceMs ?? DEFAULTS.closeGraceMs).unref());
+        const grace = new Promise<void>((r) => setTimeout(r, closeGraceMs).unref());
         await Promise.race([Promise.allSettled([...inflight]), grace]);
         server.closeAllConnections();
         await stopped;

@@ -4,6 +4,7 @@ import type { CallContext } from '../ports/base.ts';
 import type { KnowledgePort, Passage } from '../ports/knowledge.ts';
 import type { ChatMessage, ChatRequest, ModelPort } from '../ports/model.ts';
 import type { TelemetryPort } from '../ports/telemetry.ts';
+import { PIPELINE_LIMITS } from '../stack-limits.ts';
 import { noopTelemetry } from '../telemetry.ts';
 
 export type InjectionMode = 'system' | 'user';
@@ -27,8 +28,8 @@ export type ModelMiddleware = (model: ModelPort) => ModelPort;
  * A failing source is skipped and reported as a `knowledge.error` event.
  */
 export function knowledgeInjector(sources: Readonly<Record<string, KnowledgePort>>, opts: KnowledgeInjectorOptions = {}): ModelMiddleware {
-  const k = opts.k ?? 4;
-  const maxChars = opts.maxChars ?? 4000;
+  const k = opts.k ?? (PIPELINE_LIMITS.k.default as number);
+  const maxChars = opts.maxChars ?? (PIPELINE_LIMITS.maxChars.default as number);
   const mode = opts.mode ?? 'system';
   const entries = Object.entries(sources);
 

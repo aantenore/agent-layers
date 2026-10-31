@@ -78,7 +78,8 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
   const k = config.pipeline.knowledge ?? {};
   const mode = k.mode ?? 'system';
   const toolSources: Record<string, ToolPort> = { ...ports.tools };
-  if (mode === 'tools' && Object.keys(ports.knowledge).length) toolSources.knowledge = knowledgeTools(ports.knowledge);
+  const toolOpts = { ...(k.k ? { k: k.k } : {}), ...(k.maxK ? { maxK: k.maxK } : {}) };
+  if (mode === 'tools' && Object.keys(ports.knowledge).length) toolSources.knowledge = knowledgeTools(ports.knowledge, toolOpts);
   const tools = governedTools(toolSources, {
     policy: config.policy, guards: ports.guardrails, telemetry,
     ...(ports.authorization ? { authorization: ports.authorization } : {}),
@@ -112,7 +113,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
     if (hostedTools) return hostedTools;
     const knowledgeAsTools = mode !== 'tools' && Object.keys(ports.knowledge).length && !ports.tools.knowledge;
     hostedTools = knowledgeAsTools
-      ? governedTools({ ...ports.tools, knowledge: knowledgeTools(ports.knowledge) }, {
+      ? governedTools({ ...ports.tools, knowledge: knowledgeTools(ports.knowledge, toolOpts) }, {
         policy: config.policy, guards: ports.guardrails, telemetry,
         ...(ports.authorization ? { authorization: ports.authorization } : {}),
         ...(ports.approval ? { approval: ports.approval } : {}),

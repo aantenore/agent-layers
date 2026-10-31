@@ -1,5 +1,5 @@
 import { conformance, NEEDS_CALLER, testContext, type ConformanceReport } from '@agent-layers/conformance';
-import { agentSpec, compose, configuredAdapters, errorMessage, type ConfiguredAdapter, type CredentialPort, type Identity, type Layer, type Stack } from '@agent-layers/core';
+import { agentSpec, CHECK_LIMITS, compose, configuredAdapters, errorMessage, limitValue, type ConfiguredAdapter, type CredentialPort, type Identity, type Layer, type Stack } from '@agent-layers/core';
 import type { Project } from './project.ts';
 
 export interface AdapterReport { entry: ConfiguredAdapter; status: 'ok' | 'fail' | 'skip'; detail: string[] }
@@ -26,7 +26,8 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
       // The adapter's message can name the credential: only the outcome is reported.
       caller = await stack.verify(opts.token).catch(() => { callerError = 'the caller token did not verify through the identity adapter'; return undefined; });
     }
-    const audience = await probeAudience(stack, caller);
+    const limits = p.config.limits.check ?? {};
+    const audience = await probeAudience(stack, caller, limitValue(CHECK_LIMITS.listToolsTimeoutMs, limits.listToolsTimeoutMs));
     for (const entry of configuredAdapters(p.config.layers)) {
       const index = seen.get(entry.slot) ?? 0;
       seen.set(entry.slot, index + 1);
@@ -54,7 +55,7 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
         : entry.port === 'CredentialPort' ? { ...(audience ? { audience } : {}), ...(caller ? { identity: caller } : {}) }
           : entry.port === 'IdentityPort' && caller ? { valid: opts.token }
             : undefined;
-      const r: ConformanceReport = await conformance(entry.port, instance as never, fixtures);
+      const r: ConformanceReport = await conformance(entry.port, instance as never, fixtures, limits);
       reports.push({ entry, status: r.ok ? 'ok' : 'fail', detail: r.failures });
     }
   } finally {
@@ -67,10 +68,10 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
  * Audience for the credentials probe: one a real provider issues tokens for. The first `audience` a tool declares,
  * else the first `auth.audience` in the options of a configured adapter (remote runtimes, MCP servers); none otherwise.
  */
-async function probeAudience(stack: Stack, caller: Identity | undefined): Promise<string | undefined> {
+async function probeAudience(stack: Stack, caller: Identity | undefined, timeoutMs: number): Promise<string | undefined> {
   const ctx = testContext(caller ? { identity: caller } : {});
   for (const port of Object.values(stack.ports.tools)) {
-    const specs = await Promise.race([port.listTools(ctx), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000).unref())]).catch(() => []);
+    const specs = await Promise.race([port.listTools(ctx), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs).unref())]).catch(() => []);
     const found = specs.find((t) => typeof t.audience === 'string' && t.audience);
     if (found) return found.audience;
   }

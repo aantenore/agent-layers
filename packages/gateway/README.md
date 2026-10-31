@@ -55,13 +55,20 @@ The `gateway` block of the stack config, overridable per profile; `serveStack` t
 | `host` | string | `127.0.0.1` | Interface to listen on |
 | `inbound` | string[] | every mountable one | Instance names of the channels and triggers to mount |
 | `anonymous` | boolean | `false` | Accept requests without a credential; refused on the production tier |
-| `maxBodyBytes` | integer | `1048576` | Largest request body |
-| `requestTimeoutMs` | integer | `300000` | Time limit of one request, streams included |
+| `maxBodyBytes` | integer | `1048576` | Largest request body (413 above) |
+| `requestTimeoutMs` | integer | `300000` | Time limit of one request, streams included (504) |
+| `headersTimeoutMs` | integer | `30000` | Time a client has to send the request headers |
+| `bodyTimeoutMs` | integer | `120000` | Time a client has to send the whole request; capped by `requestTimeoutMs` |
+| `corsMaxAgeS` | integer | `600` | How long browsers may cache a CORS preflight answer |
+| `maxRequestIdChars` | integer | `64` | Longest `X-Request-Id` kept from the caller; longer ones are replaced |
 | `publicOrigin` | string | the listen address | Origin used in absolute URLs, behind a proxy |
 | `cors` | `{ origins }` | off | Origins allowed to call from a browser (`*` for any) |
 | `allowedOrigins` | string[] | `[]` | Origins accepted besides the gateway's own, without CORS headers (desktop clients) |
 | `allowedHosts` | string[] | loopback names when bound to loopback, any otherwise | Accepted `Host` names (`name` or `name:port`) |
-| `closeGraceMs` | integer | `10000` | Code only: how long `close` waits for work in flight |
+| `closeGraceMs` | integer | `10000` | How long `close` waits for work in flight |
+
+The limits accept `${env:NAME}` and, where [docs/limits.md](../../docs/limits.md#gateway) allows it, `"unbounded"`;
+`agent-layers check` fails a production-tier profile with an unbounded body size or time limit.
 
 ```json
 { "gateway": { "port": 8787, "host": "0.0.0.0", "inbound": ["openai-compatible", "mcp", "a2a", "cloudevents"] } }

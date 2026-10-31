@@ -37,6 +37,9 @@
     "gateway": {
       "$ref": "#/$defs/gateway"
     },
+    "limits": {
+      "$ref": "#/$defs/limits"
+    },
     "profiles": {
       "type": "object",
       "additionalProperties": {
@@ -790,12 +793,47 @@
           "type": "object",
           "properties": {
             "k": {
-              "type": "integer",
-              "minimum": 1
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 4,
+              "description": "Passages injected per model call, and the default k of the search tools; default 4."
             },
             "maxChars": {
-              "type": "integer",
-              "minimum": 200
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 200
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 4000,
+              "description": "Size of the injected knowledge block (chars); default 4000."
+            },
+            "maxK": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 20,
+              "description": "Largest k a model may ask the knowledge search tools for; default 20."
             },
             "mode": {
               "enum": [
@@ -810,12 +848,31 @@
           "additionalProperties": false
         },
         "cacheTtlMs": {
-          "type": "integer",
-          "minimum": 0
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "description": "Lifetime of cached model answers (ms); default: the cache adapter's TTL."
         },
         "approvalTimeoutMs": {
-          "type": "integer",
-          "minimum": 0
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 0,
+          "description": "How long a tool call waits for a human approval; 0 does not wait (ms); default 0."
         }
       },
       "additionalProperties": false
@@ -846,12 +903,117 @@
           "description": "Accept requests without a credential (default false)."
         },
         "maxBodyBytes": {
-          "type": "integer",
-          "minimum": 1
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "const": "unbounded"
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 1048576,
+          "description": "Largest accepted request body (413 above) (bytes); default 1048576; \"unbounded\" disables it."
         },
         "requestTimeoutMs": {
-          "type": "integer",
-          "minimum": 1
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "const": "unbounded"
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 300000,
+          "description": "Time limit of one request, streams included (504) (ms); default 300000; \"unbounded\" disables it."
+        },
+        "headersTimeoutMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "const": "unbounded"
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 30000,
+          "description": "Time a client has to send the request headers (ms); default 30000; \"unbounded\" disables it."
+        },
+        "bodyTimeoutMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "const": "unbounded"
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 120000,
+          "description": "Time a client has to send the whole request; capped by requestTimeoutMs (ms); default 120000; \"unbounded\" disables it."
+        },
+        "closeGraceMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3600000
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 10000,
+          "description": "How long shutdown waits for requests and trigger runs in flight (ms); default 10000."
+        },
+        "corsMaxAgeS": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 600,
+          "description": "How long browsers may cache a CORS preflight answer (s); default 600."
+        },
+        "maxRequestIdChars": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 64,
+          "description": "Longest X-Request-Id kept from the caller; longer ones are replaced (chars); default 64."
         },
         "publicOrigin": {
           "type": "string",
@@ -887,6 +1049,62 @@
           "required": [
             "origins"
           ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "limits": {
+      "type": "object",
+      "description": "Limits that belong to no single layer. Gateway limits are in `gateway`, pipeline limits in `pipeline`, adapter limits in their options.",
+      "properties": {
+        "check": {
+          "type": "object",
+          "description": "agent-layers check: time limits of the conformance probes.",
+          "properties": {
+            "timeoutMs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 30000,
+              "description": "Time limit of one conformance probe (ms); default 30000."
+            },
+            "deployTimeoutMs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 300000,
+              "description": "Time limit of the deploy probes (up, down) (ms); default 300000."
+            },
+            "listToolsTimeoutMs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 5000,
+              "description": "Time limit of listing tools to find a probe audience (ms); default 5000."
+            }
+          },
           "additionalProperties": false
         }
       },
@@ -980,6 +1198,9 @@
         },
         "gateway": {
           "$ref": "#/$defs/gateway"
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
         }
       },
       "additionalProperties": false

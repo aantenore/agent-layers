@@ -1,7 +1,12 @@
 import { GUARD_STAGES } from './ports/guard.ts';
 import { LAYERS } from './layers.ts';
+import { limitSchema } from './limits.ts';
 import type { JsonSchema } from './schema.ts';
 import { SLOTS } from './slots.ts';
+import { CHECK_LIMITS, GATEWAY_LIMITS, PIPELINE_LIMITS } from './stack-limits.ts';
+
+/** Schema of a stack-config limit: a number, `"unbounded"` where allowed, or a `${env:NAME}` reference. */
+const lim = (spec: Parameters<typeof limitSchema>[0], description: string) => limitSchema(spec, { env: true, description });
 
 const ref: JsonSchema = {
   type: 'object',
@@ -70,14 +75,15 @@ const pipeline: JsonSchema = {
     knowledge: {
       type: 'object',
       properties: {
-        k: { type: 'integer', minimum: 1 },
-        maxChars: { type: 'integer', minimum: 200 },
+        k: lim(PIPELINE_LIMITS.k, 'Passages injected per model call, and the default k of the search tools'),
+        maxChars: lim(PIPELINE_LIMITS.maxChars, 'Size of the injected knowledge block'),
+        maxK: lim(PIPELINE_LIMITS.maxK, 'Largest k a model may ask the knowledge search tools for'),
         mode: { enum: ['system', 'user', 'tools', 'off'], description: 'system/user: inject before model calls; tools: expose as tools; off.' },
       },
       additionalProperties: false,
     },
-    cacheTtlMs: { type: 'integer', minimum: 0 },
-    approvalTimeoutMs: { type: 'integer', minimum: 0 },
+    cacheTtlMs: lim(PIPELINE_LIMITS.cacheTtlMs, 'Lifetime of cached model answers'),
+    approvalTimeoutMs: lim(PIPELINE_LIMITS.approvalTimeoutMs, 'How long a tool call waits for a human approval; 0 does not wait'),
   },
   additionalProperties: false,
 };
@@ -90,8 +96,13 @@ const gateway: JsonSchema = {
     host: { type: 'string', minLength: 1 },
     inbound: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Channel and trigger instance names to mount; every mountable one when omitted.' },
     anonymous: { type: 'boolean', description: 'Accept requests without a credential (default false).' },
-    maxBodyBytes: { type: 'integer', minimum: 1 },
-    requestTimeoutMs: { type: 'integer', minimum: 1 },
+    maxBodyBytes: lim(GATEWAY_LIMITS.maxBodyBytes, 'Largest accepted request body (413 above)'),
+    requestTimeoutMs: lim(GATEWAY_LIMITS.requestTimeoutMs, 'Time limit of one request, streams included (504)'),
+    headersTimeoutMs: lim(GATEWAY_LIMITS.headersTimeoutMs, 'Time a client has to send the request headers'),
+    bodyTimeoutMs: lim(GATEWAY_LIMITS.bodyTimeoutMs, 'Time a client has to send the whole request; capped by requestTimeoutMs'),
+    closeGraceMs: lim(GATEWAY_LIMITS.closeGraceMs, 'How long shutdown waits for requests and trigger runs in flight'),
+    corsMaxAgeS: lim(GATEWAY_LIMITS.corsMaxAgeS, 'How long browsers may cache a CORS preflight answer'),
+    maxRequestIdChars: lim(GATEWAY_LIMITS.maxRequestIdChars, 'Longest X-Request-Id kept from the caller; longer ones are replaced'),
     publicOrigin: { type: 'string', minLength: 1 },
     allowedOrigins: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Origins accepted besides the gateway\'s own; other Origin headers get 403.' },
     allowedHosts: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Accepted Host names (name or name:port); default: loopback names when bound to loopback.' },
@@ -99,6 +110,24 @@ const gateway: JsonSchema = {
       type: 'object',
       properties: { origins: { type: 'array', items: { type: 'string', minLength: 1 } } },
       required: ['origins'],
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const limits: JsonSchema = {
+  type: 'object',
+  description: 'Limits that belong to no single layer. Gateway limits are in `gateway`, pipeline limits in `pipeline`, adapter limits in their options.',
+  properties: {
+    check: {
+      type: 'object',
+      description: 'agent-layers check: time limits of the conformance probes.',
+      properties: {
+        timeoutMs: lim(CHECK_LIMITS.timeoutMs, 'Time limit of one conformance probe'),
+        deployTimeoutMs: lim(CHECK_LIMITS.deployTimeoutMs, 'Time limit of the deploy probes (up, down)'),
+        listToolsTimeoutMs: lim(CHECK_LIMITS.listToolsTimeoutMs, 'Time limit of listing tools to find a probe audience'),
+      },
       additionalProperties: false,
     },
   },
@@ -129,6 +158,7 @@ const profile: JsonSchema = {
     policy: { type: 'array', items: { $ref: '#/$defs/policyRule' } },
     pipeline: { $ref: '#/$defs/pipeline' },
     gateway: { $ref: '#/$defs/gateway' },
+    limits: { $ref: '#/$defs/limits' },
   },
   additionalProperties: false,
 };
@@ -149,9 +179,10 @@ export const configSchema: JsonSchema = {
     policy: { type: 'array', items: { $ref: '#/$defs/policyRule' } },
     pipeline: { $ref: '#/$defs/pipeline' },
     gateway: { $ref: '#/$defs/gateway' },
+    limits: { $ref: '#/$defs/limits' },
     profiles: { type: 'object', additionalProperties: { $ref: '#/$defs/profile' } },
     agents: { type: 'object', additionalProperties: { $ref: '#/$defs/agent' } },
   },
   additionalProperties: false,
-  $defs: { adapterRef: ref, adapterRefOverlay: refOverlay, append, layers, layersOverlay, policyRule, pipeline, gateway, agent, profile },
+  $defs: { adapterRef: ref, adapterRefOverlay: refOverlay, append, layers, layersOverlay, policyRule, pipeline, gateway, limits, agent, profile },
 };

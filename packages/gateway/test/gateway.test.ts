@@ -153,6 +153,30 @@ test('limits: 404, 405, 413, 504 on timeout, 500 without the error text', async 
   }
 });
 
+test('limits are configurable: request id length, CORS max age, server timeouts; bad values are refused', async () => {
+  const stack = await stackFor('prototype');
+  const gw = await serveStack(stack, { port: 0, anonymous: true, maxRequestIdChars: 8, corsMaxAgeS: 42, headersTimeoutMs: 1234, bodyTimeoutMs: '5000' as never, cors: { origins: ['https://app.example'] } });
+  try {
+    const short = await fetch(`${gw.url}/card`, { headers: { 'x-request-id': 'abc-1234' } });
+    assert.equal(short.headers.get('x-request-id'), 'abc-1234');
+    const long = await fetch(`${gw.url}/card`, { headers: { 'x-request-id': 'abc-12345' } });
+    assert.notEqual(long.headers.get('x-request-id'), 'abc-12345');
+    const pre = await fetch(`${gw.url}/echo`, { method: 'OPTIONS', headers: { origin: 'https://app.example', 'access-control-request-method': 'POST' } });
+    assert.equal(pre.headers.get('access-control-max-age'), '42');
+  } finally {
+    await gw.close();
+  }
+  await assert.rejects(serveStack(stack, { port: 0, anonymous: true, maxBodyBytes: 0 }), /gateway\.maxBodyBytes: must be >= 1/);
+  await assert.rejects(serveStack(stack, { port: 0, anonymous: true, closeGraceMs: 'unbounded' as never }), /gateway\.closeGraceMs/);
+  const open = await serveStack(stack, { port: 0, anonymous: true, requestTimeoutMs: 'unbounded', headersTimeoutMs: 'unbounded', bodyTimeoutMs: 'unbounded' });
+  try {
+    assert.equal((await fetch(`${open.url}/card`)).status, 200);
+  } finally {
+    await open.close();
+    await stack.close();
+  }
+});
+
 test('access log: one interface span per request, path without the query, status recorded', async () => {
   const records: TelemetryRecord[] = [];
   const stack = await stackFor('prototype', records);

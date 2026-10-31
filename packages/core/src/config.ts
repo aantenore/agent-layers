@@ -3,11 +3,13 @@ import { dirname, resolve } from 'node:path';
 import type { Tier } from './adapter.ts';
 import { configSchema } from './config-schema.ts';
 import { ConfigError } from './errors.ts';
+import { coerceLimits, limitProblem, validateLimits, type LimitValue } from './limits.ts';
 import type { GuardStage } from './ports/guard.ts';
 import type { AgentSpec } from './ports/runtime.ts';
 import type { PolicyRule } from './policy.ts';
 import { validate } from './schema.ts';
 import { SLOTS, type SlotName } from './slots.ts';
+import { STACK_LIMITS } from './stack-limits.ts';
 import { deepMerge, isPlainObject } from './util.ts';
 
 export interface AdapterRef { adapter: string; name?: string; options?: Record<string, unknown>; stages?: GuardStage[] }
@@ -23,10 +25,16 @@ export type LayersConfig =
   & { [K in ListSlots]?: AdapterRef[] | AppendList | null }
   & { services?: Record<string, unknown>[] };
 
+/** Limits are numbers once the config is parsed; `"unbounded"` only where docs/limits.md allows it. */
 export interface PipelineConfig {
-  knowledge?: { k?: number; maxChars?: number; mode?: 'system' | 'user' | 'tools' | 'off' };
+  knowledge?: { k?: number; maxChars?: number; maxK?: number; mode?: 'system' | 'user' | 'tools' | 'off' };
   cacheTtlMs?: number;
   approvalTimeoutMs?: number;
+}
+
+/** Limits that belong to no single layer (see docs/limits.md). */
+export interface LimitsConfig {
+  check?: { timeoutMs?: number; deployTimeoutMs?: number; listToolsTimeoutMs?: number };
 }
 
 /** Network host of the stack (gateway mode). */
@@ -38,9 +46,19 @@ export interface GatewayConfig {
   /** Accept requests without a credential. Default false; a production-tier profile never runs triggers anonymously. */
   anonymous?: boolean;
   /** Largest accepted request body in bytes (default 1 MiB). */
-  maxBodyBytes?: number;
+  maxBodyBytes?: LimitValue;
   /** Time limit of one request, streams included (default 300000). */
-  requestTimeoutMs?: number;
+  requestTimeoutMs?: LimitValue;
+  /** Time a client has to send the request headers (default 30000). */
+  headersTimeoutMs?: LimitValue;
+  /** Time a client has to send the whole request, capped by `requestTimeoutMs` (default 120000). */
+  bodyTimeoutMs?: LimitValue;
+  /** How long `close` waits for requests and trigger runs in flight (default 10000). */
+  closeGraceMs?: number;
+  /** `Access-Control-Max-Age` of CORS preflight answers, in seconds (default 600). */
+  corsMaxAgeS?: number;
+  /** Longest `X-Request-Id` kept from the caller; longer or malformed ones are replaced (default 64). */
+  maxRequestIdChars?: number;
   /** Public origin used in absolute URLs (agent cards), when the gateway sits behind a proxy. */
   publicOrigin?: string;
   /** Cross-origin access; off when omitted. */
@@ -70,6 +88,7 @@ export interface ProfileConfig {
   policy?: PolicyRule[];
   pipeline?: PipelineConfig;
   gateway?: GatewayConfig;
+  limits?: LimitsConfig;
 }
 
 /** Contents of agent-layers.json. Schema: spec/schemas/stack-config.json. */
@@ -82,6 +101,7 @@ export interface StackConfig {
   policy?: PolicyRule[];
   pipeline?: PipelineConfig;
   gateway?: GatewayConfig;
+  limits?: LimitsConfig;
   profiles?: Record<string, ProfileConfig>;
   agents?: Record<string, AgentConfig>;
 }
@@ -99,6 +119,7 @@ export interface ResolvedConfig {
   policy: PolicyRule[];
   pipeline: PipelineConfig;
   gateway: GatewayConfig;
+  limits: LimitsConfig;
   agents: Record<string, AgentConfig>;
   /** Directory of the config file; relative paths resolve against it. */
   dir: string;
@@ -109,9 +130,20 @@ export const PRODUCTION_REQUIRES: readonly SlotName[] = ['identity', 'authorizat
 
 export const PROFILE_ENV = 'AGENT_LAYERS_PROFILE';
 
-/** Validates a parsed config against the stack config schema. */
+/** Validates a parsed config against the stack config schema. Limit values get the limit's own message. */
 export function validateConfig(config: unknown): string[] {
-  return validate(configSchema, config);
+  return validate(configSchema, config).map((e) => {
+    const m = /^\$((?:\.\w+)+): does not match any allowed shape$/.exec(e);
+    const tail = m?.[1]!.slice(1).split('.');
+    if (!tail) return e;
+    // Top level or inside a profile (`profiles.<name>.gateway...`).
+    const path = tail[0] === 'profiles' ? tail.slice(2).join('.') : tail.join('.');
+    const spec = STACK_LIMITS.find((s) => s.path === path);
+    let value: unknown = config;
+    for (const k of tail) value = (value as Record<string, unknown> | undefined)?.[k];
+    const problem = spec && limitProblem(spec, value);
+    return problem ? `$.${tail.join('.')}: ${problem}` : e;
+  });
 }
 
 const ENV_REF = /\$\{env:([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
@@ -170,6 +202,7 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
   let policy = config.policy ?? [];
   let pipeline: PipelineConfig = config.pipeline ?? {};
   let gateway: GatewayConfig = config.gateway ?? {};
+  let limits: LimitsConfig = config.limits ?? {};
   let tier: Tier = 'prototype';
   let requires: SlotName[] | undefined;
   for (const name of chain) {
@@ -178,6 +211,7 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
     if (p.policy) policy = p.policy;
     if (p.pipeline) pipeline = deepMerge(pipeline, p.pipeline);
     if (p.gateway) gateway = deepMerge(gateway, p.gateway);
+    if (p.limits) limits = deepMerge(limits, p.limits);
     if (p.tier) tier = p.tier;
     if (p.requires) requires = p.requires;
   }
@@ -191,7 +225,7 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
     ...(config.name ? { name: config.name } : {}),
     ...(profile ? { profile } : {}),
     chain, tier, ...(requires ? { requires } : {}),
-    plugins: config.plugins ?? [], layers, policy, pipeline, gateway, agents: config.agents ?? {}, dir,
+    plugins: config.plugins ?? [], layers, policy, pipeline, gateway, limits, agents: config.agents ?? {}, dir,
   };
 }
 
@@ -221,9 +255,15 @@ export function parseConfig(text: string, opts: LoadOptions & { file?: string; d
   const envErrors: string[] = [];
   const layers = interpolate(resolved.layers, env, envErrors, '$.layers');
   const agents = interpolate(resolved.agents, env, envErrors, '$.agents');
-  const gateway = interpolate(resolved.gateway, env, envErrors, '$.gateway');
+  // Limits may come from ${env:...}: interpolated strings become numbers, then their ranges are checked again.
+  const sections = coerceLimits(STACK_LIMITS, {
+    gateway: interpolate(resolved.gateway, env, envErrors, '$.gateway'),
+    pipeline: interpolate(resolved.pipeline, env, envErrors, '$.pipeline'),
+    limits: interpolate(resolved.limits, env, envErrors, '$.limits'),
+  });
+  if (!envErrors.length) envErrors.push(...validateLimits(STACK_LIMITS, sections, '$.'));
   if (envErrors.length) throw new ConfigError(envErrors.map((e) => profile ? `${e} (profile ${profile})` : e), opts.file);
-  return { ...resolved, layers, agents, gateway };
+  return { ...resolved, layers, agents, ...sections };
 }
 
 export async function loadConfig(file: string, opts: LoadOptions = {}): Promise<ResolvedConfig> {

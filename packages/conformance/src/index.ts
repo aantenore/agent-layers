@@ -1,12 +1,12 @@
 import { AdapterRegistry, compatibleVersion, noopTelemetry, PORTS, type AdapterContext, type AnyAdapter, type PortName, type PortTypes } from '@agent-layers/core';
-import { Checks } from './check.ts';
+import { Checks, type CheckLimits } from './check.ts';
 import { checkIngestion, checkKnowledge, checkMemory, checkRuntime, checkState, checkTools } from './suites/agent.ts';
 import { checkApproval, checkAuthorization, checkCredentials, checkGuard, checkIdentity } from './suites/control.ts';
 import { checkChannel, checkDeploy, checkSecrets, checkTrigger } from './suites/edge.ts';
 import { checkEvaluator, checkFeedback, checkTelemetry } from './suites/insight.ts';
 import { checkCache, checkModel, checkRouter } from './suites/model.ts';
 
-export { Checks, testContext } from './check.ts';
+export { Checks, testContext, type CheckLimits } from './check.ts';
 export { conforms, schema } from './schemas.ts';
 export { NEEDS_CALLER, sampleAccess } from './suites/control.ts';
 export type { ModelFixtures, RouterFixtures, CacheFixtures } from './suites/model.ts';
@@ -35,8 +35,8 @@ export interface ConformanceReport {
 }
 
 /** Runs the conformance suite of a port against an instance. Never throws; failures are returned. */
-export async function conformance<P extends PortName>(port: P, impl: PortTypes[P], fixtures?: unknown): Promise<ConformanceReport> {
-  const c = new Checks();
+export async function conformance<P extends PortName>(port: P, impl: PortTypes[P], fixtures?: unknown, limits?: CheckLimits): Promise<ConformanceReport> {
+  const c = new Checks(limits);
   const suite = SUITES[port];
   if (!suite) c.expect(false, `no conformance suite for ${String(port)}`);
   else if (!impl || typeof impl !== 'object') c.expect(false, `${port}: instance must be an object`);
@@ -55,6 +55,14 @@ export function checkDescriptor(d: AnyAdapter): string[] {
   if (!d.optionsSchema) out.push('optionsSchema is missing');
   if (!d.tiers?.length) out.push('tiers is empty');
   if (d.direction !== 'inbound' && d.direction !== 'outbound') out.push('direction must be inbound or outbound');
+  // Every top-level limit is an option the schema describes, with the limit's default.
+  const props = (d.optionsSchema?.properties ?? {}) as Record<string, { default?: unknown }>;
+  for (const l of Object.values(d.limits ?? {})) {
+    const key = /^options\.(\w+)$/.exec(l.path)?.[1];
+    if (!key) continue;
+    if (!props[key]) out.push(`limit ${l.path} is not in optionsSchema`);
+    else if (l.default !== null && props[key].default !== l.default) out.push(`optionsSchema.${key}.default must be ${JSON.stringify(l.default)} (the limit default)`);
+  }
   return out;
 }
 
@@ -62,6 +70,8 @@ export interface CheckAdapterOptions {
   options?: unknown;
   fixtures?: unknown;
   ctx?: Partial<AdapterContext>;
+  /** Probe time limits (default `limits.check` defaults). */
+  limits?: CheckLimits;
 }
 
 /** Checks a descriptor, creates an instance from `options` and runs its port's suite. Closes the instance. */
@@ -76,7 +86,7 @@ export async function checkAdapter(d: AnyAdapter, opts: CheckAdapterOptions = {}
     failures.push(`create: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!instance) return { port: d.port, adapter: d.name, ok: false, failures, skipped: [] };
-  const report = await conformance(d.port, instance as never, opts.fixtures);
+  const report = await conformance(d.port, instance as never, opts.fixtures, opts.limits);
   await instance.close?.().catch(() => {});
   const all = [...failures, ...report.failures];
   return { ...report, adapter: d.name, ok: all.length === 0, failures: all };

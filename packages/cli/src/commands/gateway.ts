@@ -22,7 +22,7 @@ export async function gateway(io: Io, args: GatewayArgs, wait: () => Promise<voi
   const ready = await readiness(p.config, p.registry);
   const missing = ready.problems.filter((x) => x.kind === 'not-installed' || x.kind === 'load-failed');
   if (missing.length) throw new UsageError(missing.map((m) => m.message).join('\n'));
-  if (p.config.tier === 'production' && !ready.ok) throw new UsageError(`profile ${p.config.profile ?? '(base)'} fails the readiness gate:\n${ready.problems.map((x) => `  ${x.message}`).join('\n')}`);
+  if (p.config.tier === 'production' && !ready.ok) throw new UsageError(`profile ${p.config.profile ?? '(base)'} fails the readiness gate:\n${[...ready.problems.map((x) => x.message), ...ready.limits.filter((l) => l.severity === 'fail').map((l) => `limit ${l.message}`)].map((m) => `  ${m}`).join('\n')}`);
   const port = args.port !== undefined ? Number(args.port) : p.config.gateway.port;
   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) throw new UsageError(`--port must be an integer from 0 to 65535`);
   const trace = !(p.config.layers.telemetry as unknown[] | undefined)?.length;

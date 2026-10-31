@@ -14,9 +14,9 @@ export async function checkDeploy(port: DeployPort, f: DeployFixtures = {}, c = 
     c.expect(!JSON.stringify(plan).includes('change-me'), 'plan: must not inline secret values');
   }
   if (!f.live) { c.skip('up/down: live fixture not set'); return c; }
-  const endpoints = await c.attempt('up', () => port.up(services), 300_000);
+  const endpoints = await c.attempt('up', () => port.up(services), c.deployTimeoutMs);
   c.expect(Array.isArray(endpoints), 'up: must resolve to endpoints');
-  await c.attempt('down', () => port.down(services), 300_000);
+  await c.attempt('down', () => port.down(services), c.deployTimeoutMs);
   return c;
 }
 
