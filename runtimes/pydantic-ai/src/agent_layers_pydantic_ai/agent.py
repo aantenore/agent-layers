@@ -16,6 +16,7 @@ from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.tools import RunContext, ToolDefinition
+from pydantic_ai.usage import UsageLimits
 
 from .caller import CallerBearer, caller_token, trace_headers
 from .settings import Settings, SettingsError
@@ -67,3 +68,26 @@ def build_agent(spec: AgentSpec, settings: Settings, http_client: httpx2.AsyncCl
         instructions=spec.instructions or None,
         toolsets=[gateway_tools(settings, spec)] if uses_tools else [],
     )
+
+
+class LimitedAgent:
+    """The agent as the worker sees it: every run is capped at `max_model_requests` model requests.
+
+    FastA2A's worker calls `run` and `iter` without usage limits, so a model that keeps calling tools would loop until
+    the caller's time limit. Everything else is the wrapped agent's.
+    """
+
+    def __init__(self, agent: Agent[None, str], max_model_requests: int) -> None:
+        self._agent = agent
+        self._limits = UsageLimits(request_limit=max_model_requests)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._agent, name)
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault('usage_limits', self._limits)
+        return self._agent.run(*args, **kwargs)
+
+    def iter(self, *args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault('usage_limits', self._limits)
+        return self._agent.iter(*args, **kwargs)

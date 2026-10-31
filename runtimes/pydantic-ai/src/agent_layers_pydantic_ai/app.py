@@ -14,7 +14,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from .agent import build_agent, model_http_client
+from .agent import LimitedAgent, build_agent, model_http_client
 from .caller import CallerBroker, CallerMiddleware, CallerWorker
 from .owners import CallerStorage, OwnedTaskManager, TaskStore
 from .settings import Settings
@@ -45,7 +45,7 @@ def create_app(
     storage = CallerStorage(store)
     broker = CallerBroker()
     worker = CallerWorker(
-        agent=the_agent,
+        agent=LimitedAgent(the_agent, settings.max_model_requests),  # type: ignore[arg-type]
         broker=broker,
         storage=store,
         max_concurrent_runs=settings.max_concurrent_runs,

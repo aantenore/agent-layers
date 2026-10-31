@@ -171,6 +171,7 @@ Also refused: requests with an `Origin` header (the agent is called server to se
 | `MAX_TASKS` | `1000` | Tasks, and conversations, kept in memory; `MAX_TASKS // 4` per caller key (see Task ownership) |
 | `SHUTDOWN_GRACE_S` | `10` | On SIGTERM or SIGINT, how long runs in flight may finish before they are cancelled |
 | `MODEL_TIMEOUT_S` | `120` | Time limit of one model request |
+| `MAX_MODEL_REQUESTS` | `8` | Model requests per run; beyond it the run fails (FastA2A's worker sets no limit, so a model that keeps calling tools would loop until the caller gives up) |
 | `LOG_LEVEL` | `info` | Log level |
 
 `GET /healthz` answers `{"status": "ok"}` while the server runs.

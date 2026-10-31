@@ -37,6 +37,8 @@ class Settings:
     """How old another caller's finished task or idle conversation must be to be reclaimed when the store is full."""
     shutdown_grace_s: float
     model_timeout_s: float
+    max_model_requests: int
+    """Model requests per run; a run that needs more fails instead of looping until the A2A time limit."""
     log_level: str
     gateway_secret: str | None = field(default=None, repr=False)
     """When set, every request except the agent card and health check must carry it in `GATEWAY_SECRET_HEADER`."""
@@ -101,6 +103,7 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         cross_owner_min_age_s=_float(env, 'CROSS_OWNER_MIN_AGE_S', 600.0),
         shutdown_grace_s=_float(env, 'SHUTDOWN_GRACE_S', 10.0),
         model_timeout_s=_float(env, 'MODEL_TIMEOUT_S', 120.0),
+        max_model_requests=_int(env, 'MAX_MODEL_REQUESTS', 8),
         log_level=env.get('LOG_LEVEL', 'info').strip().lower() or 'info',
         gateway_secret=env.get('A2A_GATEWAY_SECRET', '').strip() or None,
     )
