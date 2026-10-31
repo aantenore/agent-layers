@@ -54,6 +54,7 @@ def create_app(
         storage=store,
         max_concurrent_runs=settings.max_concurrent_runs,
         shutdown_grace_s=settings.shutdown_grace_s,
+        price=settings.pricing.get(settings.model or spec.model or ''),
     )
 
     @asynccontextmanager

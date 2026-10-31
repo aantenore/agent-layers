@@ -175,12 +175,18 @@ Also refused: requests with an `Origin` header (the agent is called server to se
 | `SHUTDOWN_GRACE_S` | `10.0` | On SIGTERM or SIGINT, seconds runs in flight may finish before they are cancelled; `unbounded` waits for them |
 | `MODEL_TIMEOUT_S` | `120.0` | Time limit of one model request, in seconds; `unbounded` sets none |
 | `MAX_MODEL_REQUESTS` | `8` | Model requests per run; beyond it the run fails (FastA2A's worker sets no limit, so a model that keeps calling tools would loop until the caller gives up); `unbounded` removes the cap |
+| `MODEL_PRICING` | unset | USD per million tokens by model alias, JSON `{"<alias>": {"inputPerMTok": 0.15, "outputPerMTok": 0.6}}` (both required) |
 | `LOG_LEVEL` | `info` | Log level |
 
 Limits are the numeric rows above (`MAX_*`, `*_TTL_S`, `*_AGE_S`, `*_GRACE_S`, `MODEL_TIMEOUT_S`); each is declared in
 `LIMITS` in `settings.py` with its minimum and safe range. A value below the minimum is refused at startup, and
 `unbounded` is accepted only where the row says so. A limit set to `unbounded` or outside its safe range is logged as
 a warning at startup; the full table is in [limits](../../docs/limits.md#pydantic-ai).
+
+Each completed task carries the run's token usage, summed over its model requests, in
+`metadata["agent-layers"].usage` (`inputTokens`, `outputTokens`), where the stack's `a2a` runtime reads it into
+`RunResult.usage`. When the agent's model alias has a price in `MODEL_PRICING`, `costUsd` is added; without a price
+there is no cost (not 0), and when a model response omitted its usage neither is reported.
 
 `GET /healthz` answers `{"status": "ok"}` while the server runs.
 

@@ -22,6 +22,8 @@ const PYTHON = process.platform === 'win32' ? join(HERE, '.venv', 'Scripts', 'py
 const DEV_TOKEN = 'dev-token';
 const WRONG_TOKEN = 'not-a-known-token-5c1e';
 const STEP_MS = 30_000;
+/** Price of the agent's model alias (USD per million tokens), so its runs report a cost. */
+const PRICE = { inputPerMTok: 1, outputPerMTok: 2 };
 
 const hasUv = spawnSync('uv', ['--version'], { stdio: 'ignore' }).status === 0;
 
@@ -95,7 +97,7 @@ async function startPair(profile, dir) {
   const gateway = start('gateway', process.execPath, ['--conditions=source', '--disable-warning=ExperimentalWarning', CLI, 'gateway', '--profile', profile, '--port', String(gwPort)], { cwd: EXAMPLE, env });
   const agent = start('python agent', PYTHON, ['-m', 'agent_layers_pydantic_ai'], {
     cwd: HERE,
-    env: { ...process.env, AGENT_FILE: join(EXAMPLE, 'agents', 'assistant.md'), GATEWAY_URL: `http://127.0.0.1:${gwPort}`, A2A_PORT: String(agentPort) },
+    env: { ...process.env, AGENT_FILE: join(EXAMPLE, 'agents', 'assistant.md'), GATEWAY_URL: `http://127.0.0.1:${gwPort}`, A2A_PORT: String(agentPort), MODEL_PRICING: JSON.stringify({ default: PRICE }) },
   });
   const pair = { gateway, agent, gw: `http://127.0.0.1:${gwPort}`, agentUrl: `http://localhost:${agentPort}/`, telemetry };
   try {
@@ -134,6 +136,10 @@ describe('polyglot: Pydantic AI agent as the runtime of the stack', { skip: !has
     const send = spans(pair.telemetry, 'a2a.send').at(-1);
     assert.equal(send.attrs['a2a.version'], '1.0');
     assert.equal(send.attrs['a2a.task.state'], 'completed');
+    // The Python agent's usage and cost reach the stack's RunResult, which the gateway's A2A server reports in turn.
+    const { usage, costUsd } = task.metadata?.['agent-layers'] ?? {};
+    assert.ok(usage && usage.inputTokens > 0 && usage.outputTokens > 0, 'usage of the remote run');
+    assert.equal(costUsd, (usage.inputTokens * PRICE.inputPerMTok + usage.outputTokens * PRICE.outputPerMTok) / 1e6);
   });
 
   test('agent:assistant over the OpenAI-compatible API runs the same remote agent', async () => {

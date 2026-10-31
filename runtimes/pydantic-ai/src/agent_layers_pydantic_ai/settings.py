@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -65,6 +66,14 @@ LIMITS: dict[str, Limit] = {
 
 
 @dataclass(frozen=True)
+class ModelPrice:
+    """Price of a model alias in US dollars per million tokens."""
+
+    input_per_mtok: float
+    output_per_mtok: float
+
+
+@dataclass(frozen=True)
 class Settings:
     agent_file: str
     gateway_url: str
@@ -93,6 +102,8 @@ class Settings:
     max_model_requests: int | None
     """Model requests per run; a run that needs more fails instead of looping until the A2A time limit."""
     log_level: str
+    pricing: Mapping[str, ModelPrice] = field(default_factory=dict)
+    """Prices by model alias; a run of an alias without a price reports usage but no cost."""
     gateway_secret: str | None = field(default=None, repr=False)
     """When set, every request except the agent card and health check must carry it in `GATEWAY_SECRET_HEADER`."""
 
@@ -134,6 +145,34 @@ def _limit(env: Mapping[str, str], name: str) -> int | float | None:
     if spec.high is not None and value > spec.high:
         raise SettingsError(f'{name} must be at most {spec.high}')
     return value
+
+
+_PRICE_KEYS = {'inputPerMTok': 'input_per_mtok', 'outputPerMTok': 'output_per_mtok'}
+
+
+def _pricing(env: Mapping[str, str]) -> dict[str, ModelPrice]:
+    """`MODEL_PRICING`: JSON `{"<alias>": {"inputPerMTok": n, "outputPerMTok": n}}`, both prices required."""
+    raw = env.get('MODEL_PRICING', '').strip()
+    if not raw:
+        return {}
+    try:
+        table = json.loads(raw)
+    except ValueError:
+        raise SettingsError('MODEL_PRICING must be a JSON object') from None
+    if not isinstance(table, dict):
+        raise SettingsError('MODEL_PRICING must be a JSON object')
+    out: dict[str, ModelPrice] = {}
+    for alias, price in table.items():
+        if not isinstance(price, dict) or set(price) != set(_PRICE_KEYS):
+            raise SettingsError(f'MODEL_PRICING[{alias!r}] must have exactly inputPerMTok and outputPerMTok')
+        values = {}
+        for key, name in _PRICE_KEYS.items():
+            v = price[key]
+            if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v) or v < 0:
+                raise SettingsError(f'MODEL_PRICING[{alias!r}].{key} must be a number >= 0')
+            values[name] = float(v)
+        out[alias] = ModelPrice(**values)
+    return out
 
 
 def unsafe_limits(settings: Settings) -> list[str]:
@@ -194,5 +233,6 @@ def load_settings(env: Mapping[str, str] = os.environ) -> Settings:
         model_timeout_s=_limit(env, 'MODEL_TIMEOUT_S'),
         max_model_requests=_limit(env, 'MAX_MODEL_REQUESTS'),
         log_level=env.get('LOG_LEVEL', 'info').strip().lower() or 'info',
+        pricing=_pricing(env),
         gateway_secret=env.get('A2A_GATEWAY_SECRET', '').strip() or None,
     )

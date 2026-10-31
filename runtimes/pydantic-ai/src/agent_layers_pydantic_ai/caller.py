@@ -25,7 +25,8 @@ from fasta2a.pydantic_ai import AgentWorker
 from fasta2a.schema import TaskIdParams, TaskSendParams
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .settings import GATEWAY_SECRET_HEADER
+from .figures import METADATA_KEY, run_figures
+from .settings import GATEWAY_SECRET_HEADER, ModelPrice
 
 CALLER_TOKEN: ContextVar[str | None] = ContextVar('caller_token', default=None)
 
@@ -200,6 +201,8 @@ class CallerWorker(AgentWorker[Any, Any]):
     """None: no cap on parallel runs."""
     shutdown_grace_s: float | None = field(kw_only=True)
     """None: on shutdown, wait for the runs in flight without a time limit."""
+    price: ModelPrice | None = field(default=None, kw_only=True)
+    """Price of the agent's model alias; None: runs report usage without a cost."""
     _active: int = field(default=0, init=False, repr=False)
     _idle: anyio.Event | None = field(default=None, init=False, repr=False)
     _scopes: dict[str, anyio.CancelScope] = field(default_factory=dict, init=False, repr=False)
@@ -226,6 +229,15 @@ class CallerWorker(AgentWorker[Any, Any]):
             RUN_OWNER.reset(reset_owner)
             CALLER_TRACE.reset(reset_trace)
             CALLER_TOKEN.reset(reset)
+
+    async def _run_agent(self, task_id: str, context_id: str, artifact_id: str, message_history: list[Any]) -> Any:
+        """The run, with its usage and cost written in the task's metadata before the task is marked completed."""
+        result, streamed = await super()._run_agent(task_id, context_id, artifact_id, message_history)
+        figures = run_figures(result.usage, self.price)
+        annotate = getattr(self.storage, 'annotate', None)
+        if figures and annotate is not None:
+            annotate(task_id, METADATA_KEY, figures)
+        return result, streamed
 
     async def cancel_run(self, task_id: str) -> None:
         """Mark a task that has not ended as canceled and stop its run: no further model or tool call is made."""

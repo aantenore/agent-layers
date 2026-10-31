@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+from contextlib import asynccontextmanager
 
 import anyio
 import httpx2
@@ -39,7 +40,9 @@ class FakeGateway:
             chunk = {'id': 'c1', 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': 'mock',
                      'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': text}, 'finish_reason': None}]}
             end = {**chunk, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]}
-            sse = f'data: {json.dumps(chunk)}\n\ndata: {json.dumps(end)}\n\ndata: [DONE]\n\n'
+            usage = {**chunk, 'choices': [], 'usage': {'prompt_tokens': 3, 'completion_tokens': 4, 'total_tokens': 7}}
+            events = [chunk, end, usage] if body.get('stream_options', {}).get('include_usage') else [chunk, end]
+            sse = ''.join(f'data: {json.dumps(e)}\n\n' for e in events) + 'data: [DONE]\n\n'
             return httpx2.Response(200, content=sse.encode(), headers={'content-type': 'text/event-stream'})
         return httpx2.Response(200, json={
             'id': 'c1', 'object': 'chat.completion', 'created': int(time.time()), 'model': 'mock',
@@ -48,9 +51,9 @@ class FakeGateway:
         })
 
 
-@pytest.fixture
-async def server():
-    settings = load_settings({'AGENT_FILE': 'unused.md', 'GATEWAY_URL': 'http://gateway.test', 'GATEWAY_MODEL': 'mock'})
+@asynccontextmanager
+async def serve(env: dict[str, str] | None = None):
+    settings = load_settings({'AGENT_FILE': 'unused.md', 'GATEWAY_URL': 'http://gateway.test', 'GATEWAY_MODEL': 'mock', **(env or {})})
     spec = AgentSpec(name='assistant', instructions='Be brief.', model='default', tools=(), knowledge=())
     gateway = FakeGateway()
     model_client = httpx2.AsyncClient(auth=CallerBearer(), transport=httpx2.MockTransport(gateway))
@@ -59,6 +62,12 @@ async def server():
         async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=ORIGIN) as client:
             yield client, gateway
     await model_client.aclose()
+
+
+@pytest.fixture
+async def server():
+    async with serve() as pair:
+        yield pair
 
 
 def rpc(method: str, params: dict) -> dict:
@@ -90,6 +99,24 @@ async def test_a2a_1_0_run_carries_the_caller_token_to_the_model(server, caplog)
     assert str(gateway.requests[0].url) == 'http://gateway.test/v1/chat/completions'
     assert TOKEN not in caplog.text
     assert TOKEN not in json.dumps(task)
+
+
+async def test_a_run_reports_its_usage_and_cost_in_the_task_metadata():
+    pricing = json.dumps({'mock': {'inputPerMTok': 1, 'outputPerMTok': 2}})
+    headers = {'authorization': f'Bearer {TOKEN}', 'a2a-version': '1.0'}
+    async with serve({'MODEL_PRICING': pricing}) as (client, _):
+        message = {'messageId': 'm-cost', 'role': 'ROLE_USER', 'parts': [{'text': 'Hello'}]}
+        task = await run_to_end(client, 'SendMessage', 'GetTask', message, headers)
+    figures = task['metadata']['agent-layers']
+    assert figures['usage'] == {'inputTokens': 3, 'outputTokens': 4}
+    assert figures['costUsd'] == pytest.approx((3 * 1 + 4 * 2) / 1e6)
+
+
+async def test_an_unpriced_model_reports_usage_without_a_cost(server):
+    client, _ = server
+    message = {'kind': 'message', 'messageId': 'm-free', 'role': 'user', 'parts': [{'kind': 'text', 'text': 'Hello'}]}
+    task = await run_to_end(client, 'message/send', 'tasks/get', message, {'authorization': f'Bearer {TOKEN}'})
+    assert task['metadata']['agent-layers'] == {'usage': {'inputTokens': 3, 'outputTokens': 4}}
 
 
 TRACEPARENT = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'

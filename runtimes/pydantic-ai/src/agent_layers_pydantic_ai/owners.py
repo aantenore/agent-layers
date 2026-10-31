@@ -143,6 +143,13 @@ class TaskStore(Storage[list[Any]]):
                 history.append(message)
         return task
 
+    def annotate(self, task_id: str, key: str, value: Any) -> None:
+        """Set `metadata[key]` of a task (a task already dropped is ignored)."""
+        owner = self._task_owner.get(task_id)
+        task = self._spaces[owner].tasks.get(task_id) if owner in self._spaces else None
+        if task is not None:
+            task.setdefault('metadata', {})[key] = value
+
     async def load_context(self, context_id: str) -> list[Any] | None:
         space = self._spaces.get(RUN_OWNER.get() or '')
         context = space.contexts.get(context_id) if space else None
