@@ -1,7 +1,10 @@
 import { defineAdapter, LAYERS, limitProperties, PORT_VERSIONS, type EvaluatorPort, type Layer } from '@agent-layers/core';
-import { LIMITS, scoreLayers, type SignalItem, type SignalLimitOptions } from './signals.ts';
+import { attributedScore, LIMITS, scoreLayers, type SignalItem, type SignalLimitOptions } from './signals.ts';
 
-export { LIMITS, scoreLayers, type SignalItem, type SignalLimitOptions, type SignalRun } from './signals.ts';
+export {
+  ATTRIBUTED_METRIC, attributedScore, attributeLayer, LIMITS, scoreLayers,
+  type Attribution, type SignalItem, type SignalLimitOptions, type SignalRun,
+} from './signals.ts';
 export { createSignalRecorder, type SignalRecorder } from './recorder.ts';
 
 export interface LayerSignalsOptions extends SignalLimitOptions {
@@ -9,15 +12,18 @@ export interface LayerSignalsOptions extends SignalLimitOptions {
   layers?: Layer[];
 }
 
-/** Factory: scores the health of each layer (`<layer>_health`, 1 = healthy) from a run and its telemetry. */
+/**
+ * Factory: scores the health of each layer (`<layer>_health`, 1 = healthy) from a run and its telemetry, then adds
+ * `attributed`: the layer to fix (see `attributeLayer`).
+ */
 export function createLayerSignals(options: LayerSignalsOptions = {}, name = 'layer-signals'): EvaluatorPort {
   const only = options.layers ? new Set<Layer>(options.layers) : undefined;
   return {
     name,
     async score(_c, run) {
-      const reason = (run as { reason?: unknown }).reason;
-      const scores = scoreLayers((run.events ?? []) as SignalItem[], { runId: run.runId, status: run.status, ...(typeof reason === 'string' ? { reason } : {}) }, options);
-      return only ? scores.filter((s) => s.layer && only.has(s.layer)) : scores;
+      const scores = scoreLayers((run.events ?? []) as SignalItem[], { runId: run.runId, status: run.status, ...(run.reason ? { reason: run.reason } : {}) }, options);
+      const health = only ? scores.filter((s) => s.layer && only.has(s.layer)) : scores;
+      return [...health, attributedScore(health)];
     },
   };
 }
@@ -36,8 +42,7 @@ export const adapter = defineAdapter<'EvaluatorPort', LayerSignalsOptions>({
     properties: {
       layers: { type: 'array', minItems: 1, items: { enum: LAYERS.map((l) => l.layer) } },
       ...limitProperties(LIMITS, {
-        reasonChars: 'Characters of a run reason kept in the llm and harness score reasons',
-        guardReasonChars: 'Characters of a run reason kept in the guardrail score reason',
+        reasonChars: 'Characters of a stop reason detail kept in the llm and harness score reasons',
         previewItems: 'Names listed in a score reason',
       }),
     },
