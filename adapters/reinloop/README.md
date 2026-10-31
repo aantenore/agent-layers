@@ -68,8 +68,10 @@ Agent `params`: `temperature`, `max_tokens` and `stop` go to the model; other ke
 }
 ```
 
-The dependency is `reinloop` from GitHub (`github:aantenore/reinloop#feat/layers`); its `prepare` script builds it on
-install.
+The dependency is `reinloop` from GitHub, pinned by commit
+(`github:aantenore/reinloop#f02598b556009f7127382d930c0e44613ff062f8`) so an install never picks up code that was not
+reviewed; its `prepare` script builds it on install. Once reinloop is published to npm, the pin becomes an exact
+version.
 
 ## Tests
 

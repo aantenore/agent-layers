@@ -29,7 +29,7 @@
     "test": "node --conditions=source --test \"test/**/*.test.ts\""
   },
   "dependencies": {
-    "reinloop": "github:aantenore/reinloop#feat/layers"
+    "reinloop": "github:aantenore/reinloop#f02598b556009f7127382d930c0e44613ff062f8"
   },
   "peerDependencies": {
     "@agent-layers/core": "^0.1.0"
