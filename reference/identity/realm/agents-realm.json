@@ -66,6 +66,12 @@
   ],
   "users": [
     {
+      "id": "2f6d2c1e-7a4b-4c1d-9e3f-5b8a0c6d7e01",
+      "username": "service-account-agent-runtime",
+      "enabled": true,
+      "serviceAccountClientId": "agent-runtime"
+    },
+    {
       "username": "alice",
       "enabled": true,
       "email": "alice@example.test",

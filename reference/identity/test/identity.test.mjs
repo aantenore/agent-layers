@@ -12,6 +12,8 @@ const clientId = process.env.OIDC_CLIENT_ID ?? 'agent-runtime';
 const clientSecret = process.env.OIDC_CLIENT_SECRET ?? 'change-me';
 const toolsAudience = process.env.TOOLS_AUDIENCE ?? 'tools-api';
 const opaUrl = process.env.OPA_URL ?? 'http://localhost:8181';
+// Fixed service-account user id of agent-runtime in realm/agents-realm.json: the `sub` of its client_credentials tokens.
+const agentSubject = process.env.OIDC_AGENT_SUBJECT ?? '2f6d2c1e-7a4b-4c1d-9e3f-5b8a0c6d7e01';
 
 // Test-only users and passwords from realm/agents-realm.json; the `agents-test` client exists only for these tests.
 const USERS = { alice: 'alice-test-only', bob: 'bob-test-only' };
@@ -39,7 +41,8 @@ async function userToken(username) {
 
 // User tokens from the test client carry aud agent-runtime (audience mapper): the runtime is their audience.
 const inbound = () => oidcVerifier({ issuer, audience: clientId });
-const downstream = () => oidcVerifier({ issuer, audience: toolsAudience });
+// agent-runtime tokens are `agent` only when their `sub` is its service account (exchanged tokens keep the user's sub).
+const downstream = () => oidcVerifier({ issuer, audience: toolsAudience, agentClients: [clientId], agentSubjects: { [clientId]: agentSubject } });
 
 describe('l5 identity (Keycloak + OPA)', { skip }, () => {
   let alice;

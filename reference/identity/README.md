@@ -33,7 +33,7 @@ Realm `agents`:
 
 | Client / user | Purpose |
 |---|---|
-| `agent-runtime` | Confidential client of the runtime. Service account on (agent identity), standard token exchange on. Audience mapper adds `tools-api`. Secret from `OIDC_CLIENT_SECRET` (default `change-me`) |
+| `agent-runtime` | Confidential client of the runtime. Service account on (agent identity; user id fixed to `2f6d2c1e-7a4b-4c1d-9e3f-5b8a0c6d7e01`, the `sub` of its client_credentials tokens, for `agentSubjects`), standard token exchange on. Audience mapper adds `tools-api`. Secret from `OIDC_CLIENT_SECRET` (default `change-me`) |
 | `tools-api` | Audience of downstream tool calls; issues no tokens |
 | `agents-test` | Public client with the password grant, **for the tests only**. Audience mapper adds `agent-runtime` so its user tokens can be exchanged |
 | `alice` / `alice-test-only` | Realm role `analyst` |
