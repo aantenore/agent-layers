@@ -1,4 +1,4 @@
-import { GUARD_STAGES, validate, type AccessQuestion, type ApprovalPort, type ApprovalRequest, type AuthorizationPort, type Caller, type CredentialPort, type GuardPort, type GuardStage, type IdentityPort } from '@agent-layers/core';
+import { GUARD_STAGES, validate, type AccessQuestion, type ApprovalPort, type ApprovalRequest, type AuthorizationPort, type Caller, type CredentialPort, type GuardPort, type GuardStage, type GuardVerdict, type IdentityPort } from '@agent-layers/core';
 import { Checks } from '../check.ts';
 import { conforms, schema } from '../schemas.ts';
 
@@ -134,17 +134,19 @@ export async function checkGuard(port: GuardPort, f: GuardFixtures = {}, c = new
     }
     return v;
   };
+  // The verdict reason says why ("llm-guard unavailable: authentication failed (HTTP 401)"), so a failure is diagnosable.
+  const got = (v: GuardVerdict) => (v.reason ? `${v.action} (${v.reason})` : v.action);
   for (const s of f.allow ?? stages.map((stage) => ({ stage, text: 'The weather is pleasant today.' }))) {
     const v = await run(s);
-    if (v) c.expect(v.action === 'allow', `allow: ${s.stage} sample got ${v.action}`);
+    if (v) c.expect(v.action === 'allow', `allow: ${s.stage} sample got ${got(v)}`);
   }
   for (const s of f.block ?? []) {
     const v = await run(s);
-    if (v) c.expect(v.action === 'block', `block: ${s.stage} sample got ${v.action}`);
+    if (v) c.expect(v.action === 'block', `block: ${s.stage} sample got ${got(v)}`);
   }
   for (const s of f.redact ?? []) {
     const v = await run(s);
-    if (v && c.expect(v.action === 'redact', `redact: ${s.stage} sample got ${v.action}`)) {
+    if (v && c.expect(v.action === 'redact', `redact: ${s.stage} sample got ${got(v)}`)) {
       c.expect(typeof v.text === 'string' && !v.text.includes(s.secret), `redact: ${s.stage} text still contains the secret`);
     }
   }
