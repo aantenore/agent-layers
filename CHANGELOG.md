@@ -42,6 +42,8 @@ Every package under `packages/*` and `adapters/*` is released with the same vers
   - reference services: guard → `presidio`, guard → `llm-guard`, authorization → `opa`, identity and credentials →
     `oidc` (Keycloak, real caller token), telemetry → `otlp` (collector and Jaeger);
   - real model: model → `openai-compatible` through the model gateway's `hosted` group.
+- Published 0.2.0 smoke: `npx @agent-layers/cli@0.2.0 init --template rag`, `npm install` from the registry,
+  `agent-layers check` and the project tests passed.
 - Not run yet: `guard-http`, `authz-authzen` and `knowledge-http` (no reference service), `knowledge-mcp` (needs a
   loaded Qdrant collection), `runtime-pydantic-ai` (needs the Python agent and the gateway running).
 
