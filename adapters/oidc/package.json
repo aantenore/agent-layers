@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-oidc",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenID Connect identity (JWT verification via discovery and JWKS) and OAuth 2.0 credentials (token exchange, client credentials) for agent-layers",
   "keywords": ["agent-layers", "agent-layers-adapter", "oidc", "oauth2", "jwt", "token-exchange"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/oidc#readme",
@@ -40,15 +40,15 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/adapter-basic-runtime": "0.1.0",
-    "@agent-layers/adapter-functions": "0.1.0",
-    "@agent-layers/adapter-mock-model": "0.1.0",
-    "@agent-layers/adapter-opa": "0.1.0",
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
+    "@agent-layers/adapter-basic-runtime": "0.2.0",
+    "@agent-layers/adapter-functions": "0.2.0",
+    "@agent-layers/adapter-mock-model": "0.2.0",
+    "@agent-layers/adapter-opa": "0.2.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

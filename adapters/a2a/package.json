@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-a2a",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent2Agent (A2A) protocol: the stack's agents served to other agents, and remote A2A agents as runtimes",
   "keywords": ["agent-layers", "agent-layers-adapter"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/a2a#readme",
@@ -40,16 +40,16 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/adapter-basic-runtime": "0.1.0",
-    "@agent-layers/adapter-memory-approval": "0.1.0",
-    "@agent-layers/adapter-mock-model": "0.1.0",
-    "@agent-layers/adapter-static-identity": "0.1.0",
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
-    "@agent-layers/gateway": "0.1.0",
+    "@agent-layers/adapter-basic-runtime": "0.2.0",
+    "@agent-layers/adapter-memory-approval": "0.2.0",
+    "@agent-layers/adapter-mock-model": "0.2.0",
+    "@agent-layers/adapter-static-identity": "0.2.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
+    "@agent-layers/gateway": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

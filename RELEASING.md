@@ -24,9 +24,11 @@ part of the npm release.
 ## Later releases
 
 1. Set the new version in every package and in the internal dependency ranges, for example
-   `npm version 0.2.0 --workspaces --no-git-tag-version`, then update the `^0.1.0` ranges on `@agent-layers/*`
-   packages to `^0.2.0` and run `npm install` to refresh the lockfile.
-2. Commit, tag `v0.2.0`, push.
+   `npm version 0.2.0 --workspaces --no-git-tag-version`, then update the `^0.1.0` ranges and the exact `0.1.0`
+   development pins on `@agent-layers/*` packages (and in `examples/minimal`) to the new version and run
+   `npm install` to refresh the lockfile.
+2. Add the version to [CHANGELOG.md](CHANGELOG.md): what was added and fixed, and what was verified before release.
+   Commit, tag `v0.2.0`, push; the GitHub release takes its notes from that section.
 3. `npm run release:dry`, then `npm run release`. A version that is already on npm cannot be published again.
 
 ## From GitHub Actions

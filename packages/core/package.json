@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ports, adapter registry, composition pipelines and stack config for agent-layers",
   "keywords": ["agent-layers", "agents", "llm", "ports-and-adapters", "composition", "sdk"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/core#readme",

@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Network host for a composed agent-layers stack: inbound standards, identity, limits and access logs in one place",
   "keywords": ["agent-layers", "gateway", "agents", "http"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/gateway#readme",
@@ -37,12 +37,12 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "dependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/adapter-basic-runtime": "0.1.0",
-    "@agent-layers/adapter-mock-model": "0.1.0",
-    "@agent-layers/adapter-static-identity": "0.1.0",
+    "@agent-layers/adapter-basic-runtime": "0.2.0",
+    "@agent-layers/adapter-mock-model": "0.2.0",
+    "@agent-layers/adapter-static-identity": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

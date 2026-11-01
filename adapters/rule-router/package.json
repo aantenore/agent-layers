@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-rule-router",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Router adapter that picks the model from rules on request size, tools and turn",
   "keywords": ["agent-layers", "agent-layers-adapter"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/rule-router#readme",
@@ -40,11 +40,11 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

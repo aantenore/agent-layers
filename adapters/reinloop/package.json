@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-reinloop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "reinloop agent runtime as an agent-layers RuntimePort",
   "keywords": ["agent-layers", "agent-layers-adapter", "reinloop"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/reinloop#readme",
@@ -40,15 +40,15 @@
     "reinloop": "^0.3.0"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/adapter-functions": "0.1.0",
-    "@agent-layers/adapter-mock-model": "0.1.0",
-    "@agent-layers/adapter-openai-compatible": "0.1.0",
-    "@agent-layers/adapter-regex-guard": "0.1.0",
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
+    "@agent-layers/adapter-functions": "0.2.0",
+    "@agent-layers/adapter-mock-model": "0.2.0",
+    "@agent-layers/adapter-openai-compatible": "0.2.0",
+    "@agent-layers/adapter-regex-guard": "0.2.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

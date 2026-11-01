@@ -29,7 +29,10 @@ test('init writes a complete project and refuses a non-empty folder', async () =
   const config = readFileSync(join(dir, 'agent-layers.json'), 'utf8');
   assert.match(config, /"adapter": "basic-runtime"/);
   assert.match(config, /"celsius": "\{\{1\}\}"/, 'capture-group placeholders survive');
-  assert.match(readFileSync(join(dir, 'package.json'), 'utf8'), /"name": "demo-app"[\s\S]*"@agent-layers\/core": "\^0\.1\.0"/);
+  const version = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
+  const generated = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name: string; dependencies: Record<string, string> };
+  assert.equal(generated.name, 'demo-app');
+  assert.equal(generated.dependencies['@agent-layers/core'], `^${version}`, 'packages pinned to the CLI version');
   const { io, errors } = captureIo(root);
   assert.equal(await main(['init', 'proj'], io), 1);
   assert.match(errors(), /is not empty \(use --force/);

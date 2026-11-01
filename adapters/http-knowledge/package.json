@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-http-knowledge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Knowledge adapter for any service that answers the agent-layers knowledge HTTP contract",
   "keywords": ["agent-layers", "agent-layers-adapter"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/http-knowledge#readme",
@@ -40,11 +40,11 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-http-tools",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Tool adapter that turns declarative HTTP/JSON requests into tools",
   "keywords": ["agent-layers", "agent-layers-adapter"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/http-tools#readme",
@@ -40,15 +40,15 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/adapter-basic-runtime": "0.1.0",
-    "@agent-layers/adapter-mcp": "0.1.0",
-    "@agent-layers/adapter-mock-model": "0.1.0",
-    "@agent-layers/adapter-openapi": "0.1.0",
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
+    "@agent-layers/adapter-basic-runtime": "0.2.0",
+    "@agent-layers/adapter-mcp": "0.2.0",
+    "@agent-layers/adapter-mock-model": "0.2.0",
+    "@agent-layers/adapter-openapi": "0.2.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

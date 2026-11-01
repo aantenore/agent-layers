@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-layer-signals",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Evaluator adapter that scores the health of each layer from a run and its telemetry",
   "keywords": ["agent-layers", "agent-layers-adapter"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/layer-signals#readme",
@@ -40,15 +40,15 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/adapter-basic-runtime": "0.1.0",
-    "@agent-layers/adapter-functions": "0.1.0",
-    "@agent-layers/adapter-mock-model": "0.1.0",
-    "@agent-layers/adapter-regex-guard": "0.1.0",
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
+    "@agent-layers/adapter-basic-runtime": "0.2.0",
+    "@agent-layers/adapter-functions": "0.2.0",
+    "@agent-layers/adapter-mock-model": "0.2.0",
+    "@agent-layers/adapter-regex-guard": "0.2.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

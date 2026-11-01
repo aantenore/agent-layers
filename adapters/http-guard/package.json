@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-http-guard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Guardrail adapter that calls any service speaking the agent-layers guard HTTP contract",
   "keywords": ["agent-layers", "agent-layers-adapter"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/http-guard#readme",
@@ -40,11 +40,11 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

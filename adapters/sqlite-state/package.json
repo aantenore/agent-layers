@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-sqlite-state",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Durable session state on SQLite (node:sqlite) for agent-layers",
   "keywords": ["agent-layers", "agent-layers-adapter", "sqlite"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/sqlite-state#readme",
@@ -37,11 +37,11 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

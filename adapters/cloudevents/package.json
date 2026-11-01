@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/adapter-cloudevents",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Trigger adapter that receives CloudEvents 1.0 over HTTP and starts agent runs",
   "keywords": ["agent-layers", "agent-layers-adapter"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/adapters/cloudevents#readme",
@@ -40,15 +40,15 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "peerDependencies": {
-    "@agent-layers/core": "^0.1.0"
+    "@agent-layers/core": "^0.2.0"
   },
   "devDependencies": {
-    "@agent-layers/adapter-basic-runtime": "0.1.0",
-    "@agent-layers/adapter-mock-model": "0.1.0",
-    "@agent-layers/adapter-static-identity": "0.1.0",
-    "@agent-layers/conformance": "0.1.0",
-    "@agent-layers/core": "0.1.0",
-    "@agent-layers/gateway": "0.1.0",
+    "@agent-layers/adapter-basic-runtime": "0.2.0",
+    "@agent-layers/adapter-mock-model": "0.2.0",
+    "@agent-layers/adapter-static-identity": "0.2.0",
+    "@agent-layers/conformance": "0.2.0",
+    "@agent-layers/core": "0.2.0",
+    "@agent-layers/gateway": "0.2.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }
