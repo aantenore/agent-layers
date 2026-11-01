@@ -56,10 +56,14 @@ configs:
             model: ollama_chat/lfm2.5:8b
             api_base: http://host.docker.internal:11434
         # A hosted model read from the environment (HOSTED_MODEL, HOSTED_API_KEY), with a spend cap (default 1 USD per 30 days).
+        # HOSTED_HEADER_NAME and HOSTED_HEADER_VALUE add one request header some keys require (for example the workspace
+        # a key belongs to); unset, a placeholder header with an empty value is sent.
         - model_name: hosted
           litellm_params:
             model: os.environ/HOSTED_MODEL
             api_key: os.environ/HOSTED_API_KEY
+            extra_headers:
+              ${HOSTED_HEADER_NAME:-x-agent-layers-unused}: "${HOSTED_HEADER_VALUE:-}"
             max_budget: ${HOSTED_MAX_BUDGET_USD:-1.0}
             budget_duration: ${HOSTED_BUDGET_DURATION:-30d}
         # Primary points to a model that does not exist, so every request falls back to `default`.

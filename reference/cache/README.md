@@ -28,7 +28,7 @@ Model groups exposed by the gateway:
 |---|---|
 | `default` | `ollama_chat/qwen3:4b` on the host Ollama (`host.docker.internal:11434`) |
 | `fast` | `ollama_chat/lfm2.5:8b` on the host Ollama: faster, with tool calling (needs `ollama pull lfm2.5:8b`) |
-| `hosted` | Optional: the model named by `HOSTED_MODEL` with `HOSTED_API_KEY` (any provider LiteLLM supports, set in `.env`), with a LiteLLM deployment budget of 1 USD per 30 days (`HOSTED_MAX_BUDGET_USD`, `HOSTED_BUDGET_DURATION`). Without them the group has no deployment and requests to it fail |
+| `hosted` | Optional: the model named by `HOSTED_MODEL` with `HOSTED_API_KEY` (any provider LiteLLM supports, set in `.env`), with a LiteLLM deployment budget of 1 USD per 30 days (`HOSTED_MAX_BUDGET_USD`, `HOSTED_BUDGET_DURATION`). `HOSTED_HEADER_NAME` and `HOSTED_HEADER_VALUE` add one request header the key may require, such as the workspace it belongs to. Without them the group has no deployment and requests to it fail |
 | `fallback-test` | Primary is a model that does not exist; every request falls back to `default` |
 
 Change the model by editing `ollama_chat/qwen3:4b` in the inlined config. The config is inlined (and not a bind

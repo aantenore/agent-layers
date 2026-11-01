@@ -46,6 +46,8 @@ All values are defaults for local development and live in [`.env.example`](../.e
 | cache | `VALKEY_URL` | `redis://localhost:6379` |
 | cache | `HOSTED_MODEL` | |
 | cache | `HOSTED_API_KEY` | |
+| cache | `HOSTED_HEADER_NAME` | `x-agent-layers-unused` |
+| cache | `HOSTED_HEADER_VALUE` | |
 | telemetry | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` |
 | telemetry | `LANGFUSE_URL` | `http://localhost:3000` |
 | telemetry | `LANGFUSE_PUBLIC_KEY` | `pk-lf-local` |

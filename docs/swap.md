@@ -68,3 +68,17 @@ node scripts/swap-matrix.mjs --only guard-presidio,guard-llm-guard,authz-opa,tel
   the reference realm: `change-me`) and `AGENT_LAYERS_TOKEN` to a token of a test user of the reference realm. When port
   8080 is taken, start Keycloak with `KEYCLOAK_PORT=18080` and set `OIDC_ISSUER=http://localhost:18080/realms/agents`.
 - `guard-http`, `authz-authzen` and `knowledge-http` have no reference service yet: their URLs are placeholders.
+
+The real-model cell (`--with model`) runs the same smoke dataset against any OpenAI-compatible endpoint. Through the
+model gateway of `reference/cache` and its `hosted` group:
+
+```text
+docker compose -f reference/cache/compose.yml up -d --wait
+node scripts/swap-matrix.mjs --only model-openai-compatible --with model
+```
+
+with `LLM_BASE_URL` set to the gateway (`http://localhost:4000/v1`), `LLM_API_KEY` to `GATEWAY_KEY` and `LLM_MODEL` to
+`hosted`.
+
+The `hosted` group reads `HOSTED_MODEL`, `HOSTED_API_KEY` and, when the key needs one, `HOSTED_HEADER_NAME` and
+`HOSTED_HEADER_VALUE` from `.env` (see [reference/cache](../reference/cache/README.md)), with a spend cap.
