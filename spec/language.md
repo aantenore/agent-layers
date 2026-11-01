@@ -233,6 +233,7 @@ The port operations are unchanged. The core emits only `agent.*` names. Standard
 | Event | `agent.knowledge.error` |
 | Metrics | `agent.model.tokens` (attribute `agent.tokens.kind`: `input` or `output`), `agent.tool.calls`, `agent.access.decisions`, `agent.guard.actions` |
 | Mandatory attribute | `agent.layer` on every span, event and metric |
+| Adapter | `agent.adapter` on core spans: the configured adapter that did the work (`reinloop`, `rule-router`), set by the stack |
 | Run | `agent.run.id`, `agent.name`, `agent.run.status`, `agent.run.reason` (the stop code) |
 | Model | `agent.model.requested`, `agent.model.used`, `agent.model.finish`, `agent.tokens.input`, `agent.tokens.output` |
 | Tool | `agent.tool.name`, `agent.tool.source`, `agent.tool.outcome` |

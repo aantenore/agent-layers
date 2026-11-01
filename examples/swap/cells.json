@@ -10,7 +10,8 @@
     "id": "router-rule",
     "layer": "router",
     "value": { "adapter": "rule-router", "options": { "rules": [{ "when": { "hasTools": true }, "model": "mock" }], "default": "mock" } },
-    "description": "Model chosen by request rules instead of by agent name."
+    "description": "Model chosen by request rules instead of by agent name.",
+    "observe": { "span": "agent.router.select", "attr": "agent.adapter", "equals": "rule-router" }
   },
   {
     "id": "cache-none",
@@ -23,7 +24,8 @@
     "id": "runtime-reinloop",
     "layer": "runtime",
     "value": { "adapter": "reinloop", "options": { "budget": { "maxTurns": 12 } } },
-    "description": "Agent loop run by reinloop instead of the basic runtime."
+    "description": "Agent loop run by reinloop instead of the basic runtime.",
+    "observe": { "span": "agent.run", "attr": "agent.adapter", "equals": "reinloop" }
   },
   {
     "id": "approval-none",
@@ -42,7 +44,8 @@
     "id": "guard-regex-block",
     "layer": "guardrails",
     "value": [{ "adapter": "regex-guard", "options": { "piiAction": "block" } }],
-    "description": "Same guard adapter, PII blocked instead of redacted (the smoke dataset has no PII, so the action is not exercised)."
+    "description": "Same guard adapter, PII blocked instead of redacted (the smoke dataset has no PII, so the action is not exercised).",
+    "observe": { "span": "agent.guard.check", "attr": "agent.adapter", "equals": "regex-guard" }
   },
   {
     "id": "telemetry-console",
@@ -54,19 +57,10 @@
   {
     "id": "guard-presidio",
     "layer": "guardrails",
-    "value": [
-      {
-        "adapter": "presidio",
-        "options": {
-          "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}",
-          "anonymizerUrl": "${env:PRESIDIO_ANONYMIZER_URL:-http://localhost:5001}",
-          "entities": ["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "IP_ADDRESS"]
-        }
-      }
-    ],
+    "value": [{ "adapter": "presidio", "options": { "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}", "anonymizerUrl": "${env:PRESIDIO_ANONYMIZER_URL:-http://localhost:5001}", "entities": ["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "IP_ADDRESS"] } }],
     "description": "PII detection by Presidio services (reference/guardrail).",
     "needs": ["docker:presidio-analyzer", "docker:presidio-anonymizer"],
-    "observe": { "span": "agent.guard.check", "attr": "agent.guard.name", "equals": "presidio" }
+    "observe": { "span": "agent.guard.check", "attr": "agent.adapter", "equals": "presidio" }
   },
   {
     "id": "guard-llm-guard",
@@ -74,7 +68,7 @@
     "value": [{ "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL:-http://localhost:8000}" } }],
     "description": "Prompt and output scanning by the LLM Guard API (reference/guardrail).",
     "needs": ["docker:llm-guard"],
-    "observe": { "span": "agent.guard.check", "attr": "agent.guard.name", "equals": "llm-guard" }
+    "observe": { "span": "agent.guard.check", "attr": "agent.adapter", "equals": "llm-guard" }
   },
   {
     "id": "guard-http",
@@ -82,31 +76,27 @@
     "value": [{ "adapter": "http-guard", "options": { "url": "${env:HTTP_GUARD_URL:-http://localhost:8099/check}" } }],
     "description": "Any guard service that speaks the GuardCheck/GuardVerdict contract.",
     "needs": ["docker:http-guard"],
-    "observe": { "span": "agent.guard.check", "attr": "agent.guard.name", "equals": "http-guard" }
+    "observe": { "span": "agent.guard.check", "attr": "agent.adapter", "equals": "http-guard" }
   },
   {
     "id": "authz-opa",
     "layer": "authorization",
     "value": { "adapter": "opa", "options": { "url": "${env:OPA_URL:-http://localhost:8181}" } },
     "description": "Access decisions by Open Policy Agent (reference/identity).",
-    "needs": ["docker:opa"]
+    "needs": ["docker:opa"],
+    "observe": { "span": "agent.access.check", "attr": "agent.adapter", "equals": "opa" }
   },
   {
     "id": "authz-authzen",
     "layer": "authorization",
     "value": { "adapter": "authzen", "options": { "url": "${env:AUTHZEN_URL:-http://localhost:8282}" } },
     "description": "Access decisions by any AuthZEN policy decision point.",
-    "needs": ["docker:authzen"]
+    "needs": ["docker:authzen"],
+    "observe": { "span": "agent.access.check", "attr": "agent.adapter", "equals": "authzen" }
   },
   {
     "id": "identity-oidc",
-    "layers": {
-      "identity": { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "audience": "${env:OIDC_AUDIENCE:-agent-runtime}" } },
-      "credentials": {
-        "adapter": "oidc",
-        "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "clientId": "${env:OIDC_CLIENT_ID:-agent-runtime}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
-      }
-    },
+    "layers": { "identity": { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "audience": "${env:OIDC_AUDIENCE:-agent-runtime}" } }, "credentials": { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "clientId": "${env:OIDC_CLIENT_ID:-agent-runtime}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" } } },
     "description": "Callers verified and downstream tokens exchanged by an OpenID Connect provider (reference/identity).",
     "needs": ["docker:keycloak"]
   },
@@ -122,48 +112,29 @@
     "layer": "knowledge",
     "value": { "docs": { "adapter": "http-knowledge", "options": { "url": "${env:KNOWLEDGE_URL:-http://localhost:8098}/search" } } },
     "description": "Passages from a service that speaks the knowledge HTTP contract.",
-    "needs": ["docker:http-knowledge"]
+    "needs": ["docker:http-knowledge"],
+    "observe": { "span": "agent.knowledge.search", "attr": "agent.adapter", "equals": "http-knowledge" }
   },
   {
     "id": "knowledge-mcp",
     "layer": "knowledge",
-    "value": {
-      "docs": {
-        "adapter": "mcp",
-        "options": {
-          "command": "uvx",
-          "args": ["--python", "3.12", "mcp-server-qdrant==0.8.1"],
-          "env": { "QDRANT_URL": "${env:QDRANT_URL:-http://localhost:6333}", "COLLECTION_NAME": "docs", "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2" },
-          "tool": "qdrant-find",
-          "timeoutMs": 300000
-        }
-      }
-    },
+    "value": { "docs": { "adapter": "mcp", "options": { "command": "uvx", "args": ["--python", "3.12", "mcp-server-qdrant==0.8.1"], "env": { "QDRANT_URL": "${env:QDRANT_URL:-http://localhost:6333}", "COLLECTION_NAME": "docs", "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2" }, "tool": "qdrant-find", "timeoutMs": 300000 } } },
     "description": "Passages from Qdrant through its MCP server over stdio (reference/knowledge).",
-    "needs": ["uv", "docker:qdrant"]
+    "needs": ["uv", "docker:qdrant"],
+    "observe": { "span": "agent.knowledge.search", "attr": "agent.adapter", "equals": "mcp" }
   },
   {
     "id": "runtime-pydantic-ai",
-    "layers": {
-      "runtime": {
-        "adapter": "a2a",
-        "options": { "url": "${env:A2A_AGENT_URL:-http://localhost:9100}", "auth": { "audience": "agent-gateway" }, "timeoutMs": 120000 }
-      },
-      "credentials": { "adapter": "static-identity", "options": { "tokens": { "agent-gateway": "dev-token" }, "default": "dev-downstream-token" } }
-    },
+    "layers": { "runtime": { "adapter": "a2a", "options": { "url": "${env:A2A_AGENT_URL:-http://localhost:9100}", "auth": { "audience": "agent-gateway" }, "timeoutMs": 120000 } }, "credentials": { "adapter": "static-identity", "options": { "tokens": { "agent-gateway": "dev-token" }, "default": "dev-downstream-token" } } },
     "description": "Agent loop in a Pydantic AI process reached over A2A (runtimes/pydantic-ai). The matrix does not start it: run it and the gateway first.",
-    "needs": ["uv"]
+    "needs": ["uv"],
+    "observe": { "span": "agent.run", "attr": "agent.adapter", "equals": "a2a" }
   },
   {
     "id": "model-openai-compatible",
-    "layers": {
-      "model": {
-        "adapter": "openai-compatible",
-        "options": { "baseUrl": "${env:LLM_BASE_URL:-http://localhost:11434/v1}", "apiKey": "${env:LLM_API_KEY:-}", "model": "${env:LLM_MODEL:-qwen3:4b}" }
-      },
-      "router": { "adapter": "static-router", "options": { "model": "${env:LLM_MODEL:-qwen3:4b}" } }
-    },
+    "layers": { "model": { "adapter": "openai-compatible", "options": { "baseUrl": "${env:LLM_BASE_URL:-http://localhost:11434/v1}", "apiKey": "${env:LLM_API_KEY:-}", "model": "${env:LLM_MODEL:-qwen3:4b}" } }, "router": { "adapter": "static-router", "options": { "model": "${env:LLM_MODEL:-qwen3:4b}" } } },
     "description": "A real model behind any OpenAI-compatible endpoint, set by LLM_BASE_URL, LLM_API_KEY and LLM_MODEL.",
-    "needs": ["model"]
+    "needs": ["model"],
+    "observe": { "span": "agent.model.call", "attr": "agent.adapter", "equals": "openai-compatible" }
   }
 ]

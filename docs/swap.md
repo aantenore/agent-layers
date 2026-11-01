@@ -19,8 +19,11 @@ The cells are data in [examples/swap/cells.json](../examples/swap/cells.json):
   several slots together (an identity provider also replaces the credentials slot).
 - `needs` lists what the cell requires: `docker:<service>`, `uv` or `model`. A cell with needs is skipped unless
   `--with` names them (`--with docker` covers every `docker:*`) or `--all` is passed.
-- `observe` says how the swap shows in the run. Without it the cell is reported as not observable, because nothing
-  in the run identifies that adapter.
+- `observe` says how the swap shows in the run. Core spans carry `agent.adapter`, the configured adapter behind them
+  (see [TelemetryPort](../spec/ports/TelemetryPort.md)), so most cells check that attribute:
+  `{ "span": "agent.run", "attr": "agent.adapter", "equals": "reinloop" }`. Slots without a core span (state, approval,
+  identity, telemetry) use a file, the console output or the absence of a span. Without `observe` the cell is reported
+  as not observable.
 
 For each selected cell the script writes a temporary config next to the base one (`agent-layers.swap.json`, ignored by
 git, deleted at the end even on failure) with a profile `swap-<id>` that extends `test` and overrides only the cell's

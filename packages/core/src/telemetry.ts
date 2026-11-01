@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import { isLayer, type Layer } from './layers.ts';
+import { ATTR, SPAN } from './names.ts';
 import type { Attributes, LayerAttributes, Span, SpanOptions, TelemetryPort, TraceContext } from './ports/telemetry.ts';
 
 const SECRET_KEY = /(^|[._-])(token|authorization|password|passwd|secret|api[_-]?key|apikey|cookie|credential)s?$|(^|[._-])(authorization|password|secret|api[_-]?key|cookie)[._-]/i;
@@ -31,18 +32,50 @@ export const noopTelemetry: TelemetryPort = {
   metric() {},
 };
 
+/** The slot that serves each core span, and the attribute naming the instance when the slot holds several. */
+const SPAN_SLOTS: Readonly<Record<string, { slot: string; instance?: string }>> = {
+  [SPAN.run]: { slot: 'runtime' },
+  [SPAN.modelCall]: { slot: 'model' },
+  [SPAN.cacheLookup]: { slot: 'cache' },
+  [SPAN.routerSelect]: { slot: 'router' },
+  [SPAN.accessCheck]: { slot: 'authorization' },
+  [SPAN.toolCall]: { slot: 'tools', instance: ATTR.toolSource },
+  [SPAN.guardCheck]: { slot: 'guardrails', instance: ATTR.guardName },
+  [SPAN.knowledgeSearch]: { slot: 'knowledge', instance: ATTR.knowledgeSource },
+};
+
+/** Resolves the adapter behind a core span from the configured adapters (slot, instance key, adapter name). */
+export type AdapterOf = (span: string, attrs: Attributes) => string | undefined;
+
+export function adapterOf(adapters: readonly { slot: string; key: string; ref: { adapter: string } }[]): AdapterOf {
+  const byKey = new Map<string, string>();
+  for (const a of adapters) {
+    byKey.set(`${a.slot}:${a.key}`, a.ref.adapter);
+    if (!byKey.has(a.slot)) byKey.set(a.slot, a.ref.adapter);
+  }
+  return (span, attrs) => {
+    const s = SPAN_SLOTS[span];
+    if (!s) return undefined;
+    if (!s.instance) return byKey.get(s.slot);
+    const key = attrs[s.instance];
+    return typeof key === 'string' ? byKey.get(`${s.slot}:${key}`) : undefined;
+  };
+}
+
 /**
  * Fan-out over several telemetry adapters. Enforces `agent.layer`, masks secret-looking attributes,
- * and keeps a failing event or metric adapter from breaking the run.
+ * and keeps a failing event or metric adapter from breaking the run. With `adapterOf`, core spans also carry
+ * `agent.adapter`, the configured adapter that did the work.
  */
-export function createTelemetry(ports: readonly TelemetryPort[]): TelemetryPort {
+export function createTelemetry(ports: readonly TelemetryPort[], opts: { adapterOf?: AdapterOf } = {}): TelemetryPort {
   return {
     name: 'telemetry',
-    async span<T>(name: string, attrs: LayerAttributes, fn: (span: Span) => Promise<T>, opts?: SpanOptions): Promise<T> {
+    async span<T>(name: string, attrs: LayerAttributes, fn: (span: Span) => Promise<T>, spanOpts?: SpanOptions): Promise<T> {
       requireLayer('span', name, attrs);
       // The remote parent is opaque here: each telemetry adapter parses it in its own format, or ignores it.
-      const parent = opts?.parent;
-      const safe = sanitizeAttributes(attrs);
+      const parent = spanOpts?.parent;
+      const adapter = attrs[ATTR.adapter] === undefined ? opts.adapterOf?.(name, attrs) : undefined;
+      const safe = sanitizeAttributes(adapter ? { ...attrs, [ATTR.adapter]: adapter } : attrs);
       const spans: Span[] = [];
       const combined: Span = {
         setAttributes: (a) => spans.forEach((s) => quiet(() => s.setAttributes(sanitizeAttributes(a)))),

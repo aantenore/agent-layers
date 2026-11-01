@@ -28,6 +28,7 @@ export const METRIC = Object.freeze({
 
 export const ATTR = Object.freeze({
   layer: 'agent.layer',
+  adapter: 'agent.adapter',
   name: 'agent.name',
   runId: 'agent.run.id',
   runStatus: 'agent.run.status',

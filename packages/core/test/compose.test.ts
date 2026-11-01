@@ -176,3 +176,32 @@ test('findRoute: exact before prefix, longest prefix first, 405 methods', async 
   assert.equal(findRoute(routes, 'DELETE', '/mcp').route, routes[2]);
   assert.deepEqual(findRoute(routes, 'GET', '/v10'), { allowed: [] });
 });
+
+test('core spans name the configured adapter that served them', async () => {
+  const { records, telemetry } = recorder();
+  const { model } = fakeModel(() => reply('ok'));
+  const s = await compose(resolveProfile({
+    layers: {
+      model: { adapter: 'fake-model' },
+      runtime: { adapter: 'echo' },
+      knowledge: { wiki: { adapter: 'kb' } },
+      guardrails: [{ adapter: 'allow-all' }],
+    },
+    agents: { a: { model: 'm' } },
+  }), {
+    telemetry: [telemetry],
+    adapters: [
+      testAdapter('ModelPort', 'llm', 'fake-model', () => model),
+      testAdapter('RuntimePort', 'harness', 'echo', () => echoRuntime),
+      testAdapter('KnowledgePort', 'knowledge', 'kb', () => ({ search: async () => [{ id: '1', text: 'Fact.' }] })),
+      testAdapter('GuardPort', 'guardrail', 'allow-all', () => ({ check: async () => ({ action: 'allow' }) })),
+    ],
+  });
+  await (await s.agent('a')).run('hi');
+  const adapterOf = (name: string) => [...new Set(records.flatMap((r) => (r.type === 'span' && r.name === name ? [r.attrs['agent.adapter']] : [])))];
+  assert.deepEqual(adapterOf('agent.run'), ['echo']);
+  assert.deepEqual(adapterOf('agent.model.call'), ['fake-model']);
+  assert.deepEqual(adapterOf('agent.knowledge.search'), ['kb']);
+  assert.deepEqual(adapterOf('agent.guard.check'), ['allow-all']);
+  await s.close();
+});

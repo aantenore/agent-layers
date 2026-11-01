@@ -43,6 +43,7 @@ The core emits only names that start with `agent.`. Standard names (`gen_ai.*`, 
 | Event | `agent.knowledge.error` |
 | Metric | `agent.model.tokens` (with `agent.tokens.kind`: `input` or `output`), `agent.tool.calls`, `agent.access.decisions`, `agent.guard.actions` |
 | Attribute, all | `agent.layer` (mandatory) |
+| Attribute, adapter | `agent.adapter` on core spans |
 | Attribute, run | `agent.run.id`, `agent.name`, `agent.run.status`, `agent.run.reason` (the stop code) |
 | Attribute, model | `agent.model.requested`, `agent.model.used`, `agent.tokens.input`, `agent.tokens.output`, `agent.model.finish` |
 | Attribute, tool | `agent.tool.name`, `agent.tool.source`, `agent.tool.outcome` |
@@ -53,6 +54,7 @@ The core emits only names that start with `agent.`. Standard names (`gen_ai.*`, 
 ## Semantics
 
 - `agent.layer` is mandatory on every span, event and metric. The stack rejects a call without a valid layer id with a type error before it reaches an adapter, so adapters may assume it is present.
+- `agent.adapter` names the configured adapter behind a core span (the runtime for `agent.run`, the router for `agent.router.select`, the source's adapter for `agent.knowledge.search` and `agent.tool.call`, the guard's for `agent.guard.check`). The stack sets it from the configuration, so a swapped layer is visible in the trace without any adapter change. It is absent when no configured adapter serves the span, for example the knowledge sources exposed as tools.
 - Spans nest: a span started inside `fn` of another is its child. Concurrent spans must not mix their parents.
 - `span` is transparent: it returns the value of `fn` and rethrows the same error object `fn` threw. A telemetry adapter never changes the outcome of the work.
 - Telemetry must not break a run. `event`, `metric`, `flush` and span bookkeeping should not throw; the stack also isolates failing event and metric adapters.

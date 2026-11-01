@@ -21,7 +21,7 @@ import { knowledgeInjector } from './pipeline/knowledge.ts';
 import type { Stack, StackPorts } from './stack.ts';
 import { slotInfo } from './slots.ts';
 import { LANGUAGE_LIMITS } from './stack-limits.ts';
-import { createTelemetry } from './telemetry.ts';
+import { adapterOf, createTelemetry } from './telemetry.ts';
 import { filterTools, knowledgeTools } from './tools.ts';
 import { isPlainObject, newRunId } from './util.ts';
 import { Vocabularies } from './vocab.ts';
@@ -51,7 +51,8 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
   const ports: StackPorts = { knowledge: {}, ingestion: {}, tools: {}, guardrails: [], telemetry: [], eval: [], channels: [], triggers: [] };
   const created: { close?(): Promise<void> }[] = [];
   const entries = configuredAdapters(config.layers);
-  let telemetry = createTelemetry([...(opts.telemetry ?? [])]);
+  const tagAdapters = { adapterOf: adapterOf(entries) };
+  let telemetry = createTelemetry([...(opts.telemetry ?? [])], tagAdapters);
   let composed: Stack | undefined;
   const lazyStack = (): Stack => {
     if (!composed) throw new AgentLayersError('the stack is not composed yet: use ctx.stack() when the adapter is called, not while it is created');
@@ -72,7 +73,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
   try {
     // Telemetry and secrets first: every other adapter may use them.
     for (const e of entries.filter((x) => x.slot === 'telemetry')) ports.telemetry.push(await make(e) as never);
-    telemetry = createTelemetry([...(opts.telemetry ?? []), ...ports.telemetry]);
+    telemetry = createTelemetry([...(opts.telemetry ?? []), ...ports.telemetry], tagAdapters);
     for (const w of language.warnings) telemetry.event(EVENT.configWarning, { [ATTR.layer]: 'infra', [ATTR.error]: w });
     for (const e of entries.filter((x) => x.slot === 'secrets')) ports.secrets = await make(e) as never;
     for (const e of entries) {
