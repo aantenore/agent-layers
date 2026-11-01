@@ -1,3 +1,4 @@
 node_modules/
 .env
 .agent-layers/
+agent-layers.swap.json

@@ -105,6 +105,8 @@ A runtime cell differs from its tier in the `runtime` slot only (`diff productio
 changed reinloop → a2a`, everything else `same`). `diff` does not list the `gateway` block: production also binds
 the gateway to loopback with `allowedHosts`.
 
+The same claim, one slot at a time, is re-runnable: [the layer swap matrix](swap.md).
+
 ## Results
 
 ### After 1.0: hosted model and Pydantic AI faults

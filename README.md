@@ -17,6 +17,7 @@ an adapter too, so it can be replaced like anything else.
 - **Adapters, status and maturity:** [docs/adapters.md](docs/adapters.md)
 - **Every limit, its default and safe range:** [docs/limits.md](docs/limits.md)
 - **The vertical slice, results and open gaps:** [docs/slice.md](docs/slice.md)
+- **Replace one layer by configuration alone, as a re-runnable matrix:** [docs/swap.md](docs/swap.md)
 - **The language-neutral spec:** [spec/](spec/README.md)
 - **The SDK language (shapes, vocabularies, `ext`, mappings):** [spec/language.md](spec/language.md)
 
