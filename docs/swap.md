@@ -49,3 +49,22 @@ selected cell fails.
 Cells that need Docker services expect the reference stacks (`reference/*/compose.yml`) to be running and their URLs to
 come from the `${env:NAME:-default}` values in the cell. The Pydantic AI runtime cell also expects the agent
 ([runtimes/pydantic-ai](../runtimes/pydantic-ai/README.md)) and the gateway to be started; the matrix does not start them.
+
+Starting the services and running the Docker cells:
+
+```text
+docker compose -f reference/guardrail/compose.yml up -d --wait presidio-analyzer presidio-anonymizer llm-guard
+docker compose -f reference/identity/compose.yml up -d --wait keycloak opa
+docker compose -f reference/telemetry/compose.yml up -d --wait otel-collector jaeger
+node scripts/swap-matrix.mjs --only guard-presidio,guard-llm-guard,authz-opa,telemetry-otlp --with docker
+```
+
+- `guard-llm-guard` sends `LLM_GUARD_TOKEN` (default `change-me`, as the reference service). Without the token the API
+  refuses every scan and the guard blocks every request, which is the fail-closed behaviour.
+- `authz-opa` gives the test caller the `viewer` role, the role the reference policy (`reference/identity/policies`)
+  allows to call read tools. Swapping the authorization engine swaps the policy too: the roles the identity adapter
+  issues must be the ones the policy names.
+- `identity-oidc` verifies callers through Keycloak, so `eval` needs a real token: set `OIDC_CLIENT_SECRET` (default of
+  the reference realm: `change-me`) and `AGENT_LAYERS_TOKEN` to a token of a test user of the reference realm. When port
+  8080 is taken, start Keycloak with `KEYCLOAK_PORT=18080` and set `OIDC_ISSUER=http://localhost:18080/realms/agents`.
+- `guard-http`, `authz-authzen` and `knowledge-http` have no reference service yet: their URLs are placeholders.

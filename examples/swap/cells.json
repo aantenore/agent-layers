@@ -65,7 +65,7 @@
   {
     "id": "guard-llm-guard",
     "layer": "guardrails",
-    "value": [{ "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL:-http://localhost:8000}" } }],
+    "value": [{ "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL:-http://localhost:8000}", "token": "${env:LLM_GUARD_TOKEN:-change-me}" } }],
     "description": "Prompt and output scanning by the LLM Guard API (reference/guardrail).",
     "needs": ["docker:llm-guard"],
     "observe": { "span": "agent.guard.check", "attr": "agent.adapter", "equals": "llm-guard" }
@@ -80,9 +80,8 @@
   },
   {
     "id": "authz-opa",
-    "layer": "authorization",
-    "value": { "adapter": "opa", "options": { "url": "${env:OPA_URL:-http://localhost:8181}" } },
-    "description": "Access decisions by Open Policy Agent (reference/identity).",
+    "layers": { "authorization": { "adapter": "opa", "options": { "url": "${env:OPA_URL:-http://localhost:8181}" } }, "identity": { "adapter": "static-identity", "options": { "tokens": { "dev-token": { "subject": "dev-user", "roles": ["viewer"] } } } } },
+    "description": "Access decisions by Open Policy Agent (reference/identity). The reference policy grants read tools to the viewer role, so the test caller gets that role.",
     "needs": ["docker:opa"],
     "observe": { "span": "agent.access.check", "attr": "agent.adapter", "equals": "opa" }
   },

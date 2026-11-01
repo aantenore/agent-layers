@@ -47,6 +47,11 @@ export async function conformAll(p: Project, opts: { layer?: Layer; env: Record<
         reports.push({ entry, status: 'skip', detail: [`on behalf of a caller only: ${NEEDS_CALLER}`] });
         continue;
       }
+      // A real provider issues tokens only for audiences it knows: probing with a made-up one fails a sound setup.
+      if (entry.port === 'CredentialPort' && !audience) {
+        reports.push({ entry, status: 'skip', detail: ['no tool or adapter declares an audience, so this stack exchanges no tokens yet'] });
+        continue;
+      }
       const firstAgent = stack.agents().length ? await agentSpec(p.config, stack.agents()[0]!) : undefined;
       // The model probe asks for the model the agents ask for, so a gateway that serves only named models answers it.
       const fixtures = entry.port === 'RuntimePort' && firstAgent

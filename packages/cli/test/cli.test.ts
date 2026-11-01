@@ -62,6 +62,10 @@ test('check skips an on-behalf-of credentials probe without a caller and uses th
   const cfg = JSON.parse(readFileSync(join(dir, 'agent-layers.json'), 'utf8'));
   // An unreachable token endpoint: the probe can only fail by being run.
   cfg.profiles.obo = { extends: 'prototype', layers: { credentials: { adapter: 'oidc', options: { tokenEndpoint: 'http://127.0.0.1:9/token', clientId: 'agent', clientSecret: 'secret', mode: 'on-behalf-of', timeoutMs: 500 } } } };
+  // Without a tool that asks for tokens there is no audience to exchange for: the probe is skipped.
+  cfg.profiles['obo-unused'] = structuredClone(cfg.profiles.obo);
+  // A tool that needs tokens for a downstream API gives the probe its audience.
+  cfg.profiles.obo.layers.tools = { api: { adapter: 'http-tools', options: { tools: { ledger: { description: 'Ledger', method: 'GET', url: 'http://127.0.0.1:9/ledger', auth: { audience: 'ledger-api' } } } } } };
   await writeFile(join(dir, 'obo.json'), JSON.stringify(cfg));
   const anonymous = captureIo(dir);
   // The prototype dev token is the default caller; an unknown token string is refused before any probe.
@@ -73,6 +77,9 @@ test('check skips an on-behalf-of credentials probe without a caller and uses th
   assert.equal(await main(['check', '--config', 'obo.json', '--profile', 'obo', '--layer', 'identity', '--token', 'dev-token'], withCaller.io), 1);
   assert.match(withCaller.text(), /FAIL credentials\s+oidc \(CredentialPort\)\n\s+token: threw/);
   assert.match(withCaller.text(), /ok\s+identity\s+static-identity/);
+  const unused = captureIo(dir);
+  await main(['check', '--config', 'obo.json', '--profile', 'obo-unused', '--layer', 'identity', '--token', 'dev-token'], unused.io);
+  assert.match(unused.text(), /skip credentials\s+oidc \(CredentialPort\)\n\s+no tool or adapter declares an audience/);
 });
 
 test('a production profile on prototype adapters fails the readiness gate', async () => {

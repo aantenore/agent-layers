@@ -276,6 +276,9 @@ outside the safe range; see [limits.md](limits.md).
 Conformance probes run against the live services. A credentials adapter that issues tokens only on behalf of a caller
 (`oidc` in `on-behalf-of` mode) needs one: pass `--token <caller token>` (or `AGENT_LAYERS_TOKEN`); the token is verified
 through the identity adapter and the probe exchanges it. Without a caller the probe is reported as `skip`, not as a failure.
+The probe asks for the first audience a tool declares (`auth.audience`) or an adapter's `auth.audience` option. When
+nothing declares one, the stack exchanges no tokens yet and the probe is skipped too: a real provider would refuse a
+made-up audience.
 
 **Promotion is configuration, not code.** Most enterprise moves are standard adapters pointed at systems the
 company already runs: the corporate identity provider through OIDC, corporate observability through OTLP, the

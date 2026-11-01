@@ -160,7 +160,7 @@
         "approval": null,
         "guardrails": [
           { "adapter": "presidio", "options": { "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}", "anonymizerUrl": "${env:PRESIDIO_ANONYMIZER_URL:-http://localhost:5001}", "entities": ["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "IP_ADDRESS"] } },
-          { "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL:-http://localhost:8000}" } }
+          { "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL:-http://localhost:8000}", "token": "${env:LLM_GUARD_TOKEN:-}" } }
         ],
         "channels": [
           { "adapter": "openai-compatible", "options": { "models": { "default": "default" } } },
