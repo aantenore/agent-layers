@@ -1,6 +1,6 @@
-// Shared helpers for the docs scripts. Zero dependencies.
+// Shared helpers for the repository scripts. Zero dependencies.
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -21,6 +21,19 @@ export function ensureSourceCondition(scriptUrl) {
 
 export const rel = (path) => relative(ROOT, path).split('\\').join('/');
 export const read = (path) => readFileSync(path, 'utf8');
+export const readJson = (path) => JSON.parse(read(path));
+export const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+/** Workspace folders from the root `workspaces` globs (only the `dir/*` form is used here). */
+export function workspaces() {
+  const out = [];
+  for (const pattern of readJson(join(ROOT, 'package.json')).workspaces ?? []) {
+    const base = pattern.replace(/\/\*$/, '');
+    const dirs = pattern.endsWith('/*') ? readdirSync(join(ROOT, base)).sort().map((d) => `${base}/${d}`) : [pattern];
+    for (const dir of dirs) if (existsSync(join(ROOT, dir, 'package.json'))) out.push(dir);
+  }
+  return out;
+}
 
 /** Every file under `dir` (absolute paths), skipping build output and vendored folders. */
 export function walk(dir, out = []) {

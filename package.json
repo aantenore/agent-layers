@@ -21,7 +21,7 @@
     "docs:check": "node scripts/check-docs.mjs",
     "docs:adapters": "node scripts/gen-adapters-catalog.mjs",
     "release:dry": "node scripts/build-packages.mjs --clean && npm pack --dry-run --workspaces",
-    "release": "node scripts/build-packages.mjs --clean && npm run typecheck && npm run test:packages && npm run docs:check && npm publish --workspaces --access public"
+    "release": "node scripts/build-packages.mjs --clean && npm run typecheck && npm run test:packages && npm run docs:check && node scripts/publish-unpublished.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

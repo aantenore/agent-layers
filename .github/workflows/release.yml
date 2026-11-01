@@ -1,4 +1,4 @@
-# Manual release: publishes every public workspace package to npm with provenance. Nothing runs on push.
+# Manual release: publishes every public workspace package not yet on npm, with provenance. Nothing runs on push.
 #   gh workflow run release.yml -f dry_run=true
 # Needs the repository secret NPM_TOKEN (npm granular access token, read and write on @agent-layers). See RELEASING.md.
 name: release
@@ -43,6 +43,6 @@ jobs:
         run: npm pack --dry-run --workspaces
       - name: Publish
         if: ${{ !inputs.dry_run }}
-        run: npm publish --workspaces --access public --provenance
+        run: node scripts/publish-unpublished.mjs --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

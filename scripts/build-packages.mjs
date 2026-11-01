@@ -4,24 +4,11 @@
 //   node scripts/build-packages.mjs --clean   remove dist/ first
 //   node scripts/build-packages.mjs --list    print the order and exit
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './lib/common.mjs';
+import { npm, readJson, ROOT, workspaces } from './lib/common.mjs';
 
 const args = new Set(process.argv.slice(2));
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
-
-/** Workspace folders from the root `workspaces` globs (only the `dir/*` form is used here). */
-function workspaces() {
-  const out = [];
-  for (const pattern of readJson(join(ROOT, 'package.json')).workspaces ?? []) {
-    const base = pattern.replace(/\/\*$/, '');
-    const dirs = pattern.endsWith('/*') ? readdirSync(join(ROOT, base)).sort().map((d) => `${base}/${d}`) : [pattern];
-    for (const dir of dirs) if (existsSync(join(ROOT, dir, 'package.json'))) out.push(dir);
-  }
-  return out;
-}
 
 /** Topological order over runtime and peer dependencies between workspaces; fails on a cycle. */
 function order(dirs) {

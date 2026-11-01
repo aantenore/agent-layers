@@ -15,7 +15,9 @@ part of the npm release.
    holds `dist/`, `README.md`, `LICENSE` and `package.json` only, plus `schema/` (core), `schemas/` (conformance)
    and `templates/` (cli).
 5. `npm run release`: clean build, typecheck, package tests, documentation checks, then
-   `npm publish --workspaces --access public`. npm asks for the one-time password if the account uses 2FA.
+   `node scripts/publish-unpublished.mjs`, which publishes each package whose version is not on npm yet. npm asks
+   for the one-time password if the account uses 2FA. If it stops (rate limit, expired login), run
+   `node scripts/publish-unpublished.mjs` again: it resumes with what is still missing (`--list` only prints it).
 6. Check one package: `npm view @agent-layers/cli version`, then in an empty folder
    `npx @agent-layers/cli init demo && cd demo && npm install && npx agent-layers check && npm test`.
 
@@ -29,15 +31,18 @@ part of the npm release.
 
 ## From GitHub Actions
 
-`.github/workflows/release.yml` runs the same steps on manual dispatch only and publishes with
+`.github/workflows/release.yml` runs the same steps on manual dispatch only and publishes the missing packages with
 [provenance](https://docs.npmjs.com/generating-provenance-statements). It needs a repository secret `NPM_TOKEN`: an
 npm granular access token with read and write access to the `@agent-layers` packages (Settings, Secrets and
-variables, Actions). Run it from the Actions tab, first with `dry_run` checked.
+variables, Actions). On an account with 2FA the token must be allowed to publish without a one-time password. Give
+it a short expiry and revoke it after the release. Run the workflow from the Actions tab, first with `dry_run`
+checked.
+
+npm limits how many new packages an account can create in a short time (HTTP 429). A first release of every
+package can hit it: wait and run the release again, it publishes only what is missing.
 
 ## Notes
 
-- `@agent-layers/adapter-reinloop` depends on `reinloop` through a GitHub URL pinned to a commit, so installing it
-  needs `git` and access to github.com. Switch the dependency to a version range once `reinloop` is on npm.
 - `prepack` in each package builds it and copies the root `LICENSE` into the package folder (ignored by git). The
   build of a package needs the `dist/` of the packages it depends on, which `npm run build` (dependency order)
   provides.
