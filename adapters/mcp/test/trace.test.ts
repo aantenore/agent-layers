@@ -72,6 +72,14 @@ test('tools/call carries the run bounds in params._meta, without refusing or res
     assert.equal(meta.parentRunId, 'r');
     assert.ok(Number.isInteger(meta.remainingMs) && meta.remainingMs > 0);
     assert.equal(ledger.reservedTokens, 0, 'nothing reserved');
+
+    const quiet = createMcpTools({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`, bounds: false });
+    try {
+      await quiet.callTool('echo', {}, ctx);
+      assert.equal(bodies.filter((b) => b.method === 'tools/call').at(-1)!.params._meta, undefined, 'bounds: false sends no bounds');
+    } finally {
+      await quiet.close?.();
+    }
   } finally {
     await tools.close?.();
     server.close();

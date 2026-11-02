@@ -164,3 +164,43 @@ test('the reservation of a delegated call is settled with what the remote run re
     await a.close();
   }
 });
+
+/** Serves a stack's A2A channel over HTTP; the caller is verified as an agent. */
+async function serve(stack: Stack): Promise<{ endpoint: string; close(): Promise<void> }> {
+  const mount = await createA2AServerChannel({}, 'a2a').mount!(stack.host());
+  const http = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const origin = `http://${req.headers.host}`;
+    const request = new Request(`${origin}${req.url}`, { method: req.method, headers: req.headers as Record<string, string>, ...(req.method === 'POST' ? { body: Buffer.concat(chunks) } : {}) });
+    const { route } = findRoute(mount.routes, request.method, new URL(request.url).pathname);
+    if (!route) { res.writeHead(404).end(); return; }
+    const response = await route.handle(request, { requestId: 'rt', signal: request.signal, origin, caller: { id: 'peer', kind: 'agent', roles: [], scopes: [] } });
+    res.writeHead(response.status, Object.fromEntries(response.headers)).end(Buffer.from(await response.arrayBuffer()));
+  });
+  await new Promise<void>((r) => http.listen(0, '127.0.0.1', r));
+  return {
+    endpoint: `http://127.0.0.1:${(http.address() as AddressInfo).port}/a2a/assistant`,
+    async close() { http.closeAllConnections(); http.close(); await mount.close?.(); },
+  };
+}
+
+test('a bounds stop travels the whole chain: S1 → S2 → S3 over the hop limit reaches S1 as hop_limit', async () => {
+  seen.length = 0;
+  const s3 = await compose(resolveProfile({ agents: { assistant: { model: 'm' } }, layers: { runtime: { adapter: 'recorder' } }, limits: { run: { maxHops: 1 } } }), { adapters: [recorderAdapter] });
+  const third = await serve(s3);
+  const s2 = await compose(resolveProfile({ agents: { assistant: { model: 'remote' } }, layers: { runtime: { adapter: 'a2a', options: { url: third.endpoint } } } } as never), { adapters: [runtimeAdapter] });
+  const second = await serve(s2);
+  const s1 = await compose(resolveProfile({ agents: { assistant: { model: 'remote' } }, layers: { runtime: { adapter: 'a2a', options: { url: second.endpoint } } } } as never), { adapters: [runtimeAdapter] });
+  try {
+    const r = await (await s1.agent('assistant')).run('hi');
+    assert.equal(seen.length, 0, 'S3 refused before running');
+    assert.deepEqual({ status: r.status, code: r.reason?.code }, { status: 'stopped', code: 'hop_limit' });
+  } finally {
+    await s1.close();
+    await second.close();
+    await s2.close();
+    await third.close();
+    await s3.close();
+  }
+});

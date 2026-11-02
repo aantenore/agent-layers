@@ -113,13 +113,15 @@ agent by):
 
 Run bounds: each message carries the [bounds extension](../../spec/extensions/bounds-v1.md) (header
 `A2A-Extensions`, `message.extensions` and `message.metadata[<uri>]`) with what is left of the run's bounds, from
-`outboundBounds(ctx)`: the time left minus `limits.delegation.marginMs` (never more than `timeoutMs`), hops plus one,
+`outboundBounds(ctx)`: the time left, never more than `timeoutMs`, minus `limits.delegation.marginMs`; hops plus one,
 the run's max hops, a reservation of its token and cost budget, and the lineage. A call that would go over the hop
 limit, or start with less than `limits.delegation.minRemainingMs`, is refused without a network call: the run ends
 `stopped` with `hop_limit` or `timeout` (`by: "sdk.hops"`, `"sdk.deadline"`). The reservation is settled with the usage
 and cost the remote task reports (under the extension URI, else `metadata["agent-layers"]`); an unreported spend keeps
-its whole reservation. A remote task `REJECTED` with a bounds `stop` ends the run `stopped` with that code, so a chain
-can tell "too deep" from other refusals. The run's signal aborts at its deadline, so polling shares it.
+its whole reservation; a figure it does not report stays unknown (never filled from the reservation). A remote task
+`REJECTED` with a bounds `stop` ends the run `stopped` with that code and the core's reason (`by: "sdk.hops"`,
+`"sdk.budget"`, `"sdk.deadline"`), so a chain can tell "too deep" from other refusals and a served stack reports the stop
+upstream in turn: S1 → S2 → S3 over the hop limit reaches S1 as `hop_limit`. The run's signal aborts at its deadline, so polling shares it.
 
 Transport failures are failed runs with a fixed `reason.detail` (`remote agent call failed`; code `timeout` with
 `remote agent timed out`; `stopped` + `aborted` when the caller aborted); error bodies are not read, so a token echoed

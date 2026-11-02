@@ -97,10 +97,14 @@ what a calling agent sent, which can only tighten them, and passes them in `ctx.
 
 The core checks them in the governed model and tools, so swapping the runtime keeps them. Runtime budgets stay as
 extra limits, and the first limit reached stops the run: `basic-runtime` `maxTurns` (8), `reinloop` `budget.*`. When a
-runtime reports no usage or cost, the host fills them from the run's ledger. A runtime that calls another agent, like
-the `a2a` runtime, passes on what is left with `outboundBounds(ctx)`: time minus `limits.delegation.marginMs`, hops plus
-one, a reservation of the budget; it refuses locally, without a network call, when the next agent would be over the hop
-limit, and settles the reservation with what the remote run reports. Limits are in [limits.md](../limits.md#limits).
+runtime reports no usage or cost, the host fills them from the run's ledger, only when every spend was known: a
+reservation kept for a remote run that reported nothing counts against the budget but is never reported as a cost. A
+runtime that calls another agent, like the `a2a` runtime, passes on what is left with `outboundBounds(ctx)`: the time
+left (capped by its own time limit) minus `limits.delegation.marginMs`, hops plus one, a reservation of the budget; it
+refuses locally, without a network call, when the next agent would be over the hop limit, and settles the reservation
+with what the remote run reports. An agent that calls another one in the same process passes its own context to
+`run`: the nested run is its delegate (hops plus one, a reservation, the parent as lineage, its own run id). A tool
+call received with bounds (MCP `tools/call`) runs under them like a run, so a loop over MCP stops at the hop limit too. Limits are in [limits.md](../limits.md#limits).
 
 ## How to swap
 

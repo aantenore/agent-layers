@@ -1,4 +1,4 @@
-import { boundsStop, ledgerOf, priceOf } from '../bounds.ts';
+import { BOUNDS_STOP, boundsStop, ledgerOf, priceFor, priceOf } from '../bounds.ts';
 import type { ModelPrice } from '../config.ts';
 import { BoundsExceeded, GuardrailBlocked } from '../errors.ts';
 import { boundExt } from '../ext.ts';
@@ -40,7 +40,12 @@ export interface GuardedModelOptions {
   telemetry?: TelemetryPort;
   /** Largest `ext` bag kept on a reply (`limits.extBytes`); larger ones are dropped with an event. */
   extBytes?: number;
-  /** Prices by model id (`pipeline.pricing`): the cost of each reply, debited from the run's cost budget. */
+  /**
+   * Prices by model id (`pipeline.pricing`, the reply's model or the requested one): the cost of each reply, debited
+   * from the run's cost budget. Under a cost budget, a reply from a model the table does not price is reported
+   * (`agent.cost.unpriced`), and stops the run (`limit`) when the stack's own `limits.run.maxCostUsd` is set: its cost
+   * could not be counted.
+   */
   pricing?: Readonly<Record<string, ModelPrice>>;
 }
 
@@ -61,9 +66,24 @@ export function guardedModel(model: ModelPort, opts: GuardedModelOptions = {}): 
   const bound = (reply: ModelReply, t: TelemetryPort): ModelReply => opts.extBytes === undefined ? reply
     : boundExt(reply, opts.extBytes, (bytes) => t.event(EVENT.extDropped, { [ATTR.layer]: 'llm', [ATTR.extBytes]: bytes, [ATTR.extShape]: 'ModelReply' }));
 
-  /** Debits a model reply from the run's ledger: its tokens and, when the model has a price, its cost. */
-  const debit = (reply: ModelReply, requested: string, ctx: CallContext): void => {
-    ledgerOf(ctx)?.debit(reply.usage, priceOf(opts.pricing, reply.model, requested, reply.usage));
+  /**
+   * Debits a model reply from the run's ledger: its tokens and, when the model has a price, its cost. Under a cost
+   * budget and a non-empty price table, a reply from a model with no price is reported (`agent.cost.unpriced`); when
+   * the run requires a price (`RunLedger.priceRequired`) the run stops with `limit`: thrown here when `refuse`, else
+   * recorded so the next call is refused.
+   */
+  const debit = (reply: ModelReply, requested: string, ctx: CallContext, refuse = true): void => {
+    const ledger = ledgerOf(ctx);
+    if (!ledger) return;
+    ledger.debit(reply.usage, priceOf(opts.pricing, reply.model, requested, reply.usage));
+    const pricing = opts.pricing;
+    if (!Number.isFinite(ledger.costLimit) || !pricing || !Object.keys(pricing).length) return;
+    if (priceFor(pricing, reply.model) || priceFor(pricing, requested)) return;
+    tel(ctx).event(EVENT.costUnpriced, { [ATTR.layer]: 'llm', [ATTR.modelRequested]: requested, [ATTR.modelUsed]: reply.model, [ATTR.runId]: ctx.runId });
+    if (!ledger.priceRequired) return;
+    const reason = { ...BOUNDS_STOP.budget, detail: `model "${reply.model || requested}" has no price in pipeline.pricing` };
+    ledger.stop ??= reason;
+    if (refuse) throw new BoundsExceeded(reason);
   };
 
   async function prepare(req: ModelRequest, ctx: CallContext): Promise<{ req: ModelRequest; key?: string; cached?: ModelReply }> {
@@ -126,14 +146,21 @@ export function guardedModel(model: ModelPort, opts: GuardedModelOptions = {}): 
       const deltas: ModelDelta[] = [];
       const buffer = guardsFor(guards, 'output').length > 0;
       const t = tel(ctx);
-      for await (const d of spanStream(t, SPAN.modelCall, callAttrs(routed), source, (span) => recordUsage(span, assembleDeltas(deltas, routed.model), t))) {
-        deltas.push(d);
-        if (!buffer) yield d;
+      // What the model streamed is debited however the stream ends: completed, broken off by the consumer, or failed.
+      let debited = false;
+      try {
+        for await (const d of spanStream(t, SPAN.modelCall, callAttrs(routed), source, (span) => recordUsage(span, assembleDeltas(deltas, routed.model), t))) {
+          deltas.push(d);
+          if (!buffer) yield d;
+        }
+        const full = bound(assembleDeltas(deltas, routed.model), t);
+        debited = true;
+        debit(full, routed.model, ctx);
+        await store(p.key, full);
+        if (buffer) yield* replyToDeltas(await guardOutput(full, guards, ctx, t));
+      } finally {
+        if (!debited) debit(assembleDeltas(deltas, routed.model), routed.model, ctx, false);
       }
-      const full = bound(assembleDeltas(deltas, routed.model), t);
-      debit(full, routed.model, ctx);
-      await store(p.key, full);
-      if (buffer) yield* replyToDeltas(await guardOutput(full, guards, ctx, t));
     },
   };
 }

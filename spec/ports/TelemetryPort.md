@@ -40,7 +40,7 @@ The core emits only names that start with `agent.`. Standard names (`gen_ai.*`, 
 | Kind | Names |
 | --- | --- |
 | Span | `agent.run`, `agent.model.call`, `agent.cache.lookup`, `agent.router.select`, `agent.tool.call`, `agent.access.check`, `agent.guard.check`, `agent.knowledge.search` |
-| Event | `agent.knowledge.error` |
+| Event | `agent.knowledge.error`, `agent.cost.unpriced` (a model reply without a price in `pipeline.pricing` under a cost budget, with `agent.model.requested` and `agent.model.used`) |
 | Metric | `agent.model.tokens` (with `agent.tokens.kind`: `input` or `output`), `agent.tool.calls`, `agent.access.decisions`, `agent.guard.actions`, `agent.bounds.stops` (runs the run bounds stopped, with `agent.run.reason`: `timeout`, `limit` or `hop_limit`) |
 | Attribute, all | `agent.layer` (mandatory) |
 | Attribute, adapter | `agent.adapter` on core spans |

@@ -90,10 +90,16 @@ for every caller. On a production profile with knowledge sources and a cache, `a
 Every run has these bounds, also a run started in process (a trigger, an embedding application). A calling agent's
 bounds (the A2A [bounds extension](../spec/extensions/bounds-v1.md), the gateway's `Agent-Bounds` header, MCP
 `_meta`) can only tighten them. `limits.delegation.inbound` is a setting next to these, not a number: `"tighten"`
-(default) applies a caller's bounds when they are tighter; `"ignore"` drops them, and the hop count then comes from the
-verified actor chain only. The cost of a model call comes from `pipeline.pricing` (prices by model id, in US dollars
+(default) applies a caller's bounds when they are tighter; `"ignore"` drops them, their lineage included, and the hop
+count then comes from the verified actor chain only. A run started with the context of a run in progress (an agent that
+calls another one in the same process) is that run's delegate whatever this setting says: hops plus one, a reservation
+of what is left, the parent as its lineage. The cost of a model call comes from `pipeline.pricing` (prices by model id, in US dollars
 per million tokens: `{ "gpt-4o": { "inputPerMTok": 2.5, "outputPerMTok": 10 } }`); `agent-layers check` warns when
-`limits.run.maxCostUsd` is set without prices. Runtime budgets (`basic-runtime` `maxTurns`, `reinloop` `budget`) stay as
+`limits.run.maxCostUsd` is set without prices. Under a cost budget, a reply from a model that a non-empty
+`pipeline.pricing` does not price (neither the reply's model nor the requested one) emits `agent.cost.unpriced`, and
+stops the run (`limit`, the detail names the model) when `limits.run.maxCostUsd` is set: its cost could not be counted. A spend whose figure is unknown (a reply without usage,
+a remote agent that reports no cost, a figure that is not a finite number ≥ 0) keeps its reservation spent for the
+budget, but the run then reports no `usage` or `costUsd` total it did not see. Runtime budgets (`basic-runtime` `maxTurns`, `reinloop` `budget`) stay as
 extra limits: whichever is reached first stops the run. See [0002](decisions/0002-delegation-bounds.md).
 
 ## Adapters

@@ -55,6 +55,7 @@ Lists the tools of the server and calls them. Tool names are the server's own, w
 | `include`, `exclude` | string[] | all, none | Globs of tool names to expose or hide |
 | `toolsTtlMs` | integer | 60000 | How long the tool list is cached |
 | `maxToolPages` | integer | 100 | Pages of `tools/list` read before the server is refused |
+| `bounds` | boolean | `true` | Send the run's bounds in `params._meta` of every `tools/call`; `false` for a server that refuses unknown `_meta` keys |
 
 Limits accept `${env:NAME}`; `timeoutMs` and `maxToolPages` also accept `"unbounded"`, which `agent-layers check` fails
 on the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
@@ -62,8 +63,9 @@ on the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md
 `${env:NAME}` and `${env:NAME:-default}` in the options are resolved when the instance is created.
 
 Inside a run, every `tools/call` carries the run's bounds in `params._meta["agent-layers/bounds"]` (time left minus the
-margin, hops plus one, max hops, lineage). A tool server is mostly not an agent, so the call is never refused locally
-and no budget is reserved; a server that is an agent refuses on its side.
+margin, hops plus one, max hops, lineage), unless `bounds: false`. A call with no run of its own that received bounds
+(a tool this stack serves over MCP) passes those on, so a chain keeps counting hops. A tool server is mostly not an
+agent, so the call is never refused locally and no budget is reserved; a server that is an agent refuses on its side.
 
 ```json
 {
@@ -155,7 +157,11 @@ to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge
 - Run bounds: a `tools/call` may carry the calling agent's bounds in `params._meta["agent-layers/bounds"]` (the fields of
   `Delegation`: `remainingMs`, `hops`, `maxHops`, optional `tokens`, `costUsd`, `rootRunId`, `parentRunId`). They are
   combined with the gateway's `Agent-Bounds` by taking the tighter value of each field, and can only tighten the stack's
-  limits. Invalid bounds are refused with `-32602` and the tool does not run.
+  limits. Invalid bounds are refused with `-32602` and the tool does not run. The stack applies them to the call like
+  to a run: a ledger with the stack's limits tightened by the bounds, the deadline on the call's signal, and
+  `ctx.bounds`, so a tool that calls further (over MCP or A2A) sends hops plus one. A call over the hop limit, or with
+  less than `limits.delegation.minRemainingMs` left, answers `isError: true` (`Stopped by the run bounds: hop_limit`)
+  without running the tool; a loop A → B → A over MCP stops at `limits.run.maxHops`.
 - Sessions expire after `sessionTtlMs` idle and after `maxSessionAgeMs` in any case. They are capped per caller and in
   total: a caller over its cap loses its own least recently used session (calls running in it are aborted); a full
   server makes room by evicting the least recently used session of the authenticated caller that holds the most.

@@ -43,14 +43,18 @@ export function runLimits(limits: LimitsConfig = {}): RunLimits {
 
 const finite = (n: number | undefined): n is number => typeof n === 'number' && Number.isFinite(n);
 const optional = (n: number): number | undefined => (Number.isFinite(n) ? n : undefined);
+/** A figure a ledger accepts: a finite number >= 0. Anything else is an unknown figure. */
+const amount = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0;
+const validUsage = (u: Usage | undefined): u is Usage => !!u && amount(u.inputTokens) && amount(u.outputTokens);
 
 /** What a call to another agent took from the run: settled once with what the remote run reports. */
 export interface Reservation {
   tokens?: number;
   costUsd?: number;
   /**
-   * Debits what the remote run reports and releases the rest. A figure it does not report keeps its whole reservation
-   * spent, the safe side. Only the first call counts.
+   * Debits what the remote run reports and releases the rest. A figure it does not report (or reports as anything but a
+   * finite number >= 0) keeps its whole reservation spent, the safe side, and makes the run's figure unknown: a
+   * reservation is never reported as a spend. Only the first call counts.
    */
   settle(report?: { usage?: Usage; costUsd?: number }): void;
 }
@@ -81,14 +85,18 @@ export class RunLedger {
   reservedCost = 0;
   /** Input and output tokens reported (model replies, settled delegated runs), for the run's result. */
   readonly usage: Usage = { inputTokens: 0, outputTokens: 0 };
-  /** False once a model call had no price: a partial sum would look like a real total. */
+  /** False once a spend had no valid token count (a reply without usage, a remote run that reported none). */
+  usageKnown = true;
+  /** False once a spend had no valid cost (a model without a price, a remote run that reported none): a partial sum would look like a real total. */
   costKnown = true;
+  /** A model call without a price is refused (`limit`): the stack's own `limits.run.maxCostUsd` is set. */
+  readonly priceRequired: boolean;
   /** The first stop the bounds caused, for the run's result. */
   stop: StopReason | undefined;
 
   constructor(init: {
     runId: string; hops: number; maxHops: number; lineage?: Lineage; remainingMs: number; tokens: number; costUsd: number;
-    marginMs: number; minStartMs: number; now?: number;
+    marginMs: number; minStartMs: number; now?: number; priceRequired?: boolean;
   }) {
     const now = init.now ?? Date.now();
     this.runId = init.runId;
@@ -101,6 +109,7 @@ export class RunLedger {
     this.costLimit = init.costUsd;
     this.marginMs = init.marginMs;
     this.minStartMs = init.minStartMs;
+    this.priceRequired = init.priceRequired ?? false;
     const ledger = this;
     this.view = Object.defineProperties({} as Bounds, {
       deadlineAt: { enumerable: ledger.deadline !== undefined, get: () => (ledger.deadline !== undefined ? new Date(ledger.deadline).toISOString() : undefined) },
@@ -140,15 +149,15 @@ export class RunLedger {
     return reason;
   }
 
-  /** Debits a spend: tokens and, when known, its cost. */
+  /** Debits a spend: tokens and cost, each only when it is a finite number >= 0; any other figure is unknown. */
   debit(usage: Usage | undefined, costUsd: number | undefined): void {
-    if (usage) {
+    if (validUsage(usage)) {
       this.usage.inputTokens += usage.inputTokens;
       this.usage.outputTokens += usage.outputTokens;
       this.spentTokens += usage.inputTokens + usage.outputTokens;
-    }
-    if (costUsd === undefined) this.costKnown = false;
-    else this.spentCost += costUsd;
+    } else this.usageKnown = false;
+    if (amount(costUsd)) this.spentCost += costUsd;
+    else this.costKnown = false;
   }
 
   /**
@@ -173,14 +182,19 @@ export class RunLedger {
         this.reservedTokens -= tokens ?? 0;
         this.reservedCost -= costUsd ?? 0;
         const usage = report?.usage;
-        if (usage) {
+        if (validUsage(usage)) {
           this.usage.inputTokens += usage.inputTokens;
           this.usage.outputTokens += usage.outputTokens;
+          this.spentTokens += usage.inputTokens + usage.outputTokens;
+        } else {
+          this.spentTokens += tokens ?? 0;
+          this.usageKnown = false;
         }
-        this.spentTokens += usage ? usage.inputTokens + usage.outputTokens : tokens ?? 0;
-        if (report?.costUsd !== undefined) this.spentCost += report.costUsd;
-        else if (costUsd !== undefined) this.spentCost += costUsd;
-        else this.costKnown = false;
+        if (amount(report?.costUsd)) this.spentCost += report.costUsd;
+        else {
+          this.spentCost += costUsd ?? 0;
+          this.costKnown = false;
+        }
       },
     };
   }
@@ -244,22 +258,37 @@ export function startRun(ctx: Pick<CallContext, 'runId' | 'caller' | 'delegation
   const remainingMs = Math.min(limits.timeoutMs, sent?.remainingMs ?? Infinity);
   const hops = Math.max(sent?.hops ?? 0, verifiedHops(ctx.caller));
   const maxHops = Math.min(limits.maxHops, sent?.maxHops ?? Infinity);
-  const lineage = ctx.delegation?.rootRunId && ctx.delegation.parentRunId ? { rootRunId: ctx.delegation.rootRunId, parentRunId: ctx.delegation.parentRunId } : undefined;
+  // `ignore` drops everything the caller sent, its lineage included.
+  const lineage = sent?.rootRunId && sent.parentRunId ? { rootRunId: sent.rootRunId, parentRunId: sent.parentRunId } : undefined;
   const minStartMs = Math.min(limits.minRemainingMs, limits.timeoutMs);
   const ledger = new RunLedger({
     runId: ctx.runId, hops, maxHops: Number.isFinite(maxHops) ? maxHops : Number.MAX_SAFE_INTEGER, remainingMs,
     tokens: Math.min(limits.maxTokens, sent?.tokens ?? Infinity), costUsd: Math.min(limits.maxCostUsd, sent?.costUsd ?? Infinity),
-    marginMs: limits.marginMs, minStartMs, now, ...(lineage ? { lineage } : {}),
+    marginMs: limits.marginMs, minStartMs, now, priceRequired: Number.isFinite(limits.maxCostUsd), ...(lineage ? { lineage } : {}),
   });
   if (hops > maxHops) return { ledger, refused: (ledger.stop = BOUNDS_STOP.hops) };
   if (remainingMs < minStartMs) return { ledger, refused: (ledger.stop = BOUNDS_STOP.deadline) };
   return { ledger };
 }
 
-/** The signal that aborts the run at its deadline (reason `TimeoutError`), merged by the host with the caller's. */
-export function deadlineSignal(ledger: RunLedger, now = Date.now()): AbortSignal | undefined {
+/** The abort of a run at its deadline: `signal` aborts with a `TimeoutError`; `clear` disarms it once the run settles. */
+export interface DeadlineTimer {
+  signal: AbortSignal;
+  clear(): void;
+}
+
+/**
+ * The signal that aborts the run at its deadline (reason `TimeoutError`), merged by the host with the caller's. The
+ * timer does not keep the process alive and is cleared when the run settles; undefined without a deadline, or with one
+ * too far away for a timer.
+ */
+export function deadlineSignal(ledger: RunLedger, now = Date.now()): DeadlineTimer | undefined {
   const left = ledger.remainingMs(now);
-  return Number.isFinite(left) && left <= MAX_TIMER_MS ? AbortSignal.timeout(Math.max(0, left)) : undefined;
+  if (!Number.isFinite(left) || left > MAX_TIMER_MS) return undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new DOMException('The run reached its deadline', 'TimeoutError')), Math.max(0, left));
+  timer.unref?.();
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
 /** A model call refused by the run's bounds, or undefined; recorded as the run's stop. */
@@ -267,11 +296,20 @@ export function boundsStop(ctx: CallContext): StopReason | undefined {
   return ledgerOf(ctx)?.check();
 }
 
-/** Cost of a model reply from the price table, or undefined when the model has no price. */
+/** The price of a model in the price table: an own entry only (never an inherited property such as `constructor`). */
+export function priceFor(pricing: Readonly<Record<string, ModelPrice>> | undefined, model: string): ModelPrice | undefined {
+  return pricing && Object.hasOwn(pricing, model) ? pricing[model] : undefined;
+}
+
+/**
+ * Cost of a model reply from the price table, or undefined when the model has no price or the reply no valid usage.
+ * Prices and token counts that are not finite numbers >= 0 count as 0, so a cost is never negative or NaN.
+ */
 export function priceOf(pricing: Readonly<Record<string, ModelPrice>> | undefined, model: string, requested: string, usage: Usage | undefined): number | undefined {
-  const price = pricing?.[model] ?? pricing?.[requested];
-  if (!price) return undefined;
-  return ((usage?.inputTokens ?? 0) * (price.inputPerMTok ?? 0) + (usage?.outputTokens ?? 0) * (price.outputPerMTok ?? 0)) / 1e6;
+  const price = priceFor(pricing, model) ?? priceFor(pricing, requested);
+  if (!price || !validUsage(usage)) return undefined;
+  const n = (v: unknown) => (amount(v) ? v : 0);
+  return (usage.inputTokens * n(price.inputPerMTok) + usage.outputTokens * n(price.outputPerMTok)) / 1e6;
 }
 
 /** What a call to another agent sends, and the reservation it settles when the call returns. */
@@ -297,32 +335,40 @@ export interface OutboundOptions {
 const NOTHING: Reservation = { settle() {} };
 
 /**
- * What to send to the next agent: the time left minus `limits.delegation.marginMs`, hops plus one, the run's max hops,
- * a reservation of the budget, and the lineage. Undefined outside a run (no bounds in the context). Throws
+ * What to send to the next agent: the time left (never more than `opts.timeoutMs`) minus
+ * `limits.delegation.marginMs`, hops plus one, the run's max hops, a reservation of the budget, and the lineage.
+ * Inside a run it reads the run's bounds; in a context with no run of its own but the bounds a caller sent
+ * (`ctx.delegation`), it passes those on, so a chain keeps counting. Undefined when the context has neither. Throws
  * `BoundsExceeded` without any network call when the call would exceed the hop limit (`hop_limit`), would start with
  * less than `limits.delegation.minRemainingMs` (`timeout`), or no budget is left (`limit`). A retry of the same call
  * keeps the same reservation and sends what is left of the same deadline: it never gets a fresh allowance.
  */
 export function outboundBounds(ctx: CallContext, opts: OutboundOptions = {}): OutboundCall | undefined {
-  const b = ctx.bounds;
+  const now = Date.now();
+  const sent = ctx.delegation;
+  const b: Bounds | undefined = ctx.bounds ?? (sent ? {
+    deadlineAt: new Date(now + sent.remainingMs).toISOString(), hops: sent.hops, maxHops: sent.maxHops,
+    ...(sent.tokens !== undefined ? { tokens: sent.tokens } : {}), ...(sent.costUsd !== undefined ? { costUsd: sent.costUsd } : {}),
+  } : undefined);
   if (!b) return undefined;
   const ledger = LEDGERS.get(b);
-  const lineage = { rootRunId: ctx.lineage?.rootRunId ?? ctx.runId, parentRunId: ctx.runId };
+  const lineage = { rootRunId: ctx.lineage?.rootRunId ?? (ctx.bounds ? undefined : sent?.rootRunId) ?? ctx.runId, parentRunId: ctx.runId };
   // A refused outbound call is the adapter's result (an error result, a stopped run), not a stop of this run.
   const refuse = opts.refuse !== false;
   const fail = (reason: StopReason) => new BoundsExceeded(reason);
   if (refuse && b.hops + 1 > b.maxHops) throw fail(BOUNDS_STOP.hops);
   const deadline = b.deadlineAt ? Date.parse(b.deadlineAt) : undefined;
   const margin = ledger?.marginMs ?? 0;
-  const left = deadline === undefined ? Infinity : deadline - Date.now() - margin;
-  const remainingMs = Math.min(left, opts.timeoutMs ?? Infinity, MAX_TIMER_MS);
-  if (refuse && deadline !== undefined && left < (ledger?.minStartMs ?? 0)) throw fail(BOUNDS_STOP.deadline);
+  const left = deadline === undefined ? Infinity : deadline - now;
+  // The margin comes off whatever bounds the call: the run's deadline or the adapter's own time limit.
+  const remainingMs = Math.min(left, opts.timeoutMs ?? Infinity) - margin;
+  if (refuse && deadline !== undefined && left - margin < (ledger?.minStartMs ?? 0)) throw fail(BOUNDS_STOP.deadline);
   const reservation = opts.budget === false ? NOTHING
     : ledger ? ledger.reserve(opts.share)
       : { ...(b.tokens !== undefined ? { tokens: b.tokens } : {}), ...(b.costUsd !== undefined ? { costUsd: b.costUsd } : {}), settle() {} };
   return {
     bounds: {
-      remainingMs: Math.max(0, Math.floor(remainingMs)),
+      remainingMs: Math.max(0, Math.floor(Math.min(remainingMs, MAX_TIMER_MS))),
       hops: b.hops + 1,
       maxHops: b.maxHops,
       ...(reservation.tokens !== undefined ? { tokens: reservation.tokens } : {}),
@@ -331,4 +377,41 @@ export function outboundBounds(ctx: CallContext, opts: OutboundOptions = {}): Ou
     },
     reservation,
   };
+}
+
+/** Largest integer an RFC 9651 structured field carries (15 digits): larger values, unbounded max hops included, are capped to it. */
+export const SF_MAX_INTEGER = 999_999_999_999_999;
+/** Largest whole part of an RFC 9651 decimal (12 digits). */
+const SF_MAX_DECIMAL = 999_999_999_999;
+
+const sfInteger = (n: number) => String(Math.min(Math.max(0, Math.floor(n)), SF_MAX_INTEGER));
+/** A cost as an RFC 9651 decimal: rounded down to 3 decimals (never more than was sent), whole part capped at 12 digits. */
+const sfDecimal = (n: number) => {
+  const thousandths = Math.floor(Math.min(Math.max(0, n), SF_MAX_DECIMAL) * 1000);
+  const whole = Math.floor(thousandths / 1000);
+  const fraction = thousandths % 1000;
+  return fraction ? `${whole}.${String(fraction).padStart(3, '0').replace(/0+$/, '')}` : String(whole);
+};
+const sfString = (v: string) => `"${v.replace(/[\\"]/g, '\\$&')}"`;
+
+/**
+ * The `Agent-Bounds` header value of a delegation (`remaining-ms=45000, hops=2, max-hops=4, tokens=1000,
+ * cost-usd=0.5`), as the gateway parses it: integers capped at 15 digits (an unbounded max hops is sent as the cap),
+ * the cost rounded down to 3 decimals.
+ */
+export function formatAgentBounds(d: Delegation): string {
+  return [
+    `remaining-ms=${sfInteger(d.remainingMs)}`, `hops=${sfInteger(d.hops)}`, `max-hops=${sfInteger(d.maxHops)}`,
+    ...(d.tokens !== undefined ? [`tokens=${sfInteger(d.tokens)}`] : []),
+    ...(d.costUsd !== undefined ? [`cost-usd=${sfDecimal(d.costUsd)}`] : []),
+  ].join(', ');
+}
+
+/** The `Agent-Lineage` header value of a delegation (`root="run-a1", parent="run-b7"`); undefined when it has no lineage. */
+export function formatAgentLineage(d: Pick<Delegation, 'rootRunId' | 'parentRunId'>): string | undefined {
+  const members = [
+    ...(d.rootRunId !== undefined ? [`root=${sfString(d.rootRunId)}`] : []),
+    ...(d.parentRunId !== undefined ? [`parent=${sfString(d.parentRunId)}`] : []),
+  ];
+  return members.length ? members.join(', ') : undefined;
 }

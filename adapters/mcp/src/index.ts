@@ -62,6 +62,7 @@ export const toolAdapter = defineAdapter<'ToolPort', McpToolsOptions>({
       readOnly: strings,
       include: strings,
       exclude: strings,
+      bounds: { type: 'boolean', description: 'Send the run bounds in params._meta of every tools/call (default true)' },
       ...limitProperties(TOOLS_LIMITS, { toolsTtlMs: 'How long the tool list is cached', maxToolPages: 'Pages of tools/list read before the server is refused' }),
     },
     additionalProperties: false,

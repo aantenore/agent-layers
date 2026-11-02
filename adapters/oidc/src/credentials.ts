@@ -167,7 +167,9 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
           const own = await issue(ACTOR_KEY, { grant_type: 'client_credentials' }, Infinity);
           form.actor_token = own.token;
           form.actor_token_type = ACCESS_TOKEN_TYPE;
-          boundMs = Math.min(boundMs, own.expiresAt);
+          // The cached entry's expiry already has the refresh skew taken off: bound by the token's own expiry, so the
+          // skew comes off once below.
+          boundMs = Math.min(boundMs, own.expiresAt + skewMs);
         }
         const { token, expiresIn } = await request(form);
         const issuedExpMs = expiresIn !== undefined ? now() + expiresIn * 1000 : (unverifiedExpiry(token, maxTokenChars) ?? now() / 1000 + defaultTtlSec) * 1000;

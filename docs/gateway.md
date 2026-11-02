@@ -98,7 +98,10 @@ Every request goes through the same steps before any route runs (details in the
    parses them into the route's `ctx.delegation`, each bounded by `gateway.maxTraceChars`, before the body is read; a
    malformed or repeated header, or invalid values, is a 400. Every channel passes them on to the run, where they can
    only tighten `limits.run` ([0002](decisions/0002-delegation-bounds.md)). A2A clients send the same values in the
-   [bounds extension](../spec/extensions/bounds-v1.md) instead; when both are present, the tighter values apply.
+   [bounds extension](../spec/extensions/bounds-v1.md) instead; when both are present, the tighter values apply. A
+   sender builds the headers with `formatAgentBounds` and `formatAgentLineage` (`@agent-layers/core`), which write what
+   this parser accepts: integers capped at 15 digits (an unbounded max hops is sent as the cap) and the cost rounded
+   down to 3 decimals.
 
 Agent cards and the health endpoints are public. Sessions (MCP) and tasks (A2A) belong to the caller that created
 them: another caller presenting their id gets "not found".

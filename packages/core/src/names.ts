@@ -17,6 +17,7 @@ export const EVENT = Object.freeze({
   knowledgeError: 'agent.knowledge.error',
   extDropped: 'agent.ext.dropped',
   configWarning: 'agent.config.warning',
+  costUnpriced: 'agent.cost.unpriced',
 });
 
 export const METRIC = Object.freeze({

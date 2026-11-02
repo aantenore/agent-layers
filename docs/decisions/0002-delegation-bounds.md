@@ -99,7 +99,9 @@ refuse         when deadlineAt - now < min(limits.delegation.minRemainingMs, lim
 ```
 
 `startRun` in `packages/core/src/bounds.ts` implements this table. With `limits.delegation.inbound: "ignore"` the
-delegation is dropped (its lineage is kept for correlation) and `hops` comes from the verified chain only.
+delegation is dropped, its lineage included, and `hops` comes from the verified chain only. A run started with the
+context of a run in progress (an in-process delegate) derives its delegation from the parent's ledger as
+`outboundBounds` would (hops plus one, a reservation, the parent as lineage), tightened by any delegation passed along.
 
 The wire carries time as remaining milliseconds, never as a clock time, so clock skew between hosts cannot extend a
 deadline. Network latency only shortens it. `hops` takes the larger of the asserted count and the verified actor
