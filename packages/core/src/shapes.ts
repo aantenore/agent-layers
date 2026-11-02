@@ -54,7 +54,7 @@ export const SHAPES = Object.freeze({
   GuardCheck: obj({ stage: vocab('stage'), text: S, agent: S, runId: S, tool: S, caller }, ['stage', 'text', 'agent', 'runId']),
   GuardVerdict: obj({ action: vocab('guardAction'), text: S, labels: list(vocab('guardLabel')), reason: S }, ['action']),
   AgentSpec: obj({ name: S, instructions: S, model: S, tools: list(S), knowledge: list(S), settings: 'any' }, ['name', 'instructions', 'model', 'tools']),
-  RunResult: obj({ runId: S, status: vocab('runStatus'), output: S, reason, usage, costUsd: N, events: list('any') }, ['runId', 'status', 'output']),
+  RunResult: obj({ runId: S, status: vocab('runStatus'), output: S, reason, usage, costUsd: N, events: list('any'), checkpoint: 'any' }, ['runId', 'status', 'output']),
   Trigger: obj({ id: S, kind: S, source: S, at: S, agent: S, data: 'any' }, ['id', 'kind', 'source']),
   EvalCase: obj({ id: S, input: 'any', expected: 'any', tags: list(S), layer: vocab('layer') }, ['id', 'input']),
   EvalScore: obj({ metric: S, value: N, layer: vocab('layer'), reason: S }, ['metric', 'value']),

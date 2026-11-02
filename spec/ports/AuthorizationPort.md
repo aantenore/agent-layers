@@ -1,6 +1,6 @@
 # AuthorizationPort
 
-Layer: `identity` (L6 Identity & access) · Version: 1.2.0 · Conformance: `checkAuthorization`
+Layer: `identity` (L6 Identity & access) · Version: 1.3.0 · Conformance: `checkAuthorization`
 
 ## Purpose
 
@@ -20,7 +20,7 @@ Boundary: this port answers "may they". "Who are they" is [IdentityPort](Identit
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `caller` | public [Caller](../schemas/caller.json) (no `credential`) or `{kind: "anonymous", id: "anonymous", roles: [], scopes: []}` | Who acts. Anonymous is explicit, never the agent. |
-| `action` | String, required | What they do. Tool calls use `call`; reading approvals `list`, deciding or cancelling one `decide` (since 1.2.0). Config may add values that behave like one of them. |
+| `action` | String, required | What they do. Tool calls use `call`; reading approvals `list`, deciding or cancelling one `decide` (since 1.2.0); using the gateway's run routes `resume` and `cancel` (since 1.3.0). Config may add values that behave like one of them. |
 | `target` | {`kind`, `id`, `layer`, `risk`, `agent`, `attrs?`} | What it is done to. Tool calls use `kind: "tool"` and the prefixed tool name as `id`; `layer` is the tool's layer, `risk` its risk (missing risk is `exec`), `agent` the agent name, `attrs` the tool's [Attrs](README.md#language). Approvals use `kind: "approval"`, see below. |
 | `args?` | {String: Any} | The arguments of the call. Present only when the adapter is configured to send arguments. |
 | `ext?` | Ext | Adapter-specific context. |
@@ -45,6 +45,7 @@ Boundary: this port answers "may they". "Who are they" is [IdentityPort](Identit
 - Decisions are side-effect free and repeatable for the same question, except where the policy depends on time or external state.
 - Approval is separate: an `ask` effect from the local policy is resolved by [ApprovalPort](ApprovalPort.md) before this port is asked.
 - Approval questions (since 1.2.0): the gateway's approval routes ask this port before every read or decision. The target is `{kind: "approval", id: <approval id>, layer: "identity", risk: <risk of the call being approved>, agent: <its agent>, attrs: {status, tool}}` for one approval, `{kind: "approval", id: "*", layer: "identity", risk: "read", agent: "*"}` for the list, and `{kind: "approval", id: <id>, layer: "identity", risk: "exec", agent: "*"}` for an id that does not exist, so a refused caller cannot tell unknown ids from known ones. Reads use `list`, decisions and cancels `decide`. No authorization adapter, or no allowing answer, refuses the request.
+- Run questions (since 1.3.0): the gateway's run routes ask `resume` or `cancel` on `{kind: "run", id: <run id>, layer: "harness", risk: "exec", agent: "*"}` before every request. The stack then asks `decide` when a caller other than the one that started a run continues or cancels it: on the approval the run waits for (the approval target above), or on `{kind: "run", id, layer: "harness", risk: "exec", agent: <agent>}` when it waits for none. An approval answer is a decision and always asks `decide` on the approval. See [RuntimePort](RuntimePort.md#resume).
 - Local rules and actions (since 1.2.0): a rule with `actions` matches those actions (a core value also matches the values added like it); a rule without `actions` matches tool calls only (`call`), so rules written for tools never open approvals. `rules-authorization` applies its `default` to tool calls only and denies any other action no rule matches. An adapter that sends the question to an engine (OPA, AuthZEN) passes `action` and `target.kind` on; a policy there that does not look at `action` answers approval questions as it answers tool calls, so check `action` in it before enabling the approval routes.
 
 ## Errors
@@ -67,6 +68,7 @@ Boundary: this port answers "may they". "Who are they" is [IdentityPort](Identit
 
 ## Version history
 
+- 1.3.0 — core actions `resume` and `cancel` and target kind `run`, asked by the gateway's run routes; `decide` also answers who may act on another caller's run ([0003](../../docs/decisions/0003-run-resume.md))
 - 1.2.0 — core actions `decide` and `list` and target kind `approval`, asked by the gateway's approval routes; policy rules match actions with `actions`, and a rule without it matches tool calls only
 - 1.1.0 — `AccessQuestion.caller.actors` ([0002](../../docs/decisions/0002-delegation-bounds.md)); policy rules match the current actor (`when.actor`), any actor (`when.actors`) or delegation at all (`when.delegated`)
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `AccessQuestion {caller, action, target, args?}` replaces `AccessRequest`; `AccessDecision.allowed` (was `decision`) and `reason`; anonymous is an explicit caller

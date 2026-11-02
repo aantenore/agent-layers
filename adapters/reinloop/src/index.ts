@@ -1,10 +1,10 @@
 import {
-  defineAdapter, defineLimits, limitSchema, limitValue, noopTelemetry, PORT_VERSIONS, publicCaller, stopReasonOf, type AgentSpec, type CallContext,
-  type LimitValue, type RunEvent, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason,
+  defineAdapter, defineLimits, limitSchema, limitValue, noopTelemetry, PORT_VERSIONS, publicCaller, RunRefused, stopReasonOf, type AgentSpec, type CallContext,
+  type JsonValue, type LimitValue, type RunEvent, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason,
 } from '@agent-layers/core';
 import {
-  memoryStore, pricingFor, stream, summarizeCompaction, windowCompaction, type Agent, type Budget, type CompactionSettings, type Message,
-  type ModelParams, type PolicyConfig, type Pricing, type RunResult as LoopResult, type ToolSettings,
+  memoryStore, pricingFor, replay, RunStop, stream, summarizeCompaction, windowCompaction, type Agent, type Budget, type CompactionSettings, type Message,
+  type ModelParams, type PolicyConfig, type Pricing, type RunEvent as LoopEvent, type RunResult as LoopResult, type ToolSettings,
 } from 'reinloop';
 import { fromMessages, fromUsage } from './convert.ts';
 import { budgetName, mapEvent, recordEnd, recordEvent } from './events.ts';
@@ -114,15 +114,19 @@ export function createReinloopRuntime(options: ReinloopOptions = {}, name = 'rei
   return {
     name,
     bind(stack, spec) {
-      const collect = async (input: RunInput, init: Partial<CallContext>): Promise<RunResult> => {
+      const collect = async (input: RunInput, init: Partial<CallContext>, from?: Resume): Promise<RunResult> => {
         const events: RunEvent[] = [];
-        const it = execute(stack, spec, input, stack.context({ ...init, agent: spec.name }), options, false);
+        const it = execute(stack, spec, input, stack.context({ ...init, agent: spec.name }), options, false, from);
         for (;;) {
           const step = await it.next();
           if (step.done) {
             const r = step.value;
-            events.push(endEvent(r));
-            return { runId: r.runId, status: r.status, output: r.output, usage: r.usage, costUsd: r.costUsd, ...(r.reason ? { reason: r.reason } : {}), events };
+            const { checkpoint: _checkpoint, ...end } = endEvent(r) as Extract<RunEvent, { type: 'run.end' }>;
+            events.push(end);
+            return {
+              runId: r.runId, status: r.status, output: r.output, usage: r.usage, costUsd: r.costUsd, ...(r.reason ? { reason: r.reason } : {}),
+              ...(r.checkpoint ? { checkpoint: r.checkpoint } : {}), events,
+            };
           }
           events.push(step.value);
         }
@@ -130,6 +134,16 @@ export function createReinloopRuntime(options: ReinloopOptions = {}, name = 'rei
       return {
         name: spec.name,
         run: (input, init = {}) => collect(input, init),
+        /**
+         * Continues from the run's own event log: reinloop replays it and runs the tool calls that have no result (the
+         * one that waited, which now finds its decision), then the loop goes on. An `input` answer is added once those
+         * calls have run.
+         */
+        async resume(checkpoint, answer, init = {}) {
+          const events = (checkpoint as { events?: unknown } | null)?.events;
+          if (!Array.isArray(events)) throw new RunRefused('invalid', 'not a checkpoint of this runtime');
+          return collect('', init, { events: events as LoopEvent[], ...('input' in answer ? { input: answer.input } : {}) });
+        },
         async *stream(input, init = {}) {
           const it = execute(stack, spec, input, stack.context({ ...init, agent: spec.name }), options, true);
           for (;;) {
@@ -146,14 +160,28 @@ export function createReinloopRuntime(options: ReinloopOptions = {}, name = 'rei
   };
 }
 
-interface Outcome extends Required<Pick<RunResult, 'runId' | 'status' | 'output' | 'usage'>> { reason?: StopReason; costUsd: number; budget?: string }
+interface Outcome extends Required<Pick<RunResult, 'runId' | 'status' | 'output' | 'usage'>> { reason?: StopReason; costUsd: number; budget?: string; checkpoint?: JsonValue }
+
+/** What a resume continues from: the run's reinloop event log (its checkpoint) and the input answer, if any. */
+interface Resume { events: LoopEvent[]; input?: RunInput }
 
 const endEvent = (r: Outcome): RunEvent => ({
   type: 'run.end', status: r.status, ...(r.reason ? { reason: r.reason } : {}), usage: r.usage, costUsd: r.costUsd,
+  ...(r.checkpoint ? { checkpoint: r.checkpoint } : {}),
 });
 
-/** One run: builds the reinloop agent on the governed ports, drives it, maps its events and its result. */
-async function* execute(stack: Stack, spec: AgentSpec, input: RunInput, ctx: CallContext, options: ReinloopOptions, streaming: boolean): AsyncGenerator<RunEvent, Outcome> {
+/** Why the first pass of a resume with input stops: the calls left have run, the model is next. */
+const CALLS_RUN = 'agent-layers:calls-run';
+
+/** A provider that ends the run before any model call: the calls a resume runs first, then the input is added. */
+const stopBeforeModel = { name: 'agent-layers', generate: async (): Promise<never> => { throw new RunStop(CALLS_RUN); } };
+
+/**
+ * One run: builds the reinloop agent on the governed ports, drives it, maps its events and its result. With `from`, the
+ * run continues from its event log; a waiting outcome carries the log as its checkpoint. Usage and cost are the ones of
+ * this run, not of the log it continues.
+ */
+async function* execute(stack: Stack, spec: AgentSpec, input: RunInput, ctx: CallContext, options: ReinloopOptions, streaming: boolean, from?: Resume): AsyncGenerator<RunEvent, Outcome> {
   const telemetry = ctx.telemetry ?? stack.telemetry ?? noopTelemetry;
   const control: RunControl = { halt: new AbortController() };
   const signal = ctx.signal ? AbortSignal.any([ctx.signal, control.halt.signal]) : control.halt.signal;
@@ -186,14 +214,47 @@ async function* execute(stack: Stack, spec: AgentSpec, input: RunInput, ctx: Cal
 
   const caller = publicCaller(ctx.caller);
   const identity = caller ? { subject: caller.id, kind: caller.kind, roles: caller.roles, scopes: caller.scopes } : undefined;
-  const handle = stream(agent, messages, { runId: ctx.runId, store: memoryStore(), signal, ...(identity ? { identity } : {}) });
-  for await (const ev of handle) {
-    recordEvent(telemetry, ev, spec.name);
-    for (const mapped of mapEvent(ev, { stream: streaming })) yield mapped;
+  const store = memoryStore();
+  const opts = { runId: ctx.runId, store, signal, ...(identity ? { identity } : {}) };
+  for (const ev of from?.events ?? []) await store.append(ev);
+  const base = from ? replay(ctx.runId, spec.name, from.events) : undefined;
+  const finish = async (r: LoopResult): Promise<Outcome> => {
+    const out = since(outcome(r, control, signal), base);
+    recordEnd(telemetry, { agent: spec.name, model: spec.model, costUsd: out.costUsd, ...(out.budget ? { budget: out.budget } : {}) });
+    // A run waiting for a person keeps its event log: a resume replays it.
+    return out.status === 'waiting' ? { ...out, checkpoint: { events: await store.load(ctx.runId) } as unknown as JsonValue } : out;
+  };
+  let started = false;
+  const drive = async function* (a: Agent, sent: Message[] | string | undefined): AsyncGenerator<RunEvent, LoopResult> {
+    const handle = stream(a, sent, opts);
+    for await (const ev of handle) {
+      recordEvent(telemetry, ev, spec.name);
+      // A resume with input runs in two passes: one run.start.
+      if (ev.type === 'run_start' && started) continue;
+      started = true;
+      for (const mapped of mapEvent(ev, { stream: streaming })) yield mapped;
+    }
+    return handle.result;
+  };
+  if (from?.input !== undefined) {
+    // reinloop runs the calls without a result only while the conversation ends with them: they run first, then the
+    // input is added.
+    const first = yield* drive({ ...agent, model: { ...agent.model, provider: stopBeforeModel } }, undefined);
+    if (control.end || first.status !== 'stopped' || first.reason !== CALLS_RUN) return finish(first);
+    const sent = typeof from.input === 'string' ? from.input : fromMessages(from.input.messages).messages;
+    return finish(yield* drive(agent, sent));
   }
-  const out = outcome(await handle.result, control, signal);
-  recordEnd(telemetry, { agent: spec.name, model: spec.model, costUsd: out.costUsd, ...(out.budget ? { budget: out.budget } : {}) });
-  return out;
+  return finish(yield* drive(agent, from ? undefined : messages));
+}
+
+/** The figures of an outcome less those of the log it continued. */
+function since(out: Outcome, base: { usage: { inputTokens: number; outputTokens: number }; costUsd: number } | undefined): Outcome {
+  if (!base) return out;
+  return {
+    ...out,
+    usage: { inputTokens: Math.max(0, out.usage.inputTokens - base.usage.inputTokens), outputTokens: Math.max(0, out.usage.outputTokens - base.usage.outputTokens) },
+    costUsd: Math.max(0, out.costUsd - base.costUsd),
+  };
 }
 
 const LIMIT_MAX_TOKENS: StopReason = { code: 'limit', layer: 'harness', by: 'reinloop', detail: 'max_tokens' };

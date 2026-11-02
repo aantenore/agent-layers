@@ -32,7 +32,7 @@ An `AgentSpec` carries `name`, `instructions`, `model`, `tools`, `knowledge`, `s
 | `completed` | The agent answered. |
 | `failed` | An error ended the run. |
 | `stopped` | Something ended the run on purpose: a guard, a denial, a limit, a cancellation. |
-| `waiting` | The run stopped for a human answer (an approval, input, authentication). A later run in the same session that makes the same call gets the decision. |
+| `waiting` | The run stopped for a human answer (an approval, input, authentication). `Stack.resume` continues it (see [Resume and cancel](#resume-and-cancel)); a later run in the same session that makes the same call also gets the decision. |
 
 Whenever the status is not `completed`, `reason` is structured: `{ code, layer?, by?, stage?, detail? }`. Consumers
 branch on `code` only: `guard_block`, `denied`, `aborted`, `timeout`, `limit`, `needs_input`, `needs_auth`, `rejected`,
@@ -101,6 +101,37 @@ runtime reports no usage or cost, the host fills them from the run's ledger. A r
 the `a2a` runtime, passes on what is left with `outboundBounds(ctx)`: time minus `limits.delegation.marginMs`, hops plus
 one, a reservation of the budget; it refuses locally, without a network call, when the next agent would be over the hop
 limit, and settles the reservation with what the remote run reports. Limits are in [limits.md](../limits.md#limits).
+
+## Resume and cancel
+
+A run that ends `waiting` can be continued as the same run ([0003](../decisions/0003-run-resume.md)). The host keeps
+its input, its caller (never the credential), its session, the call that waits (tool, arguments, approval id) and the
+runtime's checkpoint: in the stack's store (`layers.store`) when there is one, for `limits.run.resumeTtlMs`, else in
+memory (prototype; readiness warns on the production tier when approvals have no store).
+
+```ts
+const r = await (await stack.agent('assistant')).run('refund A1', { caller });
+// r.status === 'waiting', r.ext['sdk.approval'].id === 'ap-1'
+await stack.resume(r.runId, { approval: { id: 'ap-1', approved: true } }, { caller: reviewer });
+await stack.resume(otherRun, { input: 'the order number is A2' }, { caller });
+await stack.cancel(runId, { by: caller, reason: 'no longer needed' });
+```
+
+| Answer | Does |
+|---|---|
+| `{ approval: { id, approved, reason? } }` | decides the approval the run waits for (`ApprovalPort.decide`, `by` the resumer, authorized with `decide`), then continues |
+| `{ input }` | continues a run waiting for input; refused while its approval is still pending (decide it first, here or on the gateway) |
+
+Only the caller that started the run may resume or cancel it, unless the authorization port allows the caller
+`decide` for it. The run keeps its id, session and caller, so the stack's tools find the decision for the call that
+waited. `basic-runtime` and `reinloop` implement `resume`: `basic-runtime` keeps the conversation and the calls left
+of the last answer, `reinloop` its own event log; each runs exactly the call that waited, adds an input answer after
+its result, and goes on with the next turn, so the model is not asked the first answer again. The `a2a` runtime
+continues the remote task with a follow-up message (input only: the remote agent decides its own approvals). A
+runtime without `resume` is run again from its input, which with a real model is not deterministic. `cancel` aborts a
+run in flight in this process, or withdraws a waiting run and its approval; a cancelled run cannot be resumed. Over the
+network: the gateway's [run routes](../gateway.md#runs), A2A follow-ups that name an `input-required` task, and A2A
+CancelTask.
 
 ## How to swap
 

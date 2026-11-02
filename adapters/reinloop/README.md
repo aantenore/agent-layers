@@ -59,6 +59,10 @@ tool spans of its own: the stack's `agent.model.call` and `agent.tool.call` alre
 `ext`: the adapter reads `ext["sdk.approval"]` of governed tool results and writes no `ext` keys; the stack adds
 `ext["sdk.approval"] = {id, by, tool}` to a waiting result.
 
+A waiting result carries the run's reinloop event log as its checkpoint (RuntimePort 1.3.0). `resume` (through
+`Stack.resume`) replays it: reinloop runs the tool calls without a result, the waiting one first, then the loop goes
+on; an input answer is added once those calls have run. Usage and cost are those of the resumed run only.
+
 Agent settings: `settings.temperature`, `settings.maxOutputTokens` and `settings.stop` go to the model.
 `ext["reinloop.retryMaxTokens"]` (number) makes reinloop repeat an answer cut at the token limit once with that limit.
 Other `ext` keys of the agent (those of the model adapter's namespace, for example `openai.seed`) are sent with every

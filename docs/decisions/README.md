@@ -8,6 +8,7 @@ comments and pull requests.
 |---|---|---|---|
 | [0001](0001-sdk-language.md) | The SDK speaks its own language: fixed core shapes, configurable vocabularies and boundary mappings, standards only in adapters | Accepted | 2026-10-31 |
 | [0002](0002-delegation-bounds.md) | Every agent bounds its own run and knows who delegated it: actor chain, deadline, budget and hop limit, tightened across hops | Accepted | 2026-11-02 |
+| [0003](0003-run-resume.md) | A waiting run is continued as the same run: the host keeps it, decides its approval, and the runtime resumes from its checkpoint | Accepted | 2026-11-02 |
 
 The migration of 0001 is tracked package by package in [0001-migration-notes.md](0001-migration-notes.md).
 

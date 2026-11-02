@@ -2,14 +2,14 @@ import type { AdapterRegistry } from './adapter.ts';
 import type { ResolvedConfig } from './config.ts';
 import type { CallContext } from './ports/base.ts';
 import type { CachePort, RouterPort } from './ports/cache.ts';
-import type { ChannelHandle, ChannelHost, ChannelPort } from './ports/channel.ts';
+import type { CancelOptions, CancelResult, ChannelHandle, ChannelHost, ChannelPort } from './ports/channel.ts';
 import type { DeployPort, SecretPort } from './ports/deploy.ts';
 import type { EvaluatorPort, FeedbackPort } from './ports/eval.ts';
 import type { GuardPort } from './ports/guard.ts';
 import type { ApprovalPort, AuthorizationPort, Caller, CredentialPort, IdentityPort } from './ports/identity.ts';
 import type { IngestionPort, KnowledgePort, MemoryPort } from './ports/knowledge.ts';
 import type { ModelPort } from './ports/model.ts';
-import type { AgentSpec, RunnableAgent, RuntimePort, StatePort, TriggerPort } from './ports/runtime.ts';
+import type { AgentSpec, ResumeAnswer, RunnableAgent, RunResult, RuntimePort, StatePort, TriggerPort } from './ports/runtime.ts';
 import type { StorePort } from './ports/store.ts';
 import type { TelemetryPort } from './ports/telemetry.ts';
 import type { ToolPort } from './ports/tool.ts';
@@ -77,6 +77,21 @@ export interface Stack {
   agents(): string[];
   /** The configured agent, bound by the runtime slot. */
   agent(name: string): Promise<RunnableAgent>;
+  /**
+   * Continues a run that ended `waiting`, as `ctx.caller` (the verified resumer). Only the caller that started the run
+   * may resume it, unless the authorization port allows the resumer `decide` on the approval the run waits for (on the
+   * run itself, target kind `run`, when it waits for input). An approval answer is decided first (`ApprovalPort.decide`, authorized like
+   * the gateway's `decide`); then the runtime continues from its checkpoint when it implements `resume`, or the agent
+   * runs again from its input (not deterministic with a real model). The run keeps its id, session and caller.
+   * Rejects with `RunRefused`.
+   */
+  resume(runId: string, answer: ResumeAnswer, ctx?: Partial<CallContext>): Promise<RunResult>;
+  /**
+   * Cancels a run: aborts it when it is in flight in this process, or marks a waiting run cancelled and withdraws its
+   * pending approval (`ApprovalPort.cancel`). Only the caller that started the run, unless the authorization port
+   * allows `decide` on its approval (or on the run). Rejects with `RunRefused`.
+   */
+  cancel(runId: string, opts?: CancelOptions): Promise<CancelResult>;
   /** What channels need to reach the stack. Runs without a caller of their own get `opts.caller`. */
   host(opts?: StartOptions): ChannelHost;
   /**

@@ -66,11 +66,14 @@ export class ApprovalPending extends AgentLayersError {
   readonly by: string | undefined;
   /** Prefixed name of the tool waiting for it. */
   readonly tool: string | undefined;
-  constructor(approval: string, opts: { by?: string; tool?: string } = {}) {
+  /** Arguments of the call waiting for it, kept by the host to resume the run; never written to the result. */
+  readonly args: Record<string, unknown> | undefined;
+  constructor(approval: string, opts: { by?: string; tool?: string; args?: Record<string, unknown> } = {}) {
     super(`approval pending: ${approval}`);
     this.approval = approval;
     this.by = opts.by;
     this.tool = opts.tool;
+    this.args = opts.args;
   }
 
   get stopReason(): StopReason {
@@ -124,6 +127,22 @@ export class InboundRejected extends AgentLayersError {
   override name = 'InboundRejected';
   readonly kind: InboundRejection;
   constructor(kind: InboundRejection, message: string) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
+export type RunRefusal = 'not_found' | 'forbidden' | 'conflict' | 'invalid';
+
+/**
+ * A resume or a cancel the stack refused: no such run (or not kept any more), a caller who may not act on it, a run
+ * in a state that does not allow it (cancelled, already being resumed, an approval still pending), or an answer that
+ * does not fit what the run waits for. Channels map `kind` to their protocol's error.
+ */
+export class RunRefused extends AgentLayersError {
+  override name = 'RunRefused';
+  readonly kind: RunRefusal;
+  constructor(kind: RunRefusal, message: string) {
     super(message);
     this.kind = kind;
   }

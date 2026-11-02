@@ -43,6 +43,7 @@ standard.
 | `GET /.well-known/agent-card.json`, `POST /a2a/<agent>` | Agent2Agent (A2A) 1.0, 0.3 accepted | [`a2a`](../adapters/a2a) | RuntimePort | everything a run goes through |
 | `POST /v1/events` | CloudEvents 1.0 HTTP binding | [`cloudevents`](../adapters/cloudevents) | TriggerPort, then RuntimePort | the trigger's caller; everything a run goes through |
 | `GET /approvals`, `GET`/`POST`/`DELETE /approvals/<id>` (off by default) | JSON over HTTP | gateway | ApprovalPort | authorization of every request (actions `list`, `decide`); see [Approvals](#approvals) |
+| `POST /runs/<id>/resume`, `POST /runs/<id>/cancel` (off by default) | JSON over HTTP | gateway | RuntimePort (`Stack.resume`, `Stack.cancel`) | authorization of every request (actions `resume`, `cancel`), then the stack's own rules; see [Runs](#runs) |
 | `GET /healthz`, `GET /readyz` | | gateway | liveness; readiness gate of the profile | |
 
 ```mermaid
@@ -163,6 +164,47 @@ telemetry event `gateway.approval.decided`, and each authorization answer counts
 }
 ```
 
+## Runs
+
+A run that ended `waiting` can be continued, and any run cancelled, over HTTP
+([0003](decisions/0003-run-resume.md)). The routes are off unless `gateway.runs.enabled` is `true`;
+`gateway.runs.path` moves them (default `/runs`). They need an authorization adapter, or the gateway refuses to start.
+
+| Request | Does | Action asked | Answers |
+|---|---|---|---|
+| `POST /runs/<id>/resume` with `{ "approval": { "id", "approved", "reason"? } }` or `{ "input": "..." }` | decides the approval the run waits for, then continues it (`Stack.resume`) | `resume` | `{ runId, status, output, reason?: { code }, usage?, costUsd?, approval? }` |
+| `POST /runs/<id>/cancel` with `{ "reason"?: "..." }` | aborts the run in flight in this process, or withdraws a waiting run and its approval (`Stack.cancel`) | `cancel` | `{ runId, outcome: "aborted" \| "cancelled" }` |
+
+Every request is authenticated, then the AuthorizationPort is asked with the verified caller, the action and a target
+`{ kind: "run", id: <run id>, layer: "harness", risk: "exec", agent: "*" }`: that answer opens the route. The stack
+then applies its own rules: only the caller that started the run may continue or cancel it, unless the
+AuthorizationPort allows the caller `decide` on the approval the run waits for (on the run, target kind `run`, when it
+waits for none); an approval answer is a decision, so it needs `decide` as on `POST /approvals/<id>`, owner included,
+and is recorded with `decidedBy` set to the verified caller. Refusals are 404 (no waiting run with this id, or no
+longer kept), 403, 409 (a cancelled run, a run being resumed, an input answer while its approval is still pending, a
+decision that contradicts the one already taken) and 400 (an answer that does not fit). The run keeps its id, session
+and caller; reasons never carry `detail`. Each resume is the telemetry event `agent.run.resumed`, each cancel
+`agent.run.cancelled`.
+
+```json
+{
+  "gateway": { "runs": { "enabled": true }, "approvals": { "enabled": true } },
+  "layers": {
+    "store": { "adapter": "sqlite-store" },
+    "authorization": {
+      "adapter": "rules-authorization",
+      "options": { "rules": [
+        { "effect": "allow", "actions": ["resume", "cancel"], "when": { "authenticated": true } },
+        { "effect": "allow", "actions": ["decide", "list"], "when": { "roles": ["operator"] } }
+      ] }
+    }
+  }
+}
+```
+
+Waiting runs are kept in the store (`layers.store`) when there is one, for `limits.run.resumeTtlMs`; without it they
+are kept in the gateway's memory, lost on restart and not shared by replicas.
+
 ## Configure
 
 ```json
@@ -185,7 +227,7 @@ telemetry event `gateway.approval.decided`, and each authorization answer counts
 
 `gateway` takes `port`, `host`, `inbound` (instance names to mount; every mountable channel and trigger by default),
 `anonymous`, `auth` (`scheme`: `bearer` by default or `header`, with `header` the header name), `approvals`
-(`enabled`, `path`; see [Approvals](#approvals)), `publicOrigin`, `cors`,
+(`enabled`, `path`; see [Approvals](#approvals)), `runs` (`enabled`, `path`; see [Runs](#runs)), `publicOrigin`, `cors`,
 `allowedOrigins`, `allowedHosts` and the limits `maxBodyBytes`, `requestTimeoutMs`,
 `headersTimeoutMs`, `bodyTimeoutMs`, `closeGraceMs`, `corsMaxAgeS`, `maxRequestIdChars` and `maxTraceChars`, and a profile can override
 any of them. `agent-layers gateway --profile production [--port n] [--host h]` composes the

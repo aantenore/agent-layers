@@ -11,7 +11,7 @@ A port is the contract between the stack and one kind of backend. Every port has
 | Model plane | `llm` (L1) | [ModelPort](ModelPort.md) | 1.1.0 | Model calls with tool calls, optionally streamed |
 | Model plane | `cache` (L2) | [CachePort](CachePort.md) | 1.0.0 | Key/value cache for model replies; usable by any layer |
 | Model plane | `cache` (L2) | [RouterPort](RouterPort.md) | 1.1.0 | Pick the model for a request |
-| Agent plane | `harness` (L3) | [RuntimePort](RuntimePort.md) | 1.2.0 | Bind an agent spec to a runnable agent |
+| Agent plane | `harness` (L3) | [RuntimePort](RuntimePort.md) | 1.3.0 | Bind an agent spec to a runnable agent |
 | Agent plane | `harness` (L3) | [StatePort](StatePort.md) | 1.0.0 | Session event log |
 | Agent plane | `harness` (L3) | [StorePort](StorePort.md) | 1.0.0 | Durable small JSON values by key, with compare-and-set |
 | Agent plane | `knowledge` (L4) | [KnowledgePort](KnowledgePort.md) | 1.1.0 | Search a knowledge source, answer with passages |
@@ -20,10 +20,10 @@ A port is the contract between the stack and one kind of backend. Every port has
 | Agent plane | `tool` (L5) | [ToolPort](ToolPort.md) | 1.1.0 | List and call tools |
 | Control plane | `identity` (L6) | [IdentityPort](IdentityPort.md) | 1.1.0 | Verify inbound credentials into a caller |
 | Control plane | `identity` (L6) | [CredentialPort](CredentialPort.md) | 1.0.0 | Outbound tokens, on behalf of a user or as the agent |
-| Control plane | `identity` (L6) | [AuthorizationPort](AuthorizationPort.md) | 1.2.0 | Decide whether an action is allowed |
+| Control plane | `identity` (L6) | [AuthorizationPort](AuthorizationPort.md) | 1.3.0 | Decide whether an action is allowed |
 | Control plane | `identity` (L6) | [ApprovalPort](ApprovalPort.md) | 1.2.0 | Human approval for actions the policy marks ask |
 | Control plane | `guardrail` (L7) | [GuardPort](GuardPort.md) | 1.0.0 | Allow, block or redact text at four stages |
-| Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 1.1.0 | Expose agents to people, apps and other agents |
+| Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 1.2.0 | Expose agents to people, apps and other agents |
 | Experience plane | `interface` (L8) | [TriggerPort](TriggerPort.md) | 1.1.0 | Start runs from events and schedules |
 | Insight plane | `telemetry` (L9) | [TelemetryPort](TelemetryPort.md) | 1.0.0 | Spans, events and metrics tagged with `agent.layer` |
 | Insight plane | `eval` (L10) | [EvaluatorPort](EvaluatorPort.md) | 1.0.0 | Score a run of a dataset case |

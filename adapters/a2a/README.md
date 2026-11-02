@@ -22,7 +22,11 @@ the runtime with the caller's identity, so guards, authorization and telemetry a
     as an artifact and as the status message. `configuration.returnImmediately: true` answers at once with a working
     task (0.3: `configuration.blocking: false`).
   - `SendStreamingMessage`: Server-Sent Events: the task, the answer as an `artifactUpdate`, the final `statusUpdate`.
-  - `GetTask`, `CancelTask` on the caller's own tasks; a task of another caller is not found (`-32001`).
+  - `GetTask`, `CancelTask` on the caller's own tasks; a task of another caller is not found (`-32001`). CancelTask also
+    cancels the run in the stack (`ChannelHost.cancel`): a waiting run is withdrawn with its approval.
+  - A message with the `taskId` of the caller's `input-required` task continues that run (`ChannelHost.resume`) with
+    the message as input: same task, same run. Its approval, if any, is decided first on the gateway's approval routes;
+    while it is still pending the task stays `input-required`. A task in another state answers `-32602`.
   - Errors: `-32009` for an `A2A-Version` other than 1.0 or 0.3, `-32601` for other methods (push notifications,
     `ListTasks`, `SubscribeToTask` are not offered), `-32602` for a message without user text, `-32002` when a task
     can no longer be canceled. Other failures answer `internal error`, never the error text.
@@ -106,7 +110,7 @@ agent by):
 | `completed` | `completed` | |
 | `canceled` | `stopped` | `aborted` |
 | `rejected` | `stopped` | `rejected` |
-| `input-required` | `waiting` | `needs_input` (output: the remote status message) |
+| `input-required` | `waiting` | `needs_input` (output: the remote status message); the checkpoint is the remote task, and `resume` with an input answer sends it as a follow-up on that task |
 | `auth-required` | `waiting` | `needs_auth` |
 | `failed` | `failed` | `error` |
 | any other state | `failed` | `error`, the native state in `ext["a2a.state"]` |

@@ -11,18 +11,21 @@ import { ownerDigest } from './inbound.ts';
 import { ATTR, EVENT, METRIC, SPAN } from './names.ts';
 import { PORTS, versionAtLeast } from './ports/catalog.ts';
 import type { CallContext } from './ports/base.ts';
+import { publicCaller } from './ports/identity.ts';
 import type { ChannelHandle } from './ports/channel.ts';
 import type { GuardPort } from './ports/guard.ts';
 import type { ModelPort } from './ports/model.ts';
-import type { AgentSpec, RunEvent, RunInput, RunnableAgent, RunResult, StopReason } from './ports/runtime.ts';
+import type { AgentSpec, ResumeAnswer, RunEvent, RunInput, RunnableAgent, RunResult, StopReason } from './ports/runtime.ts';
+import type { JsonValue } from './ports/store.ts';
 import type { TelemetryPort } from './ports/telemetry.ts';
 import type { ToolPort } from './ports/tool.ts';
 import { governedTools } from './pipeline/governed-tools.ts';
 import { guardedModel } from './pipeline/guarded-model.ts';
 import { knowledgeInjector } from './pipeline/knowledge.ts';
 import type { Stack, StackPorts } from './stack.ts';
+import { memoryRunBook, runControl, storeRunBook, type InFlight, type RunControl } from './runs.ts';
 import { slotInfo } from './slots.ts';
-import { LANGUAGE_LIMITS } from './stack-limits.ts';
+import { LANGUAGE_LIMITS, RUN_LIMITS } from './stack-limits.ts';
 import { adapterOf, createTelemetry } from './telemetry.ts';
 import { filterTools, knowledgeTools } from './tools.ts';
 import { isPlainObject, newRunId } from './util.ts';
@@ -163,6 +166,17 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
 
   const bound = new Map<string, Promise<RunnableAgent>>();
   const limits = runLimits(config.limits);
+  // Runs that end waiting are kept to be resumed: in the store when there is one, else in this process (prototype).
+  const resumeTtlMs = limitValue(RUN_LIMITS.resumeTtlMs, config.limits.run?.resumeTtlMs);
+  const book = ports.store
+    ? storeRunBook(ports.store, resumeTtlMs)
+    : memoryRunBook(resumeTtlMs, limitValue(RUN_LIMITS.maxWaitingInMemory, config.limits.run?.maxWaitingInMemory));
+  const inflight = new Map<string, InFlight>();
+  const control = runControl({
+    book, inflight, resuming: new Map(), telemetry,
+    ...(ports.approval ? { approval: ports.approval } : {}), ...(ports.authorization ? { authorization: ports.authorization } : {}),
+    agent: (name) => stack.agent(name),
+  });
   const context = (init: Partial<CallContext> & { agent: string }): CallContext => ({ runId: newRunId(), telemetry, ...init });
 
   const stack: Stack = {
@@ -176,10 +190,12 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
       return ports.identity.verify(credential);
     },
     agents: () => Object.keys(config.agents),
+    resume: (runId, answer, init) => control.resume(runId, answer, init),
+    cancel: (runId, o) => control.cancel(runId, o),
     agent(name) {
       let p = bound.get(name);
       if (!p) {
-        p = bindAgent(stack, name, context, extBytes, waiting, limits);
+        p = bindAgent(stack, name, { context, extBytes, waiting, limits, control, inflight });
         bound.set(name, p);
         p.catch(() => bound.delete(name));
       }
@@ -192,6 +208,8 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
         agents: () => stack.agents(),
         run: async (agent, input, ctx) => (await stack.agent(agent)).run(input, as(ctx)),
         stream: (agent, input, ctx) => streamRun(stack, agent, input, as(ctx)),
+        resume: (runId, answer, ctx) => stack.resume(runId, answer, as(ctx)),
+        cancel: (runId, o = {}) => stack.cancel(runId, opts.caller && !o.by ? { ...o, by: opts.caller } : o),
         ...(ports.identity ? { verify: (c: string) => stack.verify(c) } : {}),
         ...(ports.model ? { model: () => modelWith([]) } : {}),
         tools: toolsForHost,
@@ -295,7 +313,17 @@ function boundsAttrs(b: Begun): Record<string, string | number | string[]> {
 /** The result of a run its bounds refuse before it starts: no model call, no tool call. */
 const refusedRun = (runId: string, reason: StopReason): RunResult => ({ runId, status: 'stopped', output: '', reason: { ...reason } });
 
-async function bindAgent(stack: Stack, name: string, context: Stack['context'], extBytes: number, waiting: Waiting, limits: RunLimits): Promise<RunnableAgent> {
+interface Binding {
+  context: Stack['context'];
+  extBytes: number;
+  waiting: Waiting;
+  limits: RunLimits;
+  control: RunControl;
+  inflight: Map<string, InFlight>;
+}
+
+async function bindAgent(stack: Stack, name: string, k: Binding): Promise<RunnableAgent> {
+  const { context, extBytes, waiting, limits, control, inflight } = k;
   const spec = await agentSpec(stack.config, name);
   const runtime = stack.ports.runtime;
   if (!runtime) throw new MissingLayerError('harness', 'runtime adapter');
@@ -307,37 +335,67 @@ async function bindAgent(stack: Stack, name: string, context: Stack['context'], 
       stack.telemetry.metric(METRIC.boundsStops, 1, { [ATTR.layer]: 'harness', [ATTR.name]: name, [ATTR.runReason]: code });
     }
   };
+
+  /**
+   * Starts a run this process can cancel: its own abort, merged with the caller's signal, registered by run id until
+   * it ends, and a slot for the approval a call of it may wait for.
+   */
+  const open = (init: Partial<CallContext>) => {
+    const own = new AbortController();
+    const signal = anySignal(init.signal, own.signal);
+    const b = begin(context, { ...init, ...(signal ? { signal } : {}) }, name, limits);
+    const caller = publicCaller(b.ctx.caller);
+    inflight.set(b.ctx.runId, { controller: own, agent: name, ...(caller ? { caller } : {}) });
+    waiting.set(b.ctx.runId, undefined);
+    const close = () => { inflight.delete(b.ctx.runId); waiting.delete(b.ctx.runId); };
+    return { b, close };
+  };
+
+  /** One run, fresh or resumed: bounds, span, the waiting record, the session log. The checkpoint never leaves. */
+  const execute = (init: Partial<CallContext>, input: RunInput, call: (ctx: CallContext) => Promise<RunResult>): Promise<RunResult> => {
+    const { b, close } = open(init);
+    const { ctx } = b;
+    return stack.telemetry.span(SPAN.run, { [ATTR.layer]: 'harness', [ATTR.name]: name, [ATTR.runId]: ctx.runId, ...boundsAttrs(b) }, async (span) => {
+      let result: RunResult;
+      let pending: ApprovalPending | undefined;
+      try {
+        result = b.refused ? refusedRun(ctx.runId, b.refused) : withApproval(await call(ctx), waiting.get(ctx.runId));
+      } catch (err) {
+        const ended = endedBy(err, ctx.runId);
+        if (!ended) throw err;
+        result = ended;
+      } finally {
+        pending = waiting.get(ctx.runId);
+        close();
+      }
+      result = settle(result, b);
+      stopped(result);
+      await control.settle(ctx, input, result, pending);
+      const { checkpoint: _checkpoint, ...rest } = result;
+      result = boundExt(rest, extBytes, (bytes) => stack.telemetry.event(EVENT.extDropped, { [ATTR.layer]: 'harness', [ATTR.extBytes]: bytes, [ATTR.extShape]: 'RunResult' }));
+      span.setAttributes({ [ATTR.runStatus]: result.status, ...(result.reason ? { [ATTR.runReason]: String(result.reason.code) } : {}) });
+      if (state && ctx.sessionId && result.events?.length) await state.append(ctx.sessionId, result.events);
+      return result;
+    }, ctx.trace ? { parent: ctx.trace } : undefined);
+  };
+
   return {
     name,
-    async run(input: RunInput, init = {}) {
-      const b = begin(context, init, name, limits);
-      const { ctx } = b;
-      return stack.telemetry.span(SPAN.run, { [ATTR.layer]: 'harness', [ATTR.name]: name, [ATTR.runId]: ctx.runId, ...boundsAttrs(b) }, async (span) => {
-        let result: RunResult;
-        waiting.set(ctx.runId, undefined);
-        try {
-          result = b.refused ? refusedRun(ctx.runId, b.refused) : withApproval(await inner.run(input, ctx), waiting.get(ctx.runId));
-        } catch (err) {
-          const ended = endedBy(err, ctx.runId);
-          if (!ended) throw err;
-          result = ended;
-        } finally {
-          waiting.delete(ctx.runId);
-        }
-        result = settle(result, b);
-        stopped(result);
-        result = boundExt(result, extBytes, (bytes) => stack.telemetry.event(EVENT.extDropped, { [ATTR.layer]: 'harness', [ATTR.extBytes]: bytes, [ATTR.extShape]: 'RunResult' }));
-        span.setAttributes({ [ATTR.runStatus]: result.status, ...(result.reason ? { [ATTR.runReason]: String(result.reason.code) } : {}) });
-        if (state && ctx.sessionId && result.events?.length) await state.append(ctx.sessionId, result.events);
-        return result;
-      }, ctx.trace ? { parent: ctx.trace } : undefined);
-    },
+    run: (input: RunInput, init = {}) => execute(init, input, (ctx) => inner.run(input, ctx)),
     ...(inner.stream ? {
       stream: (input: RunInput, init = {}) => {
-        const b = begin(context, init, name, limits);
-        if (b.refused) return refusedStream(b.refused);
-        return settleStream(streamEnded(inner.stream!(input, b.ctx)), b, stopped);
+        const { b, close } = open(init);
+        if (b.refused) { close(); return refusedStream(b.refused); }
+        return settleStream(streamEnded(inner.stream!(input, b.ctx)), b, stopped, async (r) => {
+          const pending = waiting.get(b.ctx.runId);
+          close();
+          await control.settle(b.ctx, input, r, pending);
+        }, close);
       },
+    } : {}),
+    ...(inner.resume ? {
+      resume: (checkpoint: JsonValue, answer: ResumeAnswer, init = {}) =>
+        execute(init, 'input' in answer ? answer.input : '', (ctx) => inner.resume!(checkpoint, answer, ctx)),
     } : {}),
   };
 }
@@ -347,14 +405,27 @@ async function* refusedStream(reason: StopReason): AsyncGenerator<RunEvent> {
   yield { type: 'run.end', status: 'stopped', reason: { ...reason } };
 }
 
-/** A run's stream whose final `run.end` is settled like a run's result (see `settle`). */
-async function* settleStream(events: AsyncIterable<RunEvent>, b: Begun, stopped: (r: RunResult) => void): AsyncGenerator<RunEvent> {
-  for await (const e of events) {
-    if (e.type !== 'run.end') { yield e; continue; }
-    const end = e as Extract<RunEvent, { type: 'run.end' }>;
-    const r = settle({ runId: b.ctx.runId, status: end.status, output: '', ...(end.reason ? { reason: end.reason } : {}), ...(end.usage ? { usage: end.usage } : {}), ...(end.costUsd !== undefined ? { costUsd: end.costUsd } : {}) }, b);
-    stopped(r);
-    yield { ...end, status: r.status, ...(r.reason ? { reason: r.reason } : {}), ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
+/**
+ * A run's stream whose final `run.end` is settled like a run's result (see `settle`): `ended` records how it ended
+ * (the waiting record) before the event is passed on, without its checkpoint; `close` runs however the stream stops.
+ */
+async function* settleStream(
+  events: AsyncIterable<RunEvent>, b: Begun, stopped: (r: RunResult) => void, ended: (r: RunResult) => Promise<void>, close: () => void,
+): AsyncGenerator<RunEvent> {
+  try {
+    for await (const e of events) {
+      if (e.type !== 'run.end') { yield e; continue; }
+      const { checkpoint, ...end } = e as Extract<RunEvent, { type: 'run.end' }>;
+      const r = settle({
+        runId: b.ctx.runId, status: end.status, output: '', ...(end.reason ? { reason: end.reason } : {}), ...(end.usage ? { usage: end.usage } : {}),
+        ...(end.costUsd !== undefined ? { costUsd: end.costUsd } : {}), ...(checkpoint !== undefined ? { checkpoint } : {}),
+      }, b);
+      stopped(r);
+      await ended(r);
+      yield { ...end, status: r.status, ...(r.reason ? { reason: r.reason } : {}), ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
+    }
+  } finally {
+    close();
   }
 }
 

@@ -20,7 +20,10 @@
       "description": "Cost of the run in US dollars, when known: model prices, or reported by a remote agent."
     },
     "events": { "type": "array", "items": { "$ref": "run-event.json" } },
-    "ext": { "$ref": "common.json#/$defs/Ext" }
+    "ext": { "$ref": "common.json#/$defs/Ext" },
+    "checkpoint": {
+      "description": "What the runtime needs to continue a waiting run with RunnableAgent.resume (since RuntimePort 1.3.0): JSON, opaque to the core. Present only on a waiting result; the host keeps it and removes it before the result leaves the stack."
+    }
   },
   "additionalProperties": false,
   "if": { "required": ["status"], "properties": { "status": { "enum": ["failed", "stopped", "waiting"] } } },

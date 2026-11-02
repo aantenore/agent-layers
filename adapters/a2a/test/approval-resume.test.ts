@@ -106,3 +106,52 @@ test('a denial is refused in later runs of the session', async () => {
   assert.match(res.text, /Denied: approval denied: not eligible/);
   assert.ok(!refunds.includes('D4'));
 });
+
+/** A send that names the task it continues. */
+async function follow(taskId: string, text: string, contextId: string, token = 'dev-token') {
+  const res = await fetch(`${gw.url}/a2a/assistant`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++n, method: 'SendMessage', params: { message: { messageId: `m-${n}`, role: 'ROLE_USER', contextId, taskId, parts: [{ text }] } } }),
+  });
+  return (await res.json()) as { result?: { task: { id: string; status: { state: string }; artifacts?: { parts: { text: string }[] }[] } }; error?: { code: number } };
+}
+
+/** The id of the task a send created, read back from the server. */
+async function sendTask(text: string, contextId: string) {
+  const res = await fetch(`${gw.url}/a2a/assistant`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer dev-token', 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++n, method: 'SendMessage', params: { message: { messageId: `m-${n}`, role: 'ROLE_USER', contextId, parts: [{ text }] } } }),
+  });
+  return ((await res.json()) as { result: { task: { id: string; status: { state: string } } } }).result.task;
+}
+
+test('a follow-up that names the input-required task continues the same run once the approval is decided', async () => {
+  const task = await sendTask('refund E5', 'ctx-5');
+  assert.equal(task.status.state, 'TASK_STATE_INPUT_REQUIRED');
+  const still = await follow(task.id, 'go on', 'ctx-5');
+  assert.equal(still.result!.task.status.state, 'TASK_STATE_INPUT_REQUIRED', 'the approval is still pending');
+  assert.ok(!refunds.includes('E5'));
+  assert.equal((await follow(task.id, 'go on', 'ctx-5', 'other-token')).error?.code, -32001, 'another caller\'s task is unknown');
+  await stack.ports.approval!.decide(pending().at(-1)!.id, { approved: true, by: 'reviewer' });
+  const done = await follow(task.id, 'go on', 'ctx-5');
+  assert.equal(done.result!.task.id, task.id, 'the same task');
+  assert.equal(done.result!.task.status.state, 'TASK_STATE_COMPLETED');
+  assert.equal(refunds.filter((r) => r === 'E5').length, 1);
+  assert.equal((await follow(task.id, 'again', 'ctx-5')).error?.code, -32602, 'a completed task does not take follow-ups');
+});
+
+test('CancelTask on an input-required task cancels the run in the stack and withdraws its approval', async () => {
+  const task = await sendTask('refund F6', 'ctx-6');
+  const approval = pending().at(-1)!;
+  const res = await fetch(`${gw.url}/a2a/assistant`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer dev-token', 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++n, method: 'CancelTask', params: { id: task.id } }),
+  });
+  const body = (await res.json()) as { result: { status: { state: string } } };
+  assert.equal(body.result.status.state, 'TASK_STATE_CANCELED');
+  assert.equal((await stack.ports.approval!.get(approval.id))!.status, 'cancelled');
+  await assert.rejects(stack.resume(task.id, { input: 'go' }, { caller: await stack.verify('dev-token') }), /cancelled/);
+});

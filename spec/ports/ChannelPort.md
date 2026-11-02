@@ -1,6 +1,6 @@
 # ChannelPort
 
-Layer: `interface` (L8 Interfaces, channels & triggers) · Version: 1.1.0 · Conformance: `checkChannel`
+Layer: `interface` (L8 Interfaces, channels & triggers) · Version: 1.2.0 · Conformance: `checkChannel`
 
 ## Purpose
 
@@ -27,6 +27,8 @@ one address, with authentication, limits and access logs in one place.
 - `model?() → ModelPort` — the stack's governed model: guards, cache, router and telemetry, without knowledge injection. Absent when no model is configured.
 - `tools?() → ToolPort` — the stack's governed tools (policy, approval, authorization, guards, credentials bound to the caller), with the knowledge sources as read-only tools.
 - `ownerDigest?(owner: String) → String` — the digest of a session owner, keyed with the stack's `sessions.secret`. A channel that takes a session from its client builds the session id with `inboundSessionId(channel, caller, value, host.ownerDigest)`: scoped to the verified caller, none for an anonymous request.
+- `resume?(runId: String, answer: ResumeAnswer, ctx?: partial CallContext) → RunResult` — continue a run that ended `waiting`, as `ctx.caller` (since 1.2.0; see [RuntimePort](RuntimePort.md#resume)). Rejects with `RunRefused` (`not_found`, `forbidden`, `conflict`, `invalid`).
+- `cancel?(runId: String, opts?: {by?: Caller, reason?: String, signal?: Signal}) → {runId, outcome: "aborted" | "cancelled"}` — abort a run in flight in this process or withdraw a waiting one (since 1.2.0).
 
 `InboundMount`:
 
@@ -100,6 +102,7 @@ The channel moves the shapes of the runtime: input in, [RunResult](../schemas/ru
 
 ## Version history
 
+- 1.2.0 — optional `ChannelHost.resume(runId, answer, ctx)` and `cancel(runId, {by, reason})` over `Stack.resume` and `Stack.cancel` ([0003](../../docs/decisions/0003-run-resume.md)): the `a2a` channel maps a follow-up message on an `input-required` task to `resume` (input) and CancelTask to `cancel`
 - 1.1.0 — run bounds ([0002](../../docs/decisions/0002-delegation-bounds.md)): `InboundContext.delegation` (the gateway's `Agent-Bounds` and `Agent-Lineage` headers), passed on as `CallContext.delegation`; a channel whose protocol carries bounds (A2A bounds extension, MCP `_meta`) validates them and passes the tighter of the two; conformance checks bounds with a `sendBounds` fixture
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `InboundContext.caller` (was `identity`); `trace` copied unchanged; `ChannelHost.verify` returns a `Caller`; the host takes and returns language shapes
 - 0.1.0 — initial

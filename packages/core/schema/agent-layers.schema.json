@@ -1242,6 +1242,22 @@
             }
           },
           "additionalProperties": false
+        },
+        "runs": {
+          "type": "object",
+          "description": "HTTP routes to resume and cancel runs; off unless enabled. Every request is authenticated and authorized (actions resume and cancel, target kind run).",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Mount the routes (default false)."
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/[A-Za-z0-9._~/-]*[A-Za-z0-9._~-]$",
+              "description": "Base path (default /runs)."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -1397,6 +1413,38 @@
               ],
               "default": "unbounded",
               "description": "Spend one run may incur, delegated runs included (priced with pipeline.pricing) (usd); default unbounded; \"unbounded\" disables it."
+            },
+            "resumeTtlMs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1000
+                },
+                {
+                  "const": "unbounded"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 604800000,
+              "description": "How long a waiting run stays resumable (ms); default 604800000; \"unbounded\" disables it."
+            },
+            "maxWaitingInMemory": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 1000,
+              "description": "Waiting runs kept in memory when no store is configured; the oldest is dropped first; default 1000."
             }
           },
           "additionalProperties": false
@@ -1769,7 +1817,7 @@
         },
         "action": {
           "type": "object",
-          "description": "AccessQuestion.action, policy rules. Core values: call, decide, list. Extensible: like.",
+          "description": "AccessQuestion.action, policy rules. Core values: call, decide, list, resume, cancel. Extensible: like.",
           "properties": {
             "add": {
               "type": "object",
@@ -1787,7 +1835,9 @@
                     "enum": [
                       "call",
                       "decide",
-                      "list"
+                      "list",
+                      "resume",
+                      "cancel"
                     ]
                   }
                 },

@@ -2,6 +2,38 @@
 
 Every package under `packages/*` and `adapters/*` is released with the same version. See [RELEASING.md](RELEASING.md).
 
+## 0.4.0 - unreleased
+
+### Added
+
+- Resume and cancel of runs ([0003](docs/decisions/0003-run-resume.md)). `Stack.resume(runId, answer, ctx?)` continues
+  a run that ended `waiting`, with `{ approval: { id, approved, reason? } }` or `{ input }`, and keeps its id, session
+  and caller; `Stack.cancel(runId, { by, reason })` aborts a run in flight in this process or withdraws a waiting run
+  and its pending approval. When a run ends `waiting` the host keeps its input, caller (never the credential), session,
+  the call that waits and the runtime's checkpoint, in the stack's store when configured, else in memory. Only the
+  caller that started the run may act on it, unless the authorization port allows `decide`; an approval answer is
+  always authorized like the gateway's `decide`. Refusals are `RunRefused` (`@agent-layers/core`).
+- RuntimePort 1.3.0: optional `RunnableAgent.resume(checkpoint, answer, ctx)` and `RunResult.checkpoint` (also on
+  `run.end`), removed by the host before a result leaves the stack. A runtime without `resume` is run again from its
+  input (not deterministic with a real model). Conformance checks resume for runtimes that declare it
+  ([RuntimePort](spec/ports/RuntimePort.md#resume)).
+- `basic-runtime` and `reinloop` implement `resume`: the run continues from its conversation (`basic-runtime`) or its
+  event log (`reinloop`), runs exactly the call that waited, adds an input answer after its result and goes on. The
+  `a2a` runtime continues the remote task with a follow-up message.
+- ChannelPort 1.2.0: optional `ChannelHost.resume` and `ChannelHost.cancel`. The `a2a` channel continues the run of an
+  `input-required` task when a message names it (`taskId`), and CancelTask cancels the run in the stack.
+- AuthorizationPort 1.3.0: core actions `resume` and `cancel`, target kind `run`.
+- Gateway: `POST /runs/<id>/resume` and `POST /runs/<id>/cancel`, off unless `gateway.runs.enabled`, authenticated and
+  authorized with actions `resume` and `cancel` on target kind `run` ([docs/gateway.md](docs/gateway.md#runs)).
+- Limits `limits.run.resumeTtlMs` (604800000 ms) and `limits.run.maxWaitingInMemory` (1000); telemetry events
+  `agent.run.resumed`, `agent.run.cancelled`, `agent.run.keep_failed`, `agent.run.control_failed`.
+- Readiness warns on the production tier when an approval adapter is configured without a store.
+
+### Changed
+
+- `ApprovalPending` carries the arguments of the call that waits (`args`), kept by the host to resume the run and
+  never written to the result.
+
 ## 0.3.0 - unreleased
 
 Every package moves to 0.3.0 together: adapters of this release use core exports that 0.2.0 does not have

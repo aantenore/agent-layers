@@ -7,11 +7,13 @@ import {
   type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
 import { approvalRoutes } from './approvals.ts';
+import { runRoutes } from './runs.ts';
 import { BoundsHeaderError, delegationOf } from './bounds.ts';
 import { BodyTooLarge, errorResponse, readBody, toRequest, writeResponse } from './http.ts';
 
 export { BodyTooLarge, errorResponse } from './http.ts';
 export { DEFAULT_APPROVALS_PATH, approvalRoutes, approvalView, decidedBy } from './approvals.ts';
+export { DEFAULT_RUNS_PATH, runRoutes, runView } from './runs.ts';
 export { BoundsHeaderError, delegationOf, parseAgentBounds, parseAgentLineage } from './bounds.ts';
 
 /** A channel or trigger instance of the stack that the gateway mounts. Instances listed in `stack.ports.triggers` are triggers. */
@@ -186,15 +188,19 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
         mounted.push({ route, instance: name });
       }
     }
-    // Approval routes: off unless configured; authenticated like every route, then authorized per request.
-    const approvals = opts.approvals;
-    if (approvals?.enabled) {
+    // Approval and run routes: off unless configured; authenticated like every route, then authorized per request.
+    const control = [
+      { key: 'approvals', on: opts.approvals, routes: approvalRoutes },
+      { key: 'runs', on: opts.runs, routes: runRoutes },
+    ] as const;
+    for (const { key, on, routes } of control) {
+      if (!on?.enabled) continue;
       const inbound = [...mounted];
-      for (const route of approvalRoutes(stack, approvals.path ? { path: approvals.path } : {})) {
+      for (const route of routes(stack, on.path ? { path: on.path } : {})) {
         const at = route.path.replace(/\/\*$/, '');
         const clash = inbound.find((m) => routeMatches(m.route, at) || routeMatches(route, m.route.path.replace(/\/\*$/, '')));
-        if (RESERVED.some((r) => routeMatches(route, r)) || clash) throw new ConfigError([`gateway.approvals: ${route.path} clashes with ${clash ? `"${clash.instance}"` : 'a reserved path'}`]);
-        mounted.push({ route, instance: 'approvals' });
+        if (RESERVED.some((r) => routeMatches(route, r)) || clash) throw new ConfigError([`gateway.${key}: ${route.path} clashes with ${clash ? `"${clash.instance}"` : 'a reserved path'}`]);
+        mounted.push({ route, instance: key });
       }
     }
   } catch (err) {

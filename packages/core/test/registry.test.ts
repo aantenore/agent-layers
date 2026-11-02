@@ -8,8 +8,8 @@ const ctx = { name: 'x', env: {}, cwd: process.cwd(), telemetry: noopTelemetry }
 test('PORT_VERSIONS covers every port and each port names its layer', () => {
   assert.equal(Object.keys(PORT_VERSIONS).length, 22);
   const bumped: Record<string, string> = {
-    ApprovalPort: '1.2.0', RuntimePort: '1.2.0', TriggerPort: '1.1.0', ModelPort: '1.1.0', RouterPort: '1.1.0', ToolPort: '1.1.0',
-    KnowledgePort: '1.1.0', IdentityPort: '1.1.0', AuthorizationPort: '1.2.0', ChannelPort: '1.1.0',
+    ApprovalPort: '1.2.0', RuntimePort: '1.3.0', TriggerPort: '1.1.0', ModelPort: '1.1.0', RouterPort: '1.1.0', ToolPort: '1.1.0',
+    KnowledgePort: '1.1.0', IdentityPort: '1.1.0', AuthorizationPort: '1.3.0', ChannelPort: '1.2.0',
   };
   for (const p of Object.values(PORTS)) assert.equal(PORT_VERSIONS[p.port], bumped[p.port] ?? '1.0.0', p.port);
   assert.equal(PORTS.TriggerPort.layer, 'interface');
@@ -39,7 +39,7 @@ test('compatibleVersion: same major, adapter minor no newer than the core; versi
   for (const [port, version] of Object.entries(PORT_VERSIONS)) assert.equal(compatibleVersion(version, version), true, port);
   const base = { port: 'RuntimePort', layer: 'harness', name: 'rt', direction: 'outbound', maps: { technology: 'x' }, tiers: ['prototype'], create: () => ({}) } as const;
   assert.doesNotThrow(() => defineAdapter({ ...base, portVersion: '1.0.0' } as never));
-  assert.throws(() => defineAdapter({ ...base, portVersion: '1.3.0' } as never), /implements RuntimePort 1\.3\.0, core has 1\.2\.0/);
+  assert.throws(() => defineAdapter({ ...base, portVersion: '1.4.0' } as never), /implements RuntimePort 1\.4\.0, core has 1\.3\.0/);
   assert.equal(versionAtLeast('1.1.0', '1.1.0'), true);
   assert.equal(versionAtLeast('1.10.0', '1.9.0'), true);
   assert.equal(versionAtLeast('1.0.9', '1.1.0'), false);

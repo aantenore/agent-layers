@@ -158,6 +158,15 @@ const gateway: JsonSchema = {
       },
       additionalProperties: false,
     },
+    runs: {
+      type: 'object',
+      description: 'HTTP routes to resume and cancel runs; off unless enabled. Every request is authenticated and authorized (actions resume and cancel, target kind run).',
+      properties: {
+        enabled: { type: 'boolean', description: 'Mount the routes (default false).' },
+        path: { type: 'string', pattern: '^/[A-Za-z0-9._~/-]*[A-Za-z0-9._~-]$', description: 'Base path (default /runs).' },
+      },
+      additionalProperties: false,
+    },
   },
   additionalProperties: false,
 };
@@ -194,6 +203,8 @@ const limits: JsonSchema = {
         maxHops: lim(RUN_LIMITS.maxHops, 'Agent-to-agent calls a chain may make; 0 refuses every delegated run'),
         maxTokens: lim(RUN_LIMITS.maxTokens, 'Tokens one run may spend, delegated runs included'),
         maxCostUsd: lim(RUN_LIMITS.maxCostUsd, 'Spend one run may incur, delegated runs included (priced with pipeline.pricing)'),
+        resumeTtlMs: lim(RUN_LIMITS.resumeTtlMs, 'How long a waiting run stays resumable'),
+        maxWaitingInMemory: lim(RUN_LIMITS.maxWaitingInMemory, 'Waiting runs kept in memory when no store is configured; the oldest is dropped first'),
       },
       additionalProperties: false,
     },

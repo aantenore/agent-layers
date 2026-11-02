@@ -84,6 +84,8 @@ for every caller. On a production profile with knowledge sources and a cache, `a
 | `limits.run.maxHops` | `4` | 0–∞ or unbounded | 0–10 | fail if unbounded; warn outside safe range | Agent-to-agent calls a chain may make before a run is refused (`hop_limit`); stops loops such as A → B → A. `0` refuses every delegated run. |
 | `limits.run.maxTokens` | `unbounded` | 1–∞ or unbounded | — | warn if unbounded | Tokens (input plus output) one run may spend, delegated runs included; the model pipeline refuses the next call once they are spent (`limit`). |
 | `limits.run.maxCostUsd` | `unbounded` | 0–∞ or unbounded | — | warn if unbounded | Spend in US dollars one run may incur, delegated runs included, priced with `pipeline.pricing` and with what remote agents report (`limit`). |
+| `limits.run.resumeTtlMs` | `604800000` ms | 1000–∞ or unbounded | — | warn if unbounded | How long a run that ended `waiting` stays resumable (`Stack.resume`); the host keeps it in the store with this expiry, or in memory. |
+| `limits.run.maxWaitingInMemory` | `1000` | 1–1000000 | — | — | Waiting runs kept in memory when no store is configured; the oldest is dropped first, so a prototype cannot grow without end. |
 | `limits.delegation.marginMs` | `1000` ms | 0–60000 | — | — | Time kept back on each call to another agent, so the answer can travel back before this run's deadline. |
 | `limits.delegation.minRemainingMs` | `1000` ms | 0–60000 | — | — | A run, or a call to another agent, does not start with less time than this (capped by `limits.run.timeoutMs`). |
 

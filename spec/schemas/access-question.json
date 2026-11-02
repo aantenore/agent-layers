@@ -26,7 +26,7 @@
       "type": "object",
       "required": ["kind", "id", "layer", "risk", "agent"],
       "properties": {
-        "kind": { "type": "string", "description": "tool for a tool call, approval for an approval read or decided through the gateway." },
+        "kind": { "type": "string", "description": "tool for a tool call, approval for an approval read or decided, run for a run resumed or cancelled." },
         "id": { "type": "string" },
         "layer": { "$ref": "common.json#/$defs/Layer" },
         "risk": { "$ref": "common.json#/$defs/Risk" },

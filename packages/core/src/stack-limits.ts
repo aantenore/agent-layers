@@ -41,6 +41,8 @@ export const RUN_LIMITS = defineLimits({
   maxHops: { path: 'limits.run.maxHops', default: 4, unit: 'count', min: 0, unbounded: 'fail', safe: { max: 10 } },
   maxTokens: { path: 'limits.run.maxTokens', default: 'unbounded', unit: 'tokens', min: 1, unbounded: 'warn' },
   maxCostUsd: { path: 'limits.run.maxCostUsd', default: 'unbounded', unit: 'usd', min: 0, integer: false, unbounded: 'warn' },
+  resumeTtlMs: { path: 'limits.run.resumeTtlMs', default: 604_800_000, unit: 'ms', min: 1000, unbounded: 'warn' },
+  maxWaitingInMemory: { path: 'limits.run.maxWaitingInMemory', default: 1000, unit: 'count', min: 1, max: 1_000_000 },
 });
 
 /** How a run passes its bounds on to another agent (`limits.delegation` block). */

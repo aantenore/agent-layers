@@ -54,13 +54,13 @@ export interface CredentialPort extends PortBase {
 
 /**
  * Actions an access question asks about. Core values: `call` (a tool), `decide` and `list` (approvals, since
- * AuthorizationPort 1.2.0); config may add values `like` one of them.
+ * AuthorizationPort 1.2.0), `resume` and `cancel` (runs, since 1.3.0); config may add values `like` one of them.
  */
-export type Action = 'call' | 'decide' | 'list' | (string & {});
+export type Action = 'call' | 'decide' | 'list' | 'resume' | 'cancel' | (string & {});
 
 /** What is being accessed. */
 export interface AccessTarget {
-  /** `tool` for a tool call, `approval` for an approval read or decided through the gateway. */
+  /** `tool` for a tool call, `approval` for an approval read or decided, `run` for a run resumed or cancelled. */
   kind: string;
   id: string;
   layer: Layer;
