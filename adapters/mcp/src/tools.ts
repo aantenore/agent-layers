@@ -23,6 +23,8 @@ export interface McpToolsOptions extends McpServerOptions {
   toolsTtlMs?: number;
   /** Pages of `tools/list` read before the server is refused (default 100). */
   maxToolPages?: LimitValue;
+  /** Send the run's bounds in `params._meta` of every `tools/call` (default true). False for a server that refuses unknown `_meta` keys. */
+  bounds?: boolean;
 }
 
 export interface McpDeps {
@@ -122,7 +124,7 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
       // A server may echo request headers back; the token and static header secrets must not reach the model.
       const forms = token ? secretForms([token, ...staticSecrets(cfg.headers)], minSecretChars) : staticForms;
       // The bounds of the run go with every call; a tool server is mostly not an agent, so nothing is refused or reserved here.
-      const bounds = outboundBounds(ctx, { budget: false, refuse: false })?.bounds;
+      const bounds = cfg.bounds === false ? undefined : outboundBounds(ctx, { budget: false, refuse: false })?.bounds;
       try {
         const res = await session.run((c) => c.callTool(entry.mcpName, args, ctx.signal, headers, bounds ? { [BOUNDS_META]: bounds } : undefined), ctx.credentials);
         let text = redact(res.text, forms);

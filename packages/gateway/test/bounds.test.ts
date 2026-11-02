@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compose, defineAdapter, PORT_VERSIONS, resolveProfile, type ChannelPort } from '@agent-layers/core';
+import { compose, defineAdapter, formatAgentBounds, formatAgentLineage, PORT_VERSIONS, resolveProfile, SF_MAX_INTEGER, type ChannelPort } from '@agent-layers/core';
 import { identityAdapter } from '@agent-layers/adapter-static-identity';
 import { BoundsHeaderError, delegationOf, parseAgentBounds, parseAgentLineage, serveStack } from '../src/index.ts';
 
@@ -14,6 +14,18 @@ test('Agent-Bounds: required members, optional tokens and cost, whitespace, inte
   assert.equal(parseAgentBounds('remaining-ms=1, hops=0, max-hops=3, cost-usd=2', MAX)?.costUsd, 2);
   assert.deepEqual(parseAgentBounds('remaining-ms=1, hops=0, max-hops=3, extra="x"', MAX), { remainingMs: 1, hops: 0, maxHops: 3 }, 'unknown members are ignored');
   assert.equal(parseAgentBounds(undefined, MAX), undefined);
+});
+
+test('the core serializer and the gateway parser agree: unbounded max hops, long costs, quoted lineage', () => {
+  const sent = { remainingMs: 45000.7, hops: 2, maxHops: Number.MAX_SAFE_INTEGER, tokens: 1e20, costUsd: 0.123456 };
+  const header = formatAgentBounds(sent);
+  assert.equal(header, `remaining-ms=45000, hops=2, max-hops=${SF_MAX_INTEGER}, tokens=${SF_MAX_INTEGER}, cost-usd=0.123`);
+  assert.deepEqual(parseAgentBounds(header, MAX), { remainingMs: 45000, hops: 2, maxHops: SF_MAX_INTEGER, tokens: SF_MAX_INTEGER, costUsd: 0.123 });
+  assert.equal(parseAgentBounds(formatAgentBounds({ remainingMs: 1, hops: 0, maxHops: 1, costUsd: 0.0009 }), MAX)?.costUsd, 0, 'rounded down, never up');
+  assert.equal(parseAgentBounds(formatAgentBounds({ remainingMs: 1, hops: 0, maxHops: 1, costUsd: 2 }), MAX)?.costUsd, 2);
+  const lineage = formatAgentLineage({ rootRunId: 'run-"a"\\1', parentRunId: 'p' })!;
+  assert.deepEqual(parseAgentLineage(lineage, MAX), { rootRunId: 'run-"a"\\1', parentRunId: 'p' });
+  assert.equal(formatAgentLineage({}), undefined);
 });
 
 test('Agent-Bounds: malformed or invalid values are refused', () => {

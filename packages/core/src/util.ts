@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-/** Glob with `*` (any run of characters) and `?` (one character), anchored. */
+/** Glob with `*` (any run of characters, line breaks included) and `?` (one character), anchored. */
 export function globToRegExp(glob: string): RegExp {
   const body = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
-  return new RegExp(`^${body}$`);
+  return new RegExp(`^${body}$`, 's');
 }
 
 export function matchesAny(globs: readonly string[], name: string): boolean {

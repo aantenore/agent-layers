@@ -67,6 +67,7 @@ const policyRule: JsonSchema = {
         actor: { type: 'array', items: { type: 'string' }, description: 'Globs on the id of the current actor (the agent presenting the credential); matches only a delegated caller.' },
         actors: { type: 'array', items: { type: 'string' }, description: 'Globs on the id of any actor of the delegation chain, prior ones included.' },
         delegated: { type: 'boolean', description: 'true: a caller with at least one actor; false: one with none.' },
+        issuer: { type: 'array', items: { type: 'string' }, description: 'Globs on the issuer that vouches for an actor (Actor.issuer): with actor or actors, an actor matches only when its issuer matches too. Actor ids are unique per issuer only.' },
       },
       additionalProperties: false,
     },

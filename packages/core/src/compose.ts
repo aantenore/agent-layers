@@ -1,6 +1,8 @@
 import { AdapterRegistry, importAdapters, packageLoader, type AnyAdapter } from './adapter.ts';
 import { agentSpec, configuredAdapters, type AdapterRef, type ConfiguredAdapter, type ResolvedConfig } from './config.ts';
-import { BOUNDS_STOP, deadlineSignal, runLimits, startRun, type RunLedger, type RunLimits } from './bounds.ts';
+import {
+  BOUNDS_STOP, deadlineSignal, ledgerOf, outboundBounds, runLimits, startRun, tighterDelegation, type DeadlineTimer, type Reservation, type RunLedger, type RunLimits,
+} from './bounds.ts';
 import { AdapterError, AgentLayersError, ApprovalPending, BoundsExceeded, ConfigError, errorMessage, GuardrailBlocked, MissingLayerError, runEndOf } from './errors.ts';
 import { boundExt, SDK_NAMESPACE, extNamespace, withExt } from './ext.ts';
 import { anySignal, limitValue } from './limits.ts';
@@ -10,7 +12,7 @@ import {
 import { ownerDigest } from './inbound.ts';
 import { ATTR, EVENT, METRIC, SPAN } from './names.ts';
 import { PORTS, versionAtLeast } from './ports/catalog.ts';
-import type { CallContext } from './ports/base.ts';
+import type { CallContext, Delegation } from './ports/base.ts';
 import { publicCaller } from './ports/identity.ts';
 import type { ChannelHandle } from './ports/channel.ts';
 import type { GuardPort } from './ports/guard.ts';
@@ -18,7 +20,7 @@ import type { ModelPort } from './ports/model.ts';
 import type { AgentSpec, ResumeAnswer, RunEvent, RunInput, RunnableAgent, RunResult, StopReason } from './ports/runtime.ts';
 import type { JsonValue } from './ports/store.ts';
 import type { TelemetryPort } from './ports/telemetry.ts';
-import type { ToolPort } from './ports/tool.ts';
+import type { ToolPort, ToolResult } from './ports/tool.ts';
 import { governedTools } from './pipeline/governed-tools.ts';
 import { guardedModel } from './pipeline/guarded-model.ts';
 import { knowledgeInjector } from './pipeline/knowledge.ts';
@@ -107,6 +109,9 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
   }
   const digest = ownerDigest(sessionSecret);
 
+  const limits = runLimits(config.limits);
+  const context = (init: Partial<CallContext> & { agent: string }): CallContext => ({ runId: newRunId(), telemetry, ...init });
+
   const k = config.pipeline.knowledge ?? {};
   const mode = k.mode ?? 'system';
   const toolSources: Record<string, ToolPort> = { ...ports.tools };
@@ -155,17 +160,18 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
   };
 
   // Tools for hosted channels: the governed tools plus the knowledge sources as read-only tools. A call waiting for an
-  // approval is a pending result here (`ext["sdk.approval"]`), which the channel passes on in its protocol.
+  // approval is a pending result here (`ext["sdk.approval"]`), which the channel passes on in its protocol. A call that
+  // carries a calling agent's bounds runs under them (see inboundBoundedTools).
   let hostedTools: ToolPort | undefined;
   const toolsForHost = (): ToolPort => {
     if (hostedTools) return hostedTools;
     const knowledgeAsTools = mode !== 'tools' && Object.keys(ports.knowledge).length && !ports.tools.knowledge;
-    hostedTools = governedTools(knowledgeAsTools ? { ...ports.tools, knowledge: knowledgeTools(ports.knowledge, toolOpts) } : toolSources, governance);
+    const governed = governedTools(knowledgeAsTools ? { ...ports.tools, knowledge: knowledgeTools(ports.knowledge, toolOpts) } : toolSources, governance);
+    hostedTools = inboundBoundedTools(governed, context, limits, telemetry);
     return hostedTools;
   };
 
   const bound = new Map<string, Promise<RunnableAgent>>();
-  const limits = runLimits(config.limits);
   // Runs that end waiting are kept to be resumed: in the store when there is one, else in this process (prototype).
   const resumeTtlMs = limitValue(RUN_LIMITS.resumeTtlMs, config.limits.run?.resumeTtlMs);
   const book = ports.store
@@ -177,7 +183,6 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
     ...(ports.approval ? { approval: ports.approval } : {}), ...(ports.authorization ? { authorization: ports.authorization } : {}),
     agent: (name) => stack.agent(name),
   });
-  const context = (init: Partial<CallContext> & { agent: string }): CallContext => ({ runId: newRunId(), telemetry, ...init });
 
   const stack: Stack = {
     config, registry, ports, telemetry, tools, vocabularies: language.vocab, warnings: language.warnings,
@@ -264,37 +269,83 @@ function withApproval(result: RunResult, pending: ApprovalPending | undefined): 
   return { ...result, status: 'waiting', reason: result.reason ?? pending.stopReason, ext: withExt(result.ext, pending.approvalExt)! };
 }
 
-/** A run's context with its bounds, and the ledger behind them (see `startRun`). */
-interface Begun { ctx: CallContext; ledger: RunLedger; refused?: StopReason; own?: AbortSignal }
+/**
+ * A run's context with its bounds, and the ledger behind them (see `startRun`); the timer of its deadline, and the
+ * reservation it took from the run that called it in the same process.
+ */
+interface Begun { ctx: CallContext; ledger: RunLedger; refused?: StopReason; own?: AbortSignal; deadline?: DeadlineTimer; parent?: Reservation }
 
 /**
  * Starts the bounds of a run: computes them from the stack's limits and what the caller sent (`delegation`, removed
- * from the run's context), arms an abort at the deadline, merged with the caller's signal.
+ * from the run's context), arms an abort at the deadline, merged with the caller's signal. A run started with the
+ * context of a run in progress (an agent that calls another one in the same process) is that run's delegate: its
+ * bounds derive from what the parent has left, as `outboundBounds` would send them (hops plus one, a reservation of
+ * the budget, the parent as its lineage), tightened by any delegation passed along, and it gets a run id of its own.
  */
 function begin(context: Stack['context'], init: Partial<CallContext>, name: string, limits: RunLimits): Begun {
-  const { delegation: _sent, bounds: _parent, ...base } = context({ ...init, agent: name });
-  const start = startRun({ runId: base.runId, ...(base.caller ? { caller: base.caller } : {}), ...(init.delegation ? { delegation: init.delegation } : {}) }, limits);
+  const parentLedger = ledgerOf(init);
+  let parent: Reservation | undefined;
+  let refusedByParent: StopReason | undefined;
+  let delegation: Delegation | undefined = init.delegation;
+  let effective = limits;
+  if (parentLedger) {
+    try {
+      const out = outboundBounds({ runId: parentLedger.runId, agent: name, bounds: init.bounds!, ...(parentLedger.lineage ? { lineage: parentLedger.lineage } : {}) }, { refuse: false });
+      if (out) {
+        parent = out.reservation;
+        delegation = tighterDelegation(out.bounds, init.delegation);
+      }
+    } catch (err) {
+      if (!(err instanceof BoundsExceeded)) throw err;
+      refusedByParent = err.stopReason;
+    }
+    // The parent's bounds are the stack's own, whatever `limits.delegation.inbound` says about outside callers.
+    effective = { ...limits, inbound: 'tighten' };
+  }
+  const { delegation: _sent, bounds: _parent, ...rest } = init;
+  // The parent's run id is the parent's: the delegate gets its own.
+  const own = parentLedger && rest.runId === parentLedger.runId ? (({ runId: _id, ...r }) => r)(rest) : rest;
+  const base = context({ ...own, agent: name });
+  const start = startRun({ runId: base.runId, ...(base.caller ? { caller: base.caller } : {}), ...(delegation ? { delegation } : {}) }, effective);
   const { ledger } = start;
-  const signal = anySignal(base.signal, deadlineSignal(ledger));
+  const refused = refusedByParent ?? start.refused;
+  if (refusedByParent) ledger.stop = refusedByParent;
+  const deadline = refused ? undefined : deadlineSignal(ledger);
+  const signal = anySignal(base.signal, deadline?.signal);
   const lineage = ledger.lineage ?? base.lineage;
   const ctx: CallContext = { ...base, bounds: ledger.view, ...(lineage ? { lineage } : {}), ...(signal ? { signal } : {}) };
-  return { ctx, ledger, ...(start.refused ? { refused: start.refused } : {}), ...(base.signal ? { own: base.signal } : {}) };
+  return {
+    ctx, ledger, ...(refused ? { refused } : {}), ...(base.signal ? { own: base.signal } : {}), ...(deadline ? { deadline } : {}), ...(parent ? { parent } : {}),
+  };
+}
+
+/**
+ * Ends a run's bounds: disarms its deadline and settles the parent's reservation with what the run's ledger counted (a
+ * figure it does not know keeps the whole reservation spent).
+ */
+function finish(b: Begun): void {
+  b.deadline?.clear();
+  const { ledger } = b;
+  b.parent?.settle({ ...(ledger.usageKnown ? { usage: { ...ledger.usage } } : {}), ...(ledger.costKnown ? { costUsd: ledger.spentCost } : {}) });
 }
 
 /**
  * The result as the bounds left it: a run that did not complete because of a bound (a model call refused, the deadline
  * reached while the caller was still waiting) ends `stopped` with the bound's reason. Usage and cost the runtime does
- * not report come from the ledger.
+ * not report come from the ledger, and only when every spend of the run was known: a reservation spent for a remote
+ * run that reported nothing is never a figure of the result.
  */
 function settle(result: RunResult, b: Begun): RunResult {
   let r = result;
   const { ledger } = b;
   if (r.status === 'failed' || r.status === 'stopped') {
     const code = String(r.reason?.code ?? 'error');
-    if (!ledger.stop && !b.own?.aborted && ledger.remainingMs() <= 0 && ['timeout', 'aborted', 'error'].includes(code)) ledger.stop = BOUNDS_STOP.deadline;
+    // The deadline is the cause only when its own signal fired, not when the clock merely passed it.
+    const expired = b.deadline ? b.deadline.signal.aborted : ledger.remainingMs() <= 0;
+    if (!ledger.stop && !b.own?.aborted && expired && ['timeout', 'aborted', 'error'].includes(code)) ledger.stop = BOUNDS_STOP.deadline;
     if (ledger.stop) r = { ...r, status: 'stopped', reason: { ...ledger.stop } };
   }
-  if (!r.usage && (ledger.usage.inputTokens || ledger.usage.outputTokens)) r = { ...r, usage: { ...ledger.usage } };
+  if (!r.usage && ledger.usageKnown && (ledger.usage.inputTokens || ledger.usage.outputTokens)) r = { ...r, usage: { ...ledger.usage } };
   if (r.costUsd === undefined && ledger.costKnown && ledger.spentCost > 0) r = { ...r, costUsd: ledger.spentCost };
   return r;
 }
@@ -355,7 +406,7 @@ async function bindAgent(stack: Stack, name: string, k: Binding): Promise<Runnab
   const execute = (init: Partial<CallContext>, input: RunInput, call: (ctx: CallContext) => Promise<RunResult>): Promise<RunResult> => {
     const { b, close } = open(init);
     const { ctx } = b;
-    return stack.telemetry.span(SPAN.run, { [ATTR.layer]: 'harness', [ATTR.name]: name, [ATTR.runId]: ctx.runId, ...boundsAttrs(b) }, async (span) => {
+    const run = stack.telemetry.span(SPAN.run, { [ATTR.layer]: 'harness', [ATTR.name]: name, [ATTR.runId]: ctx.runId, ...boundsAttrs(b) }, async (span) => {
       let result: RunResult;
       let pending: ApprovalPending | undefined;
       try {
@@ -377,6 +428,7 @@ async function bindAgent(stack: Stack, name: string, k: Binding): Promise<Runnab
       if (state && ctx.sessionId && result.events?.length) await state.append(ctx.sessionId, result.events);
       return result;
     }, ctx.trace ? { parent: ctx.trace } : undefined);
+    return run.finally(() => finish(b));
   };
 
   return {
@@ -385,7 +437,7 @@ async function bindAgent(stack: Stack, name: string, k: Binding): Promise<Runnab
     ...(inner.stream ? {
       stream: (input: RunInput, init = {}) => {
         const { b, close } = open(init);
-        if (b.refused) { close(); return refusedStream(b.refused); }
+        if (b.refused) { close(); return refusedStream(b, stopped); }
         return settleStream(streamEnded(inner.stream!(input, b.ctx)), b, stopped, async (r) => {
           const pending = waiting.get(b.ctx.runId);
           close();
@@ -400,9 +452,12 @@ async function bindAgent(stack: Stack, name: string, k: Binding): Promise<Runnab
   };
 }
 
-/** The stream of a run its bounds refuse: one `run.end`. */
-async function* refusedStream(reason: StopReason): AsyncGenerator<RunEvent> {
-  yield { type: 'run.end', status: 'stopped', reason: { ...reason } };
+/** The stream of a run its bounds refuse: one `run.end`, counted like a refused run. */
+async function* refusedStream(b: Begun, stopped: (r: RunResult) => void): AsyncGenerator<RunEvent> {
+  const r = refusedRun(b.ctx.runId, b.refused!);
+  stopped(r);
+  finish(b);
+  yield { type: 'run.end', status: r.status, ...(r.reason ? { reason: r.reason } : {}) };
 }
 
 /**
@@ -426,7 +481,36 @@ async function* settleStream(
     }
   } finally {
     close();
+    finish(b);
   }
+}
+
+/**
+ * Hosted tools under the bounds a calling agent sent. A call that carries `ctx.delegation` and has no run of its own
+ * (a tool call a channel received, such as MCP `tools/call`) gets a ledger like a run: the stack's limits tightened by
+ * what was sent, the deadline armed on its signal, and `ctx.bounds`, so whatever the tool calls next keeps counting
+ * hops. A call over the hop limit or with too little time left is refused (an error result) without calling the tool.
+ */
+function inboundBoundedTools(tools: ToolPort, context: Stack['context'], limits: RunLimits, telemetry: Stack['telemetry']): ToolPort {
+  return {
+    ...tools,
+    name: tools.name ?? 'tools',
+    listTools: (ctx) => tools.listTools(ctx),
+    async callTool(name, args, ctx): Promise<ToolResult> {
+      if (ctx.bounds || !ctx.delegation) return tools.callTool(name, args, ctx);
+      const b = begin(context, ctx, ctx.agent, limits);
+      try {
+        if (b.refused) {
+          const code = String(b.refused.code);
+          telemetry.metric(METRIC.boundsStops, 1, { [ATTR.layer]: 'harness', [ATTR.name]: ctx.agent, [ATTR.runReason]: code });
+          return { ok: false, text: `Stopped by the run bounds: ${code}`, ext: { 'sdk.outcome': 'error' } };
+        }
+        return await tools.callTool(name, args, b.ctx);
+      } finally {
+        finish(b);
+      }
+    },
+  };
 }
 
 /** A runtime's stream whose pending approval or guard block, thrown instead of ended, becomes its `run.end` event. */

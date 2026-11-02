@@ -231,7 +231,7 @@ The port operations are unchanged. The core emits only `agent.*` names. Standard
 | Kind | Names |
 | --- | --- |
 | Spans | `agent.run`, `agent.model.call`, `agent.cache.lookup`, `agent.router.select`, `agent.tool.call`, `agent.access.check`, `agent.guard.check`, `agent.knowledge.search` |
-| Event | `agent.knowledge.error` |
+| Event | `agent.knowledge.error`, `agent.cost.unpriced` (a model reply without a price under a cost budget) |
 | Metrics | `agent.model.tokens` (attribute `agent.tokens.kind`: `input` or `output`), `agent.tool.calls`, `agent.access.decisions`, `agent.guard.actions`, `agent.bounds.stops` (attribute `agent.run.reason`) |
 | Mandatory attribute | `agent.layer` on every span, event and metric |
 | Adapter | `agent.adapter` on core spans: the configured adapter that did the work (`reinloop`, `rule-router`), set by the stack |

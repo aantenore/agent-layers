@@ -24,9 +24,11 @@ export interface PolicyRule {
    * Delegation (`Caller.actors`): `actor` matches the id of the current actor (the agent presenting the credential) by
    * glob, and only when there is one; `actors` matches any actor of the chain, prior ones included (RFC 8693 counts
    * only the current actor for access control, so a rule asks for prior ones explicitly); `delegated: true` matches a
-   * caller with at least one actor, `false` one with none.
+   * caller with at least one actor, `false` one with none. An actor id is unique only at the issuer that vouches for it:
+   * `issuer` (globs on `Actor.issuer`) makes `actor` and `actors` match an actor only when its issuer matches too; an
+   * actor without `issuer` (vouched for by the credential's issuer, which the rule cannot see) then never matches.
    */
-  when?: { roles?: string[]; scopes?: string[]; kind?: 'user' | 'agent'; authenticated?: boolean; actor?: string[]; actors?: string[]; delegated?: boolean };
+  when?: { roles?: string[]; scopes?: string[]; kind?: 'user' | 'agent'; authenticated?: boolean; actor?: string[]; actors?: string[]; delegated?: boolean; issuer?: string[] };
 }
 
 /** What a policy rule is matched against. No `caller` means anonymous; no `action` means `call`. */
@@ -55,8 +57,10 @@ function ruleMatches(r: PolicyRule, s: PolicySubject, vocab: Vocabularies): bool
   if (w.scopes && !w.scopes.some((x) => c?.scopes?.includes(x))) return false;
   const chain = c?.actors ?? [];
   if (w.delegated !== undefined && w.delegated !== (chain.length > 0)) return false;
-  if (w.actor && !(chain.length && matchesAny(w.actor, chain[chain.length - 1]!.id))) return false;
-  if (w.actors && !chain.some((a) => matchesAny(w.actors!, a.id))) return false;
+  const vouched = (a: Actor) => !w.issuer || (typeof a.issuer === 'string' && matchesAny(w.issuer, a.issuer));
+  const current = chain[chain.length - 1];
+  if (w.actor && !(current && matchesAny(w.actor, current.id) && vouched(current))) return false;
+  if (w.actors && !chain.some((a) => matchesAny(w.actors!, a.id) && vouched(a))) return false;
   return true;
 }
 
@@ -78,8 +82,11 @@ export function accessQuestion(tool: string, spec: ToolSpec, args: Record<string
 
 /**
  * The policy subject of an access question (for policy engines that work on questions only). Only callers of kind
- * `user` or `agent` with an id count as callers (with their well-formed actors); anything else (anonymous, unknown kinds) has none, so rules on kind,
- * roles or scopes do not match, as in `evaluatePolicy`. An unknown risk counts as `exec`.
+ * `user` or `agent` with an id count as callers; anything else (anonymous, unknown kinds) has none, so rules on kind,
+ * roles or scopes do not match, as in `evaluatePolicy`. An unknown risk counts as `exec`. A malformed delegation chain
+ * fails closed: each malformed actor (or a chain that is not a list) stays in the chain as an actor with an empty id and
+ * no issuer, so the caller counts as delegated (`delegated: false` does not match) and only a glob matching any id
+ * (`*`) matches that actor.
  */
 export function policySubject(q: AccessQuestion, vocab: Vocabularies = CORE_VOCABULARIES): PolicySubject {
   const c = q.caller as Partial<PublicCaller> | undefined;
@@ -87,9 +94,13 @@ export function policySubject(q: AccessQuestion, vocab: Vocabularies = CORE_VOCA
   const risk = vocab.has('risk', q.target?.risk) ? q.target.risk : 'exec';
   const out: PolicySubject = { tool: String(q.target?.id ?? ''), risk, ...(typeof q.action === 'string' ? { action: q.action } : {}) };
   if ((c?.kind === 'user' || c?.kind === 'agent') && typeof c.id === 'string' && c.id) {
-    const actors = (Array.isArray(c.actors) ? c.actors : [])
-      .filter((a): a is Actor => !!a && typeof a.id === 'string' && !!a.id && (a.kind === 'user' || a.kind === 'agent'))
-      .map((a) => ({ id: a.id, kind: a.kind }));
+    const wellFormed = (a: unknown): a is Actor => {
+      const v = a as Partial<Actor> | null;
+      return !!v && typeof v.id === 'string' && !!v.id && (v.kind === 'user' || v.kind === 'agent') && (v.issuer === undefined || typeof v.issuer === 'string');
+    };
+    const malformed: Actor = { id: '', kind: 'agent' };
+    const listed: unknown[] = c.actors === undefined ? [] : Array.isArray(c.actors) ? c.actors : [c.actors];
+    const actors = listed.map((a): Actor => (wellFormed(a) ? { id: a.id, kind: a.kind, ...(a.issuer !== undefined ? { issuer: a.issuer } : {}) } : malformed));
     out.caller = { id: c.id, kind: c.kind, roles: strings(c.roles), scopes: strings(c.scopes), ...(actors.length ? { actors } : {}) };
   }
   return out;

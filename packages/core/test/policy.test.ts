@@ -63,7 +63,23 @@ test('actor rules: the current actor by default, prior actors only when a rule a
   assert.equal(evaluatePolicy([{ effect: 'deny', when: { delegated: true } }], subject(plain)), undefined);
   assert.equal(evaluatePolicy([{ effect: 'deny', when: { delegated: false } }], subject(plain)), 'deny');
   const q = { caller: { ...chain, actors: [...chain.actors, { id: 7 }] }, action: 'call', target: { kind: 'tool', id: 'erp__pay', layer: 'tool' as const, risk: 'write', agent: 'a' } };
-  assert.deepEqual(policySubject(q as never).caller?.actors, chain.actors, 'malformed actors are dropped');
+  const malformed = policySubject(q as never).caller;
+  assert.deepEqual(malformed?.actors, [...chain.actors, { id: '', kind: 'agent' }], 'a malformed actor stays as one that matches nothing but *');
+  assert.equal(evaluatePolicy([{ effect: 'allow', when: { delegated: false } }], { tool: 'erp__pay', risk: 'write', caller: malformed! }), undefined, 'a malformed chain counts as delegated');
+  assert.equal(evaluatePolicy([{ effect: 'allow', when: { actor: ['billing-*'] } }], { tool: 'erp__pay', risk: 'write', caller: malformed! }), undefined);
+  const notList = policySubject({ ...q, caller: { ...chain, actors: { id: 'x' } } } as never).caller;
+  assert.equal(notList?.actors?.length, 1, 'a chain that is not a list is delegated too');
+});
+
+test('actor rules with issuer: an actor id matches only at the issuer that vouches for it', () => {
+  const caller = { id: 'u', kind: 'user' as const, roles: [], scopes: [], actors: [{ id: 'bot', kind: 'agent' as const, issuer: 'https://idp-b.example' }] };
+  const subject = { tool: 't', risk: 'read' as const, caller };
+  assert.equal(evaluatePolicy([{ effect: 'allow', when: { actor: ['bot'], issuer: ['https://idp-a.*'] } }], subject), undefined);
+  assert.equal(evaluatePolicy([{ effect: 'allow', when: { actors: ['bot'], issuer: ['https://idp-b.*'] } }], subject), 'allow');
+  const unvouched = { ...caller, actors: [{ id: 'bot', kind: 'agent' as const }] };
+  assert.equal(evaluatePolicy([{ effect: 'allow', when: { actor: ['bot'], issuer: ['*'] } }], { ...subject, caller: unvouched }), undefined);
+  // Globs span line breaks: an id with a newline cannot slip past a "*" rule.
+  assert.equal(evaluatePolicy([{ effect: 'deny', when: { actor: ['*'] } }], { ...subject, caller: { ...caller, actors: [{ id: 'evil\nbot', kind: 'agent' }] } }), 'deny');
 });
 
 test('actions: a rule without actions matches tool calls only; a rule on a core action matches the values added like it', () => {

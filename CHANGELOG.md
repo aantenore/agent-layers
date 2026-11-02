@@ -34,7 +34,7 @@ Every package under `packages/*` and `adapters/*` is released with the same vers
 - `ApprovalPending` carries the arguments of the call that waits (`args`), kept by the host to resume the run and
   never written to the result.
 
-## 0.3.0 - unreleased
+## 0.3.0 - 2026-11-02
 
 Every package moves to 0.3.0 together: adapters of this release use core exports that 0.2.0 does not have
 (`ApprovalPending`, `runEndOf`, `inboundSessionId`, `ownerDigest`, `versionAtLeast`).
@@ -206,6 +206,41 @@ Every package moves to 0.3.0 together: adapters of this release use core exports
   to the model backend ([RouterPort](spec/ports/RouterPort.md)); schedules come from `cron-trigger`
   ([interface](docs/layers/interface.md)); in the README, A2A is an implemented adapter and promptfoo the reference
   eval runner with its adapter planned.
+- Run bounds as added in this release ([0002](docs/decisions/0002-delegation-bounds.md),
+  `@agent-layers/core`):
+  - A tool call served over MCP with bounds (`_meta["agent-layers/bounds"]` or `Agent-Bounds`) now runs under them:
+    the hosted tools start a ledger with the stack's limits, refuse a call over the hop limit or with too little time
+    (an error result, `Stopped by the run bounds: <code>`), arm the deadline, and set `ctx.bounds`, so the hop count
+    no longer resets on each MCP hop. `outboundBounds` passes on `ctx.delegation` when the context has no run of its
+    own.
+  - A remote run that reports no cost or usage keeps its reservation spent for the budget, but the reservation is no
+    longer reported as `RunResult.costUsd` (or `usage`): the figure stays unknown (`RunLedger.usageKnown`,
+    `costKnown`). The ledger takes only finite figures ≥ 0; NaN, negative or infinite usage and cost are unknown, and
+    `priceOf` never returns a negative or NaN cost.
+  - Under a cost budget, a reply from a model that a non-empty `pipeline.pricing` does not price emits the event
+    `agent.cost.unpriced`, and stops the run (`limit`, the detail names the model) when `limits.run.maxCostUsd` is
+    set, instead of silently turning the cost budget off. Prices are own entries only (`priceFor`): a model named `constructor` has none.
+  - `outboundBounds` takes the margin off the adapter's time limit too: `min(time left, timeoutMs) - marginMs`.
+  - A bounds stop reaches the start of a chain: the `a2a` runtime keeps the core's reason (`by: "sdk.hops"`, ...) for a
+    remote bounds `stop`, so a served stack reports it upstream in turn (S1 → S2 → S3 over the hop limit reaches S1 as
+    `hop_limit`).
+  - A run started with the context of a run in progress (in-process nesting) is that run's delegate: hops plus one, a
+    reservation of the parent's budget settled with the nested run's result, the parent as lineage, a run id of its
+    own; an explicit delegation passed along still tightens.
+  - `limits.delegation.inbound: "ignore"` drops the caller's lineage too.
+  - A streamed model reply broken off by the consumer or failed is still debited.
+  - The deadline counts as the cause of a failed or stopped run only when its own signal fired, not when the clock
+    passed it; the deadline timer (`deadlineSignal`, now `{signal, clear}`) is unref'd and cleared when the run
+    settles; a refused stream counts in `agent.bounds.stops`.
+- `oidc` credentials: with `actor: "self"`, the refresh skew is taken off once, not twice, so short-lived exchanged
+  tokens are cached.
+- Policy globs match across line breaks; `when.issuer` (stack `policy`, `rules-authorization`) restricts `actor` and
+  `actors` to actors vouched for by a matching `Actor.issuer`; `policySubject` fails closed on a malformed actor chain
+  (the caller counts as delegated) instead of dropping malformed actors, and `rules-authorization` denies such a
+  question before any rule ([AuthorizationPort](spec/ports/AuthorizationPort.md)).
+- `formatAgentBounds` and `formatAgentLineage` (`@agent-layers/core`) write the `Agent-Bounds` and `Agent-Lineage`
+  headers the gateway parses: integers capped at 15 digits (`SF_MAX_INTEGER`, so an unbounded max hops is accepted)
+  and the cost rounded down to 3 decimals. MCP tools option `bounds: false` stops sending the run bounds in `_meta`.
 
 ## 0.2.0 - 2026-11-01
 

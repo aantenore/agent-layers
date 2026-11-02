@@ -21,6 +21,7 @@ export const EVENT = Object.freeze({
   runCancelled: 'agent.run.cancelled',
   runKeepFailed: 'agent.run.keep_failed',
   runControlFailed: 'agent.run.control_failed',
+  costUnpriced: 'agent.cost.unpriced',
 });
 
 export const METRIC = Object.freeze({

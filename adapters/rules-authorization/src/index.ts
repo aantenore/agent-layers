@@ -27,6 +27,8 @@ export function createRulesAuthorization(options: RulesAuthorizationOptions, nam
     async evaluate(q) {
       const v = vocab();
       const subject = policySubject(q, v);
+      // A malformed delegation chain (kept by policySubject as actors with an empty id) is refused whatever the rules say.
+      if (subject.caller?.actors?.some((a) => !a.id)) return { allowed: false, reason: 'malformed delegation chain (denied)' };
       switch (evaluatePolicy(options.rules, subject, v)) {
         case 'allow': return { allowed: true, reason: 'allowed by rule' };
         case 'deny': return { allowed: false, reason: 'denied by rule' };
@@ -67,7 +69,7 @@ export const adapter = defineAdapter<'AuthorizationPort', RulesAuthorizationOpti
               type: 'object',
               properties: {
                 roles: strings, scopes: strings, kind: { enum: ['user', 'agent'] }, authenticated: { type: 'boolean' },
-                actor: strings, actors: strings, delegated: { type: 'boolean' },
+                actor: strings, actors: strings, delegated: { type: 'boolean' }, issuer: strings,
               },
               additionalProperties: false,
             },

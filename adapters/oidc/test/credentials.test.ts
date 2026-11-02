@@ -104,6 +104,20 @@ describe('token exchange (on-behalf-of)', () => {
     }
   });
 
+  test('actor "self" takes the refresh skew off once: short-lived exchanged tokens are still cached', async () => {
+    // 50 s tokens with the default 30 s skew: usable for 20 s. Taking the skew off twice left nothing to cache.
+    const s = await tokenServer((f, n) => ({ access_token: f.get('grant_type') === 'client_credentials' ? `own-${n}` : `tok-${n}`, token_type: 'Bearer', expires_in: 50 }));
+    try {
+      const c = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of', actor: 'self' }));
+      const a = alice();
+      assert.equal(await c.token('tools-api', { caller: a }), 'tok-2');
+      assert.equal(await c.token('tools-api', { caller: a }), 'tok-2', 'cached');
+      assert.equal(s.forms.length, 2, 'one client_credentials, one exchange');
+    } finally {
+      await s.close();
+    }
+  });
+
   test('exchanged tokens with and without actor never share a cache entry; the actor option is validated', async () => {
     const s = await tokenServer();
     try {

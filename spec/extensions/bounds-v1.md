@@ -51,7 +51,7 @@ On the task it returns, a receiver that activated the extension writes one objec
 | --- | --- | --- |
 | `usage` | `{inputTokens, outputTokens}`, integers ≥ 0 | Tokens the run spent, delegated runs included, when known. |
 | `costUsd` | number ≥ 0 | What the run cost, delegated runs included, when known. |
-| `stop` | `timeout`, `limit` or `hop_limit` | Present only when the receiver's own bounds stopped the run: its deadline, its budget, or the hop limit. |
+| `stop` | `timeout`, `limit` or `hop_limit` | Present only when the run bounds stopped the run: its deadline, its budget, or the hop limit, at the receiver or further down the chain (a delegate's `stop` is reported upstream in turn). |
 
 `stop` is the stop code alone; who stopped the run and why stays inside the receiver. The sender settles what it
 reserved for the call with `usage` and `costUsd`; a figure that is not reported keeps its whole share spent.

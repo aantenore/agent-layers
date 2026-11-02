@@ -56,7 +56,7 @@ export {
 } from './limits.ts';
 export { CHECK_LIMITS, DELEGATION_LIMITS, GATEWAY_LIMITS, LANGUAGE_LIMITS, PIPELINE_LIMITS, RUN_LIMITS, STACK_LIMITS } from './stack-limits.ts';
 export {
-  BOUNDS_STOP, MAX_TIMER_MS, RunLedger, boundsStop, deadlineSignal, delegationProblems, ledgerOf, outboundBounds, priceOf, runLimits, startRun,
-  tighterDelegation, verifiedHops,
-  type OutboundCall, type OutboundOptions, type Reservation, type RunLimits, type RunStart,
+  BOUNDS_STOP, MAX_TIMER_MS, RunLedger, SF_MAX_INTEGER, boundsStop, deadlineSignal, delegationProblems, formatAgentBounds, formatAgentLineage, ledgerOf,
+  outboundBounds, priceFor, priceOf, runLimits, startRun, tighterDelegation, verifiedHops,
+  type DeadlineTimer, type OutboundCall, type OutboundOptions, type Reservation, type RunLimits, type RunStart,
 } from './bounds.ts';

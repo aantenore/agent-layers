@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  activeTrace, anySignal, ATTR, BoundsExceeded, defineLimits, isAbort, limitValue, messageText, noMappings, outboundBounds, RunRefused, timeoutSignal,
+  activeTrace, anySignal, ATTR, BOUNDS_STOP, BoundsExceeded, defineLimits, isAbort, limitValue, messageText, noMappings, outboundBounds, RunRefused, timeoutSignal,
   type CallContext, type JsonValue, type LimitValue, type Mappings, type OutboundCall, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason, type Usage,
 } from '@agent-layers/core';
 import {
@@ -214,14 +214,16 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
             reported = { ...(m?.usage ? { usage: m.usage } : {}), ...(m?.costUsd !== undefined ? { costUsd: m.costUsd } : {}) };
             span.setAttributes({ 'a2a.task.state': task.native ?? task.state });
             const s = runStatus(task.state);
-            // A remote run its own bounds stopped says which one, so a chain can tell "too deep" from "out of budget".
-            const code = s.status === 'stopped' && m?.stop ? m.stop : s.code;
+            // A remote run its own bounds stopped says which one, so a chain can tell "too deep" from "out of budget". The
+            // bounds are the chain's: the stop keeps the core's reason (`by: sdk.*`), so this stack reports it upstream in turn.
+            const boundsStop = s.status === 'stopped' && m?.stop ? Object.values(BOUNDS_STOP).find((r) => r.code === m.stop) : undefined;
+            const code = s.code;
             const result: RunResult = {
               runId: ctx.runId,
               status: s.status,
               // A failed or stopped task's text is the remote side's own wording: it stays out of the output.
               output: s.status === 'completed' || s.status === 'waiting' ? task.text : '',
-              ...(code ? { reason: { code, layer: 'harness', by } } : {}),
+              ...(boundsStop ? { reason: { ...boundsStop } } : code ? { reason: { code, layer: 'harness', by } } : {}),
               ...(reported.usage ? { usage: reported.usage } : {}),
               ...(reported.costUsd !== undefined ? { costUsd: reported.costUsd } : {}),
               // A state this adapter does not know is a failure; the native value is kept for the operator.

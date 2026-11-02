@@ -75,11 +75,12 @@ test('when.actors matches any actor of the chain, prior ones included, only when
   assert.equal((await current.evaluate(withActors(chain))).allowed, true, 'actor ignores the prior planner');
 });
 
-test('when.delegated tells a delegated call from a direct one; malformed actors are ignored', async () => {
+test('when.delegated tells a delegated call from a direct one; a malformed chain is denied whatever the rules say', async () => {
   const port = createRulesAuthorization({ rules: [{ effect: 'allow', when: { delegated: true } }, { effect: 'deny', when: { delegated: false } }] });
   assert.equal((await port.evaluate(withActors(chain))).allowed, true);
   assert.equal((await port.evaluate(withActors(undefined))).allowed, false);
-  assert.equal((await port.evaluate(withActors([{ id: '', kind: 'agent' }, { id: 'x', kind: 'robot' }, 7]))).allowed, false, 'only well-formed actors count');
+  const malformed = await port.evaluate(withActors([...(chain as unknown[]), { id: 'x', kind: 'robot' }]));
+  assert.deepEqual(malformed, { allowed: false, reason: 'malformed delegation chain (denied)' }, 'fails closed even under an allow rule');
 });
 
 test('the options schema accepts actor, actors and delegated and refuses wrong types', async () => {
