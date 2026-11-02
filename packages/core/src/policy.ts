@@ -14,8 +14,8 @@ export interface PolicyRule {
   /** Risk values. A rule on a core value also matches the added values `like` it. */
   risk?: Risk[];
   /**
-   * Actions (since AuthorizationPort 1.2.0): `call`, `decide`, `list` or values added `like` one of them; a rule on a
-   * core value also matches the values added like it. A rule without `actions` matches tool calls only (`call`), so
+   * Actions (since AuthorizationPort 1.2.0): `call`, `decide`, `list`, `resume`, `cancel` (the last two since 1.3.0)
+   * or values added `like` one of them; a rule on a core value also matches the values added like it. A rule without `actions` matches tool calls only (`call`), so
    * rules written for tools never open other actions.
    */
   actions?: string[];

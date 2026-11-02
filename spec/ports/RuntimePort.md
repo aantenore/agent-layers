@@ -1,6 +1,6 @@
 # RuntimePort
 
-Layer: `harness` (L3 Agent runtime) · Version: 1.2.0 · Conformance: `checkRuntime`
+Layer: `harness` (L3 Agent runtime) · Version: 1.3.0 · Conformance: `checkRuntime`
 
 ## Purpose
 
@@ -16,6 +16,8 @@ A `RunnableAgent` has:
 - `name: String` — equals `agent.name`.
 - `run(input: RunInput, ctx?: partial CallContext) → RunResult` — run to completion.
 - `stream?(input: RunInput, ctx?: partial CallContext) → stream of RunEvent` — optional, same run delivered as events.
+- `resume?(checkpoint: Json, answer: ResumeAnswer, ctx?: partial CallContext) → RunResult` — optional (since 1.3.0),
+  continues a `waiting` run from the checkpoint its result carried. See [Resume](#resume).
 
 `Stack` is the set of configured port instances of the deployment, already composed: a model with knowledge injection, guards, cache and router applied; tools prefixed and governed; telemetry fan-out. The runtime uses these and does not re-implement the composition. `CallContext` is in the [port index](README.md#common-types).
 
@@ -49,6 +51,7 @@ A `RunnableAgent` has:
 | `costUsd?` | Number, >= 0 | What the run cost in US dollars, summed over its model calls. Present when the runtime knows the prices of the models it called, or a remote agent reports it; absent when unknown (not 0). |
 | `events?` | [[RunEvent](../schemas/run-event.json)] | What happened during the run. |
 | `ext?` | Ext | Adapter-specific fields. |
+| `checkpoint?` | Json | What the runtime needs to continue a `waiting` run with `resume` (since 1.3.0). Opaque to the core; present only on a waiting result; kept by the host and removed before the result leaves the stack. |
 
 Statuses: `completed` (the agent answered), `failed` (an error ended the run), `stopped` (something ended the run on purpose: a guard, a denial, a limit, a cancellation), `waiting` (the run stopped for a human answer and can be resumed).
 
@@ -64,7 +67,7 @@ Statuses: `completed` (the agent answered), `failed` (an error ended the run), `
 | `stage?` | Guard stage, for `guard_block`. |
 | `detail?` | Internal text for people. Never parsed, never shown to the caller. |
 
-A run that waits for an approval ends with status `waiting` and reason `{code: "needs_input", layer: "identity", by: <approval instance>, detail: <approval id>}`, and the stack writes `ext["sdk.approval"] = {id, by?, tool?}` on the result: the approval id, the approval instance and the prefixed tool name, so a caller reads the id without parsing `detail` (since 1.1.0). Inside a run, a call of the stack's tools that waits for an approval throws `ApprovalPending` (from `@agent-layers/core`, like `GuardrailBlocked`) when the runtime's descriptor declares `portVersion` 1.1.0 or later; a runtime built for 1.0.0 gets the pending result instead, since it may turn a thrown tool error into tool text. A runtime may let it propagate, and the stack ends the run as above, or end the run itself with `runEndOf(err)` (status `waiting`, reason `err.stopReason`). Tools that return the pending result instead (a governed `ToolPort` outside a stack) carry `ext["sdk.approval"]` (the approval id) on the tool result, so a runtime can end the run without parsing text. A later run in the same session (same session id, same caller) that makes the same call, same tool and same arguments, gets the decision: approved runs once, denied is refused, still pending returns the same approval id (see [ApprovalPort](ApprovalPort.md)). The session carries the decision, not the conversation: `basic-runtime` and `reinloop` start each run from its input, so the follow-up message must lead the model to the same call.
+A run that waits for an approval ends with status `waiting` and reason `{code: "needs_input", layer: "identity", by: <approval instance>, detail: <approval id>}`, and the stack writes `ext["sdk.approval"] = {id, by?, tool?}` on the result: the approval id, the approval instance and the prefixed tool name, so a caller reads the id without parsing `detail` (since 1.1.0). Inside a run, a call of the stack's tools that waits for an approval throws `ApprovalPending` (from `@agent-layers/core`, like `GuardrailBlocked`) when the runtime's descriptor declares `portVersion` 1.1.0 or later; a runtime built for 1.0.0 gets the pending result instead, since it may turn a thrown tool error into tool text. A runtime may let it propagate, and the stack ends the run as above, or end the run itself with `runEndOf(err)` (status `waiting`, reason `err.stopReason`). Tools that return the pending result instead (a governed `ToolPort` outside a stack) carry `ext["sdk.approval"]` (the approval id) on the tool result, so a runtime can end the run without parsing text. A later run in the same session (same session id, same caller) that makes the same call, same tool and same arguments, gets the decision: approved runs once, denied is refused, still pending returns the same approval id (see [ApprovalPort](ApprovalPort.md)). The session carries the decision, not the conversation: `basic-runtime` and `reinloop` start each run from its input, so the follow-up message must lead the model to the same call. To continue the same run instead, use [Resume](#resume).
 
 ### Run events
 
@@ -77,9 +80,34 @@ A run that waits for an approval ends with status `waiting` and reason `{code: "
 | `tool.call` | `id`, `tool` |
 | `tool.result` | `id`, `tool`, `ok`, `durationMs?` |
 | `text` | `text` |
-| `run.end` | `status`, `reason?`, `usage?`, `costUsd?` |
+| `run.end` | `status`, `reason?`, `usage?`, `costUsd?`, `checkpoint?` (since 1.3.0, removed by the host like the result's) |
 
 Adapter events are named `<namespace>.<name>` (for example `reinloop.compaction`). They are stored and replayed, and never read by the core. `at` is an ISO 8601 time.
+
+### Resume
+
+`ResumeAnswer` is `{approval: {id, approved, reason?}}` (the decision on the approval the run waits for) or
+`{input: RunInput}` (what a `needs_input` run asked for). The host continues a waiting run with `Stack.resume(runId,
+answer, ctx)` ([0003](../../docs/decisions/0003-run-resume.md)):
+
+- When a run ends `waiting`, the host keeps what continuing it needs: the run's input, its caller without the
+  credential, its session, the call that waits (tool, arguments, approval id) and the runtime's `checkpoint`. In the
+  stack's [StorePort](StorePort.md) when one is configured (`sdk.run.*` keys, expiring after
+  `limits.run.resumeTtlMs`), else in memory (prototype).
+- Only the caller that started the run (same `kind` and `id`) may resume or cancel it, unless the
+  [AuthorizationPort](AuthorizationPort.md) allows the caller `decide` on the approval the run waits for (on the run,
+  target kind `run`, when it waits for none). An approval answer is decided through `ApprovalPort.decide`, with `by`
+  the resumer's verified identity, and needs `decide` like the gateway's approval routes, owner included. An input
+  answer is refused while the run's approval is still pending.
+- The run keeps its id, session and caller (the owner's fresh credential, else none), so the stack's tools find the
+  decision for the call that waited. A runtime with `resume` gets the checkpoint and the answer: it runs exactly the
+  call that waited, then goes on; an input answer is added to the conversation after that call's result. A runtime
+  without `resume`, or a run kept without a checkpoint, is run again from its input (the input answer when there is
+  one): with a real model that is not deterministic.
+- `Stack.cancel(runId, {by, reason})` aborts a run in flight in this process (its signal fires, the run ends `stopped`
+  with `aborted`), or marks a waiting run cancelled and withdraws its pending approval (`ApprovalPort.cancel`). A
+  cancelled run cannot be resumed. Refusals are `RunRefused` with `kind` `not_found`, `forbidden`, `conflict` or
+  `invalid`.
 
 ## Semantics
 
@@ -109,10 +137,12 @@ Adapter events are named `<namespace>.<name>` (for example `reinloop.compaction`
 - With a stack and an agent fixture: `bind` resolves, the agent's `name` equals the spec's, and `run` returns a result that validates against `run-result.json`; a result whose status is not `completed` has a `reason`. Without fixtures the run checks are skipped.
 - With the fixtures, for a runtime whose descriptor declares 1.1.0 or later (`checkAdapter` reads it; `conformance` takes `portVersion` in the fixtures, default the core's): a run whose signal is already aborted resolves `stopped` with reason `aborted` (or `timeout`); a streamed run ends with a `run.end` of the run's status, and its `text` events add up to the output of a completed run (when the runtime streams); every model and tool call of a run carries the run's caller; with a `toolInput` fixture, a tool call that throws `ApprovalPending` ends the run `waiting` with `needs_input`, or lets the error through.
 - With the fixtures, for a runtime declaring 1.2.0 or later: every model and tool call of a run started with `bounds` carries the run's bounds; a model call the core refuses (`BoundsExceeded`, code `limit`) ends the run `stopped` with `limit`, or the runtime lets the error through to the host.
+- With a `toolInput` fixture, for a runtime declaring 1.3.0 or later that implements `resume`: a run whose tool call waits for an approval ends `waiting` with a JSON `checkpoint`; resuming it with the decision runs that call first, same tool and arguments, keeps the run id, and returns a result that validates.
 - `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.3.0 — resume ([0003](../../docs/decisions/0003-run-resume.md)): optional `RunnableAgent.resume(checkpoint, answer, ctx)` and `RunResult.checkpoint` (also on `run.end`); the host keeps waiting runs and continues them with `Stack.resume`, cancels with `Stack.cancel`; conformance checks resume when declared
 - 1.2.0 — run bounds ([0002](../../docs/decisions/0002-delegation-bounds.md)): every run gets `ctx.bounds` from the host (deadline, budget, hops) and may be refused before it starts (`hop_limit`, `timeout`); the core enforces them in the governed model and tools whatever the runtime; runtimes pass the context on and end the run `stopped` on `BoundsExceeded`; conformance checks both
 - 1.1.0 — the stack's tools throw `ApprovalPending` for a call waiting for an approval and the stack ends the run `waiting`; `RunResult.ext["sdk.approval"] = {id, by?, tool?}`; conformance checks abort, stream, caller and approval
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `AgentSpec.settings` and `ext` replace `params`; status `waiting`; structured `RunResult.reason`; core event types with fixed payloads

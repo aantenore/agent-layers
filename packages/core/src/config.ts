@@ -55,7 +55,7 @@ export interface LimitsConfig {
   /** Largest `ext` bag kept on a shape the core passes on (default 16384 bytes). */
   extBytes?: number;
   /** Bounds of every run; see docs/limits.md. */
-  run?: { timeoutMs?: LimitValue; maxHops?: LimitValue; maxTokens?: LimitValue; maxCostUsd?: LimitValue };
+  run?: { timeoutMs?: LimitValue; maxHops?: LimitValue; maxTokens?: LimitValue; maxCostUsd?: LimitValue; resumeTtlMs?: LimitValue; maxWaitingInMemory?: number };
   /**
    * How bounds cross to and from other agents. `inbound`: `tighten` (default) applies a caller's bounds when they are
    * tighter than the stack's own; `ignore` drops them, and the hop count then comes from the verified actor chain only.
@@ -106,6 +106,12 @@ export interface GatewayConfig {
    * authorization port (actions `list` and `decide`, target kind `approval`).
    */
   approvals?: { enabled?: boolean; path?: string };
+  /**
+   * HTTP routes over runs: `POST <path>/<id>/resume` continues a waiting run, `POST <path>/<id>/cancel` cancels one.
+   * Off unless `enabled`; each request is authenticated and authorized through the authorization port (actions `resume`
+   * and `cancel`, target kind `run`).
+   */
+  runs?: { enabled?: boolean; path?: string };
 }
 
 /** Client sessions of inbound channels and triggers. */

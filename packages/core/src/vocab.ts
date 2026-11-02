@@ -24,7 +24,7 @@ export const VOCABULARIES = Object.freeze({
   finish: { core: ['end', 'limit', 'tools', 'refused', 'other'], extensible: 'like', usedBy: 'ModelReply.finish' },
   risk: { core: ['read', 'write', 'exec'], extensible: 'like', usedBy: 'ToolSpec.risk, policy rules' },
   effect: { core: ['allow', 'ask', 'deny'], extensible: 'no', usedBy: 'policy rules' },
-  action: { core: ['call', 'decide', 'list'], extensible: 'like', usedBy: 'AccessQuestion.action, policy rules' },
+  action: { core: ['call', 'decide', 'list', 'resume', 'cancel'], extensible: 'like', usedBy: 'AccessQuestion.action, policy rules' },
   stage: { core: [...GUARD_STAGES], extensible: 'no', usedBy: 'GuardCheck.stage' },
   guardAction: { core: ['allow', 'block', 'redact'], extensible: 'no', usedBy: 'GuardVerdict.action' },
   guardLabel: { core: ['pii', 'secret', 'injection', 'toxicity', 'policy', 'other'], extensible: 'like', usedBy: 'GuardVerdict.labels' },

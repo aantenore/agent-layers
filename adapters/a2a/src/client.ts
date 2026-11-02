@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
-  activeTrace, anySignal, ATTR, BOUNDS_STOP, BoundsExceeded, defineLimits, isAbort, limitValue, messageText, noMappings, outboundBounds, timeoutSignal,
-  type CallContext, type LimitValue, type Mappings, type OutboundCall, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason, type Usage,
+  activeTrace, anySignal, ATTR, BOUNDS_STOP, BoundsExceeded, defineLimits, isAbort, limitValue, messageText, noMappings, outboundBounds, RunRefused, timeoutSignal,
+  type CallContext, type JsonValue, type LimitValue, type Mappings, type OutboundCall, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason, type Usage,
 } from '@agent-layers/core';
 import {
   A2A_VERSION, BOUNDS_URI, INTERRUPTED, LEGACY_VERSION, messageWire, METHOD_OF, METHODS, readResult, TERMINAL, type TaskState, type WireVersion,
@@ -171,75 +171,97 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
         try { await call(cancelMethod, { id }, { ...ctx, signal }, signal); } catch { /* the run already has its result */ }
       }
 
+      /**
+       * One message to the remote agent; with `followUp`, it continues that remote task (an A2A follow-up on an
+       * `input-required` task). A waiting result carries the remote task as its checkpoint.
+       */
+      async function send(input: RunInput, init: Partial<CallContext>, followUp?: RemoteTask): Promise<RunResult> {
+        const ctx = stack.context({ ...init, agent: agent.name });
+        const by = agent.name;
+        const ended = (reason: Omit<StopReason, 'layer' | 'by'>, status: RunResult['status'] = 'failed'): RunResult =>
+          ({ runId: ctx.runId, status, output: '', reason: { ...reason, layer: 'harness', by } });
+        // What is left of the run's bounds goes to the remote agent; a call that would break them is refused here,
+        // without a network call. The run's signal already aborts at its deadline; this adapter's own limit caps it.
+        let outbound: OutboundCall | undefined;
+        try {
+          outbound = boundsUri ? outboundBounds(ctx, { timeoutMs }) : undefined;
+        } catch (err) {
+          if (err instanceof BoundsExceeded) return { runId: ctx.runId, status: 'stopped', output: '', reason: { ...err.stopReason } };
+          throw err;
+        }
+        const signal = anySignal(timeoutSignal(timeoutMs), ctx.signal) ?? new AbortController().signal;
+        let reported: { usage?: Usage; costUsd?: number } | undefined;
+        return stack.telemetry.span('a2a.send', { [ATTR.layer]: 'harness', [ATTR.name]: agent.name, [ATTR.runId]: ctx.runId, 'a2a.version': version }, async (span) => {
+          let taskId: string | undefined;
+          const contextId = followUp?.contextId || ctx.sessionId;
+          const message = messageWire({
+            messageId: randomUUID(), role: 'user', text: inputText(input), ...(contextId ? { contextId } : {}), ...(followUp ? { taskId: followUp.taskId } : {}),
+            ...(outbound && boundsUri ? { extensions: [boundsUri], metadata: { [boundsUri]: outbound.bounds } } : {}),
+          }, version);
+          try {
+            let read = readResult(await call(METHOD_OF[version].send, { message }, ctx, signal, !!outbound));
+            if (read.message !== undefined) return mappings.in(read.raw, { runId: ctx.runId, status: 'completed', output: read.message } satisfies RunResult);
+            while (read.task && !TERMINAL.includes(read.task.state) && !INTERRUPTED.includes(read.task.state)) {
+              taskId = read.task.id;
+              await new Promise((r) => setTimeout(r, pollMs));
+              signal.throwIfAborted();
+              read = readResult(await call(METHOD_OF[version].get, { id: read.task.id }, ctx, signal));
+            }
+            taskId = undefined;
+            if (!read.task) return ended({ code: 'error', detail: 'remote agent sent no task' });
+            const task = read.task;
+            const m = task.metadata;
+            reported = { ...(m?.usage ? { usage: m.usage } : {}), ...(m?.costUsd !== undefined ? { costUsd: m.costUsd } : {}) };
+            span.setAttributes({ 'a2a.task.state': task.native ?? task.state });
+            const s = runStatus(task.state);
+            // A remote run its own bounds stopped says which one, so a chain can tell "too deep" from "out of budget". The
+            // bounds are the chain's: the stop keeps the core's reason (`by: sdk.*`), so this stack reports it upstream in turn.
+            const boundsStop = s.status === 'stopped' && m?.stop ? Object.values(BOUNDS_STOP).find((r) => r.code === m.stop) : undefined;
+            const code = s.code;
+            const result: RunResult = {
+              runId: ctx.runId,
+              status: s.status,
+              // A failed or stopped task's text is the remote side's own wording: it stays out of the output.
+              output: s.status === 'completed' || s.status === 'waiting' ? task.text : '',
+              ...(boundsStop ? { reason: { ...boundsStop } } : code ? { reason: { code, layer: 'harness', by } } : {}),
+              ...(reported.usage ? { usage: reported.usage } : {}),
+              ...(reported.costUsd !== undefined ? { costUsd: reported.costUsd } : {}),
+              // A state this adapter does not know is a failure; the native value is kept for the operator.
+              ...(task.native !== undefined ? { ext: { 'a2a.state': task.native } } : {}),
+              // The remote task a follow-up continues.
+              ...(s.status === 'waiting' ? { checkpoint: { taskId: task.id, contextId: task.contextId } satisfies RemoteTask as unknown as JsonValue } : {}),
+            };
+            return mappings.in(read.raw, result);
+          } catch (err) {
+            // A task still working on the remote side is canceled there too; a failed cancel does not change the result.
+            if (taskId && signal.aborted) await cancel(taskId, ctx);
+            if (ctx.signal?.aborted) return ended({ code: 'aborted' }, 'stopped');
+            // A fixed detail: error text can carry URLs or credentials.
+            return isAbort(err) ? ended({ code: 'timeout', detail: 'remote agent timed out' }) : ended({ code: 'error', detail: RUN_FAILED });
+          } finally {
+            // Settled with what the remote run reported; an unreported spend keeps its whole reservation.
+            outbound?.reservation.settle(reported);
+          }
+        });
+      }
+
       return {
         name: agent.name,
-        async run(input, init = {}) {
-          const ctx = stack.context({ ...init, agent: agent.name });
-          const by = agent.name;
-          const ended = (reason: Omit<StopReason, 'layer' | 'by'>, status: RunResult['status'] = 'failed'): RunResult =>
-            ({ runId: ctx.runId, status, output: '', reason: { ...reason, layer: 'harness', by } });
-          // What is left of the run's bounds goes to the remote agent; a call that would break them is refused here,
-          // without a network call. The run's signal already aborts at its deadline; this adapter's own limit caps it.
-          let outbound: OutboundCall | undefined;
-          try {
-            outbound = boundsUri ? outboundBounds(ctx, { timeoutMs }) : undefined;
-          } catch (err) {
-            if (err instanceof BoundsExceeded) return { runId: ctx.runId, status: 'stopped', output: '', reason: { ...err.stopReason } };
-            throw err;
-          }
-          const signal = anySignal(timeoutSignal(timeoutMs), ctx.signal) ?? new AbortController().signal;
-          let reported: { usage?: Usage; costUsd?: number } | undefined;
-          return stack.telemetry.span('a2a.send', { [ATTR.layer]: 'harness', [ATTR.name]: agent.name, [ATTR.runId]: ctx.runId, 'a2a.version': version }, async (span) => {
-            let taskId: string | undefined;
-            const message = messageWire({
-              messageId: randomUUID(), role: 'user', text: inputText(input), ...(ctx.sessionId ? { contextId: ctx.sessionId } : {}),
-              ...(outbound && boundsUri ? { extensions: [boundsUri], metadata: { [boundsUri]: outbound.bounds } } : {}),
-            }, version);
-            try {
-              let read = readResult(await call(METHOD_OF[version].send, { message }, ctx, signal, !!outbound));
-              if (read.message !== undefined) return mappings.in(read.raw, { runId: ctx.runId, status: 'completed', output: read.message } satisfies RunResult);
-              while (read.task && !TERMINAL.includes(read.task.state) && !INTERRUPTED.includes(read.task.state)) {
-                taskId = read.task.id;
-                await new Promise((r) => setTimeout(r, pollMs));
-                signal.throwIfAborted();
-                read = readResult(await call(METHOD_OF[version].get, { id: read.task.id }, ctx, signal));
-              }
-              taskId = undefined;
-              if (!read.task) return ended({ code: 'error', detail: 'remote agent sent no task' });
-              const task = read.task;
-              const m = task.metadata;
-              reported = { ...(m?.usage ? { usage: m.usage } : {}), ...(m?.costUsd !== undefined ? { costUsd: m.costUsd } : {}) };
-              span.setAttributes({ 'a2a.task.state': task.native ?? task.state });
-              const s = runStatus(task.state);
-              // A remote run its own bounds stopped says which one, so a chain can tell "too deep" from "out of budget". The
-              // bounds are the chain's: the stop keeps the core's reason (`by: sdk.*`), so this stack reports it upstream in turn.
-              const boundsStop = s.status === 'stopped' && m?.stop ? Object.values(BOUNDS_STOP).find((r) => r.code === m.stop) : undefined;
-              const code = s.code;
-              const result: RunResult = {
-                runId: ctx.runId,
-                status: s.status,
-                // A failed or stopped task's text is the remote side's own wording: it stays out of the output.
-                output: s.status === 'completed' || s.status === 'waiting' ? task.text : '',
-                ...(boundsStop ? { reason: { ...boundsStop } } : code ? { reason: { code, layer: 'harness', by } } : {}),
-                ...(reported.usage ? { usage: reported.usage } : {}),
-                ...(reported.costUsd !== undefined ? { costUsd: reported.costUsd } : {}),
-                // A state this adapter does not know is a failure; the native value is kept for the operator.
-                ...(task.native !== undefined ? { ext: { 'a2a.state': task.native } } : {}),
-              };
-              return mappings.in(read.raw, result);
-            } catch (err) {
-              // A task still working on the remote side is canceled there too; a failed cancel does not change the result.
-              if (taskId && signal.aborted) await cancel(taskId, ctx);
-              if (ctx.signal?.aborted) return ended({ code: 'aborted' }, 'stopped');
-              // A fixed detail: error text can carry URLs or credentials.
-              return isAbort(err) ? ended({ code: 'timeout', detail: 'remote agent timed out' }) : ended({ code: 'error', detail: RUN_FAILED });
-            } finally {
-              // Settled with what the remote run reported; an unreported spend keeps its whole reservation.
-              outbound?.reservation.settle(reported);
-            }
-          });
+        run: (input, init = {}) => send(input, init),
+        /**
+         * Sends the input as a follow-up message on the remote task that asked for it. An approval the remote agent waits
+         * for is decided on its side (its approval routes); the follow-up then continues the task.
+         */
+        async resume(checkpoint, answer, init = {}) {
+          const task = checkpoint as Partial<RemoteTask> | null;
+          if (!task || typeof task.taskId !== 'string') throw new RunRefused('invalid', 'not a checkpoint of this runtime');
+          if (!('input' in answer)) throw new RunRefused('invalid', 'the remote agent decides its own approvals: send the follow-up input once decided');
+          return send(answer.input, init, { taskId: task.taskId, contextId: typeof task.contextId === 'string' ? task.contextId : '' });
         },
       };
     },
   };
 }
+
+/** The remote task of a waiting run, which a follow-up continues. */
+interface RemoteTask { taskId: string; contextId: string }

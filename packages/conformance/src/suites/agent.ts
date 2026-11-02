@@ -14,7 +14,8 @@ export interface RuntimeFixtures {
   toolInput?: string;
   /**
    * RuntimePort version the runtime implements (`checkAdapter` passes its descriptor's; default: the core's). The
-   * behaviour checks (abort, stream ≡ run, caller, approval) apply from 1.1.0, the bounds checks from 1.2.0.
+   * behaviour checks (abort, stream ≡ run, caller, approval) apply from 1.1.0, the bounds checks from 1.2.0, the resume
+   * checks from 1.3.0 (for a runtime with `resume`).
    */
   portVersion?: string;
 }
@@ -161,8 +162,62 @@ export async function checkRuntime(port: RuntimePort, f: RuntimeFixtures = {}, c
     else c.skip(`behaviour: RuntimePort ${f.portVersion} predates the abort, stream, caller and approval checks (1.1.0)`);
     if (versionAtLeast(f.portVersion ?? PORT_VERSIONS.RuntimePort, '1.2.0')) await checkRunBounds(port, f, c);
     else c.skip(`bounds: RuntimePort ${f.portVersion} predates the run bounds checks (1.2.0)`);
+    if (!versionAtLeast(f.portVersion ?? PORT_VERSIONS.RuntimePort, '1.3.0')) c.skip(`resume: RuntimePort ${f.portVersion} predates the resume checks (1.3.0)`);
+    else if (!agent.resume) c.skip('resume: the runtime does not implement resume');
+    else await checkRunResume(port, f, c);
   }
   return c;
+}
+
+/**
+ * Resume (1.3.0, for a runtime with `resume`): a run whose tool call waits for an approval ends `waiting` with a JSON
+ * checkpoint; resuming it with the decision runs exactly that call first (same tool, same arguments) and the run no
+ * longer waits for it.
+ */
+async function checkRunResume(port: RuntimePort, f: RuntimeFixtures, c: Checks): Promise<void> {
+  if (!f.toolInput) { c.skip('resume: needs a toolInput fixture'); return; }
+  const name = f.agent!.name;
+  const calls: { tool: string; args: unknown }[] = [];
+  let waits = true;
+  const probe = Object.create(f.stack!) as Stack;
+  Object.assign(probe, {
+    toolsFor(agent: AgentSpec): ToolPort {
+      const tools = f.stack!.toolsFor(agent);
+      return {
+        ...(tools.name ? { name: tools.name } : {}),
+        listTools: (ctx) => tools.listTools(ctx),
+        async callTool(tool, args, ctx) {
+          calls.push({ tool, args: JSON.parse(JSON.stringify(args ?? {})) });
+          // The first call waits for a person; once decided, every call goes through.
+          if (waits) { waits = false; throw new ApprovalPending('conformance-approval', { by: 'conformance', tool, args }); }
+          return tools.callTool(tool, args, ctx);
+        },
+      };
+    },
+  });
+  const agent = await c.attempt('bind (resume)', () => port.bind(probe, f.agent!));
+  if (!agent?.resume) return;
+  const runId = `conformance-resume-${Date.now()}`;
+  let first: RunResult | undefined;
+  await c.attempt('run (resume)', async () => {
+    try { first = await agent.run(f.toolInput!, testContext({ agent: name, runId })); } catch (err) {
+      if (!(err instanceof ApprovalPending)) throw err;
+    }
+  });
+  if (!first) { c.skip('resume: the run let ApprovalPending through, so it has no checkpoint'); return; }
+  if (!c.expect(first.status === 'waiting', `resume: the run ended ${first.status}, expected waiting`)) return;
+  if (!c.expect(first.checkpoint !== undefined, 'resume: a waiting result must carry a checkpoint when the runtime implements resume')) return;
+  c.expect(JSON.stringify(JSON.parse(JSON.stringify(first.checkpoint))) === JSON.stringify(first.checkpoint), 'resume: the checkpoint must be plain JSON');
+  const pending = calls[0]!;
+  const before = calls.length;
+  const checkpoint = JSON.parse(JSON.stringify(first.checkpoint));
+  const resumed = await c.attempt('resume', () => agent.resume!(checkpoint, { approval: { id: 'conformance-approval', approved: true } }, testContext({ agent: name, runId })));
+  if (!resumed) return;
+  c.all(conforms('run-result', resumed), 'resumed result');
+  c.produced('resume', resumed);
+  const next = calls[before];
+  c.expect(!!next && next.tool === pending.tool && JSON.stringify(next.args) === JSON.stringify(pending.args), 'resume: the first call after resume must be the call that waited, with the same arguments');
+  c.expect(resumed.runId === runId, 'resume: the resumed run must keep the run id');
 }
 
 export async function checkState(port: StatePort, _f: unknown = {}, c = new Checks()): Promise<Checks> {

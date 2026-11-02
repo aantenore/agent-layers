@@ -80,6 +80,7 @@
         "reason": { "$ref": "common.json#/$defs/StopReason" },
         "usage": { "$ref": "common.json#/$defs/Usage" },
         "costUsd": { "type": "number", "minimum": 0 },
+        "checkpoint": { "description": "The checkpoint of a waiting run (since RuntimePort 1.3.0), as on RunResult; removed by the host." },
         "at": { "$ref": "common.json#/$defs/Time" }
       },
       "additionalProperties": false

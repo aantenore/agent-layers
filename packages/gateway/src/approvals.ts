@@ -1,5 +1,5 @@
 import {
-  ANONYMOUS, ATTR, CORE_VOCABULARIES, ConfigError, errorMessage, METRIC, publicCaller,
+  ANONYMOUS, approvalTarget, ATTR, CORE_VOCABULARIES, ConfigError, errorMessage, METRIC, publicCaller,
   type AccessQuestion, type AccessTarget, type Approval, type ApprovalPort, type ApprovalStatus, type Caller, type InboundContext, type InboundRoute, type Stack,
 } from '@agent-layers/core';
 import { errorResponse } from './http.ts';
@@ -19,15 +19,6 @@ export function approvalView(a: Approval): Approval {
 
 /** Who decided, as recorded on the approval: the verified caller as `kind:id`. */
 export const decidedBy = (caller: Caller | undefined): string => (caller ? `${caller.kind}:${caller.id}` : ANONYMOUS.id);
-
-/** The target of an approval question: the approval, with the risk and agent of the call it is about. */
-function targetOf(a: Approval): AccessTarget {
-  const t = a.request.question?.target;
-  return {
-    kind: 'approval', id: a.id, layer: 'identity', risk: t?.risk ?? 'exec', agent: a.request.agent,
-    attrs: { status: a.status, ...(t?.id ? { tool: t.id } : {}) },
-  };
-}
 
 /** Listing and unknown ids: no approval to describe. An unknown id counts as the most dangerous risk. */
 const collection: AccessTarget = { kind: 'approval', id: '*', layer: 'identity', risk: 'read', agent: '*' };
@@ -79,7 +70,7 @@ export function approvalRoutes(stack: Stack, opts: { path?: string } = {}): Inbo
     const id = idOf(req);
     if (!id) return errorResponse(404, 'no such approval', 'not_found_error');
     const found = await port!.get(id);
-    const refused = await authorize(action, found ? targetOf(found) : unknownTarget(id), ctx);
+    const refused = await authorize(action, found ? approvalTarget(found) : unknownTarget(id), ctx);
     if (refused) return refused;
     return found ?? errorResponse(404, 'no such approval', 'not_found_error');
   }

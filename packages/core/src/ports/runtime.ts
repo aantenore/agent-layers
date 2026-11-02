@@ -6,6 +6,7 @@ import type { InboundMount } from './channel.ts';
 import type { GuardStage } from './guard.ts';
 import type { Caller } from './identity.ts';
 import type { Finish, Message, ModelSettings, Usage } from './model.ts';
+import type { JsonValue } from './store.ts';
 
 /** Agent definition, runtime-neutral. Schema: spec/schemas/agent-spec.json. */
 export interface AgentSpec {
@@ -50,7 +51,7 @@ export type CoreRunEvent =
   | { type: 'tool.call'; id: string; tool: string; at?: string }
   | { type: 'tool.result'; id: string; tool: string; ok: boolean; durationMs?: number; at?: string }
   | { type: 'text'; text: string; at?: string }
-  | { type: 'run.end'; status: RunStatus; reason?: StopReason; usage?: Usage; costUsd?: number; at?: string };
+  | { type: 'run.end'; status: RunStatus; reason?: StopReason; usage?: Usage; costUsd?: number; checkpoint?: JsonValue; at?: string };
 
 /** Adapter event, `<namespace>.<name>`: stored and replayed, never read by the core. */
 export interface ExtRunEvent { type: `${string}.${string}`; at?: string; [k: string]: unknown }
@@ -71,12 +72,32 @@ export interface RunResult {
   costUsd?: number;
   events?: RunEvent[];
   ext?: Ext;
+  /**
+   * What the runtime needs to continue a `waiting` run with `RunnableAgent.resume` (since 1.3.0): plain JSON, opaque
+   * to the core. Present only on a waiting result. The host keeps it and removes it before the result leaves the stack.
+   */
+  checkpoint?: JsonValue;
 }
+
+/**
+ * The answer that continues a waiting run (since RuntimePort 1.3.0): the decision on the approval it waits for, or
+ * the input it asked for (`needs_input` from the runtime or a remote agent).
+ */
+export type ResumeAnswer =
+  | { approval: { id: string; approved: boolean; reason?: string } }
+  | { input: RunInput };
 
 export interface RunnableAgent {
   readonly name: string;
   run(input: RunInput, ctx?: Partial<CallContext>): Promise<RunResult>;
   stream?(input: RunInput, ctx?: Partial<CallContext>): AsyncIterable<RunEvent>;
+  /**
+   * Continues a waiting run from the `checkpoint` its result carried (since 1.3.0), with the same `ctx.runId`. The host
+   * has already recorded an approval decision: the runtime runs exactly the call that waited (the stack's tools find
+   * the decision), then the loop goes on; an `input` answer is added to the conversation after it. Without `resume`
+   * the host runs the agent again from its input.
+   */
+  resume?(checkpoint: JsonValue, answer: ResumeAnswer, ctx?: Partial<CallContext>): Promise<RunResult>;
 }
 
 /** Binds an agent spec to a runnable agent that uses the stack's ports. */

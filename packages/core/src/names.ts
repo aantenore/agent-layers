@@ -17,6 +17,10 @@ export const EVENT = Object.freeze({
   knowledgeError: 'agent.knowledge.error',
   extDropped: 'agent.ext.dropped',
   configWarning: 'agent.config.warning',
+  runResumed: 'agent.run.resumed',
+  runCancelled: 'agent.run.cancelled',
+  runKeepFailed: 'agent.run.keep_failed',
+  runControlFailed: 'agent.run.control_failed',
   costUnpriced: 'agent.cost.unpriced',
 });
 

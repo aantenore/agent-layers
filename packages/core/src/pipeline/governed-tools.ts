@@ -237,7 +237,7 @@ export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: G
       });
       const approval = out.ext?.['sdk.outcome'] === 'pending' ? out.ext['sdk.approval'] : undefined;
       if (typeof approval !== 'string') return out;
-      const pending = new ApprovalPending(approval, { tool: name, ...(opts.approval?.name ? { by: opts.approval.name } : {}) });
+      const pending = new ApprovalPending(approval, { tool: name, args: args ?? {}, ...(opts.approval?.name ? { by: opts.approval.name } : {}) });
       opts.onPending?.(pending, ctx);
       if (opts.pendingAs === 'error') throw pending;
       return out;

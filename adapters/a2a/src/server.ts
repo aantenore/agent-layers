@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  defineLimits, delegationProblems, limitValue, ownerDigest, tighterDelegation,
+  defineLimits, delegationProblems, limitValue, ownerDigest, RunRefused, tighterDelegation,
   type ChannelHost, type ChannelPort, type Delegation, type InboundContext, type InboundRoute, type LimitValue, type RunResult, type TraceContext,
 } from '@agent-layers/core';
 import {
@@ -76,8 +76,11 @@ const isJson = (req: Request) => /^application\/json\s*(;|$)/i.test(req.headers.
 const rpcResponse = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 
-/** A send's message: its text and context, and the bounds extension when the client activated it. */
-interface Inbound { text: string; contextId: string; boundsUri?: string; bounds?: Delegation }
+/**
+ * A send's message: its text and context, the task it continues (a follow-up), and the bounds extension when the
+ * client activated it.
+ */
+interface Inbound { text: string; contextId: string; taskId?: string; boundsUri?: string; bounds?: Delegation }
 
 /** The response header that tells the client which extension the server activated. */
 const activated = (m: Inbound): Record<string, string> => (m.boundsUri ? { [EXTENSION_HEADER]: m.boundsUri } : {});
@@ -140,7 +143,9 @@ function traceOf(req: Request, ctx: InboundContext): TraceContext | undefined {
 /**
  * Serves the stack's agents to other agents over A2A: an agent card per agent and the JSON-RPC methods of A2A 1.0
  * (SendMessage, SendStreamingMessage, GetTask, CancelTask), plus their 0.3 names. Runs go through the runtime with the
- * caller's identity. Mounted by the gateway, which authenticates callers; agent cards are public.
+ * caller's identity. A message that names an `input-required` task continues its run (`ChannelHost.resume`), and
+ * CancelTask cancels the run in the stack too (`ChannelHost.cancel`). Mounted by the gateway, which authenticates
+ * callers; agent cards are public.
  */
 export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a2a'): ChannelPort {
   const base = `/${(options.basePath ?? '/a2a').replace(/^\/+|\/+$/g, '')}`;
@@ -226,10 +231,19 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         const sessionId = `a2a-${(host.ownerDigest ?? ownerDigest())(owner)}-${contextId}`;
         // What the caller sent in the extension and in the host's own carrier: the host only lets it tighten the limits.
         const delegation = tighterDelegation(ctx.delegation, msg.bounds);
-        const done = host.run(agent, text, {
+        const stored = { value, owner, anonymous: !ctx.caller, controller } as StoredTask;
+        stored.done = track(stored, msg, host.run(agent, text, {
           runId: id, sessionId, signal: controller.signal, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(trace ? { trace } : {}),
           ...(delegation ? { delegation } : {}),
-        }).then((r) => {
+        }));
+        tasks.set(id, stored);
+        return stored;
+      }
+
+      /** Updates a task from its run when it ends: state, answer, figures, status message. */
+      function track(stored: StoredTask, msg: Inbound, run: Promise<RunResult>): Promise<void> {
+        const { value } = stored;
+        return run.then((r) => {
           value.state = value.state === 'canceled' ? 'canceled' : stateOfRun(r);
           if (value.state === 'completed') value.answer = r.output;
           // Usage and cost travel in the task's metadata, so a calling stack can account for this run.
@@ -237,15 +251,41 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
           if (Object.keys(metadata).length) value.metadata = metadata;
           if (msg.boundsUri) value.bounds = { uri: msg.boundsUri, report: boundsReport(r, metadata) };
           const said = SAID[value.state]?.(r) ?? 'The agent run failed.';
-          value.status = { messageId: randomUUID(), role: 'agent', text: said, contextId, taskId: id };
+          value.status = { messageId: randomUUID(), role: 'agent', text: said, contextId: value.contextId, taskId: value.id };
         }, () => {
           value.state = value.state === 'canceled' ? 'canceled' : 'failed';
-          value.status = { messageId: randomUUID(), role: 'agent', text: 'The agent run failed.', contextId, taskId: id };
+          value.status = { messageId: randomUUID(), role: 'agent', text: 'The agent run failed.', contextId: value.contextId, taskId: value.id };
         }).finally(() => { value.timestamp = new Date().toISOString(); stored.finishedAt = Date.now(); });
-        const stored: StoredTask = { value, owner, anonymous: !ctx.caller, controller, done };
-        tasks.set(id, stored);
-        return stored;
       }
+
+      /**
+       * A follow-up message on an `input-required` task continues its run (the host's `resume`) with the message as
+       * input: same task, same run. Another caller's task, or one that is not waiting for input, is refused.
+       */
+      function follow(msg: Inbound, ctx: InboundContext, trace: TraceContext | undefined): StoredTask {
+        const t = owned({ id: msg.taskId }, ctx);
+        if (t.value.state !== 'input-required') throw new RpcError(-32602, 'the task is not waiting for input');
+        if (msg.contextId !== t.value.contextId) throw new RpcError(-32602, 'message.contextId does not match the task');
+        const delegation = tighterDelegation(ctx.delegation, msg.bounds);
+        t.controller = new AbortController();
+        delete t.finishedAt;
+        delete t.value.answer;
+        t.value.state = 'working';
+        t.value.timestamp = new Date().toISOString();
+        const resumed = host.resume!(t.value.id, { input: msg.text }, {
+          signal: t.controller.signal, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(trace ? { trace } : {}), ...(delegation ? { delegation } : {}),
+        }).catch((err: unknown) => {
+          // The run could not be continued (cancelled, an approval still pending): the task stays as it was.
+          if (err instanceof RunRefused) return { runId: t.value.id, status: 'waiting', output: 'The task could not continue.', reason: { code: 'needs_input' } } satisfies RunResult;
+          throw err;
+        });
+        t.done = track(t, msg, resumed);
+        return t;
+      }
+
+      /** Starts a task, or continues one when the message names a task (and the host can resume runs). */
+      const begin = (agent: string, msg: Inbound, ctx: InboundContext, trace: TraceContext | undefined): StoredTask =>
+        (msg.taskId !== undefined && host.resume ? follow(msg, ctx, trace) : start(agent, msg, ctx, trace));
 
       /**
        * The message of a send, and the bounds it carries when the client activated the bounds extension (header or
@@ -259,9 +299,10 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         const text = partsText(m.parts);
         if (!text.trim()) throw new RpcError(-32602, 'message.parts has no text');
         const contextId = typeof m.contextId === 'string' && /^[\w.:-]{1,128}$/.test(m.contextId) ? m.contextId : randomUUID();
-        if (!boundsOn) return { text, contextId };
+        const follows = typeof m.taskId === 'string' && m.taskId ? { taskId: m.taskId } : {};
+        if (!boundsOn) return { text, contextId, ...follows };
         const active = BOUNDS_URIS.filter((u) => requested(req, m).has(u));
-        if (!active.length) return { text, contextId };
+        if (!active.length) return { text, contextId, ...follows };
         let bounds: Delegation | undefined;
         for (const uri of active) {
           const data = m.metadata && typeof m.metadata === 'object' ? m.metadata[uri] : undefined;
@@ -269,7 +310,7 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
           if (delegationProblems(data).length) throw new RpcError(-32602, `message.metadata["${uri}"] is not valid bounds data`);
           bounds = tighterDelegation(bounds, pickBounds(data));
         }
-        return { text, contextId, boundsUri: active[0]!, ...(bounds ? { bounds } : {}) };
+        return { text, contextId, ...follows, boundsUri: active[0]!, ...(bounds ? { bounds } : {}) };
       }
 
       function owned(params: Record<string, any> | undefined, ctx: InboundContext): StoredTask {
@@ -281,7 +322,7 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
 
       function stream(req: Request, rpcId: Rpc['id'], agent: string, params: Rpc['params'], ctx: InboundContext, v: WireVersion, trace: TraceContext | undefined): Response {
         const msg = readMessage(req, params);
-        const task = start(agent, msg, ctx, trace);
+        const task = begin(agent, msg, ctx, trace);
         const enc = new TextEncoder();
         const frame = (result: unknown) => enc.encode(`data: ${JSON.stringify({ jsonrpc: '2.0', id: rpcId, result })}\n\n`);
         const body = new ReadableStream<Uint8Array>({
@@ -314,7 +355,7 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
           switch (method.op) {
             case 'send': {
               const sent = readMessage(req, msg.params);
-              const task = start(agent, sent, ctx, traceOf(req, ctx));
+              const task = begin(agent, sent, ctx, traceOf(req, ctx));
               const cfg = msg.params?.configuration ?? {};
               const immediate = v === A2A_VERSION ? cfg.returnImmediately === true : cfg.blocking === false;
               if (!immediate) await task.done;
@@ -329,6 +370,8 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
               if (TERMINAL.includes(t.value.state)) throw new RpcError(ERRORS.taskNotCancelable, 'task is not cancelable');
               t.value.state = 'canceled';
               t.controller.abort();
+              // The run is cancelled in the stack too: a waiting one is withdrawn with its approval and cannot be resumed.
+              if (host.cancel) await host.cancel(t.value.id, { ...(ctx.caller ? { by: ctx.caller } : {}), reason: 'canceled by the client' }).catch(() => {});
               await t.done;
               return rpcResponse({ jsonrpc: '2.0', id, result: getResult(t.value, v) });
             }

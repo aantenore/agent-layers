@@ -2,7 +2,7 @@ import type { OwnerDigest } from '../inbound.ts';
 import type { CallContext, Delegation, PortBase } from './base.ts';
 import type { Caller } from './identity.ts';
 import type { ModelPort } from './model.ts';
-import type { RunEvent, RunInput, RunResult } from './runtime.ts';
+import type { ResumeAnswer, RunEvent, RunInput, RunResult } from './runtime.ts';
 import type { TraceContext } from './telemetry.ts';
 import type { ToolPort } from './tool.ts';
 
@@ -19,7 +19,26 @@ export interface ChannelHost {
   tools?(): ToolPort;
   /** Digest of a session owner, keyed with the stack's `sessions.secret`: pass it to `inboundSessionId`. */
   ownerDigest?: OwnerDigest;
+  /**
+   * Continues a waiting run of this stack with an answer, as `ctx.caller` (since 1.2.0). Rejects with `RunRefused`
+   * (unknown run, another caller's run, a cancelled run, an answer that does not fit what the run waits for).
+   */
+  resume?(runId: string, answer: ResumeAnswer, ctx?: Partial<CallContext>): Promise<RunResult>;
+  /** Cancels a run of this stack: aborts it when in flight here, or withdraws it when waiting (since 1.2.0). */
+  cancel?(runId: string, opts?: CancelOptions): Promise<CancelResult>;
 }
+
+/** Who cancels a run, and why (since ChannelPort 1.2.0). */
+export interface CancelOptions {
+  /** The verified caller cancelling; absent: anonymous. */
+  by?: Caller;
+  /** Kept with the run and on its withdrawn approval; never shown to other callers. */
+  reason?: string;
+  signal?: AbortSignal;
+}
+
+/** What a cancel did: `aborted` a run in flight in this process, or `cancelled` a waiting run. */
+export interface CancelResult { runId: string; outcome: 'aborted' | 'cancelled' }
 
 export interface ChannelHandle {
   url?: string;

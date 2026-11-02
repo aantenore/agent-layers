@@ -52,7 +52,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   DeployPort: { port: 'DeployPort', layer: 'infra', version: '1.0.0', description: 'Turn service specs into running endpoints' },
   SecretPort: { port: 'SecretPort', layer: 'infra', version: '1.0.0', description: 'Resolve secret references' },
   ModelPort: { port: 'ModelPort', layer: 'llm', version: '1.1.0', description: 'Model calls with tool calls, optionally streamed' },
-  RuntimePort: { port: 'RuntimePort', layer: 'harness', version: '1.2.0', description: 'Bind an agent spec to a runnable agent' },
+  RuntimePort: { port: 'RuntimePort', layer: 'harness', version: '1.3.0', description: 'Bind an agent spec to a runnable agent' },
   StatePort: { port: 'StatePort', layer: 'harness', version: '1.0.0', description: 'Session event log' },
   StorePort: { port: 'StorePort', layer: 'harness', version: '1.0.0', description: 'Durable small JSON values by key, with compare-and-set' },
   TriggerPort: { port: 'TriggerPort', layer: 'interface', version: '1.1.0', description: 'Start runs from events and schedules' },
@@ -62,7 +62,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   ToolPort: { port: 'ToolPort', layer: 'tool', version: '1.1.0', description: 'List and call tools' },
   IdentityPort: { port: 'IdentityPort', layer: 'identity', version: '1.1.0', description: 'Verify inbound credentials into a caller' },
   CredentialPort: { port: 'CredentialPort', layer: 'identity', version: '1.0.0', description: 'Outbound tokens, on behalf of a user or as the agent' },
-  AuthorizationPort: { port: 'AuthorizationPort', layer: 'identity', version: '1.2.0', description: 'Decide whether an action is allowed' },
+  AuthorizationPort: { port: 'AuthorizationPort', layer: 'identity', version: '1.3.0', description: 'Decide whether an action is allowed' },
   ApprovalPort: { port: 'ApprovalPort', layer: 'identity', version: '1.2.0', description: 'Human approval for actions the policy marks ask' },
   GuardPort: { port: 'GuardPort', layer: 'guardrail', version: '1.0.0', description: 'Allow, block or redact text at four stages' },
   CachePort: { port: 'CachePort', layer: 'cache', version: '1.0.0', description: 'Key/value cache for model replies; usable by any layer' },
@@ -70,7 +70,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   TelemetryPort: { port: 'TelemetryPort', layer: 'telemetry', version: '1.0.0', description: 'Spans, events and metrics tagged with agent.layer' },
   EvaluatorPort: { port: 'EvaluatorPort', layer: 'eval', version: '1.0.0', description: 'Score a run of a dataset case' },
   FeedbackPort: { port: 'FeedbackPort', layer: 'eval', version: '1.0.0', description: 'User feedback attached to runs, as evaluation data' },
-  ChannelPort: { port: 'ChannelPort', layer: 'interface', version: '1.1.0', description: 'Expose agents to people, apps and other agents' },
+  ChannelPort: { port: 'ChannelPort', layer: 'interface', version: '1.2.0', description: 'Expose agents to people, apps and other agents' },
 });
 
 /** Semver per port. */

@@ -74,7 +74,7 @@ A vocabulary is a set of values defined by the SDK. The core branches only on co
 | `finish` | `end`, `limit`, `tools`, `refused`, `other` | values with `like` | `ModelReply.finish` |
 | `risk` | `read`, `write`, `exec` | values with `like` | `ToolSpec.risk`, policy rules |
 | `effect` | `allow`, `ask`, `deny` | no | policy rules |
-| `action` | `call`, `decide`, `list` | values with `like` | `AccessQuestion.action`, policy rules |
+| `action` | `call`, `decide`, `list`, `resume`, `cancel` | values with `like` | `AccessQuestion.action`, policy rules |
 | `stage` | `input`, `output`, `tool_args`, `tool_result` | no | `GuardCheck.stage` |
 | `guardAction` | `allow`, `block`, `redact` | no | `GuardVerdict.action` |
 | `guardLabel` | `pii`, `secret`, `injection`, `toxicity`, `policy`, `other` | values with `like` | `GuardVerdict.labels` |

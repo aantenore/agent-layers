@@ -29,6 +29,10 @@ model request unchanged (keys in the model adapter's namespace, for example `ope
 The adapter reads `ext["sdk.approval"]` of governed tool results and writes no `ext` keys; the stack adds
 `ext["sdk.approval"] = {id, by, tool}` to a waiting result.
 
+A waiting result carries a checkpoint (RuntimePort 1.3.0): the conversation so far and the calls of the last answer
+still to run, the waiting one first. `resume` (through `Stack.resume`) runs exactly those calls, adds an input answer
+after their results, and goes on with the next turn; the model is not asked the first answer again.
+
 ## Options
 
 | Option | Type | Default | Meaning |

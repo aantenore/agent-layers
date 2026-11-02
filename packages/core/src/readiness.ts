@@ -24,7 +24,8 @@ export interface Readiness {
   /**
    * Warnings that do not fail the check: ext keys an adapter reads that nothing in the profile produces, and, on the
    * production tier, a model cache shared across callers while knowledge sources are configured, and inbound
-   * channels or triggers without `sessions.secret`; on any tier, a cost budget without model prices.
+   * channels or triggers without `sessions.secret`, and approvals without a store (waiting runs kept in memory); on any
+   * tier, a cost budget without model prices.
    */
   warnings: string[];
 }
@@ -65,7 +66,7 @@ export async function readiness(config: ResolvedConfig, registry: AdapterRegistr
     if (empty) problems.push({ kind: 'missing-layer', slot, message: `${slot}: required by profile ${config.profile ?? '(base)'} but not configured` });
   }
   const warnings = [...language.warnings];
-  if (config.tier === 'production') warnings.push(...sharedCacheWarnings(config), ...sessionSecretWarnings(config));
+  if (config.tier === 'production') warnings.push(...sharedCacheWarnings(config), ...sessionSecretWarnings(config), ...waitingRunWarnings(config));
   warnings.push(...pricingWarnings(config));
   return { ok: problems.length === 0 && !limits.some((l) => l.severity === 'fail'), tier: config.tier, requires, problems, limits, warnings };
 }
@@ -76,6 +77,13 @@ function sharedCacheWarnings(config: ResolvedConfig): string[] {
   const knowledge = layers.knowledge && typeof layers.knowledge === 'object' ? Object.values(layers.knowledge).filter((v) => v != null) : [];
   if (config.pipeline.cacheScope !== 'shared' || layers.cache == null || knowledge.length === 0) return [];
   return ['pipeline.cacheScope is shared while knowledge sources are configured: a cached answer built from one caller\'s passages can be served to another caller; use "caller"'];
+}
+
+/** Runs waiting for an approval are kept to be resumed: without a store they live in one process's memory. */
+function waitingRunWarnings(config: ResolvedConfig): string[] {
+  const layers = config.layers as Record<string, unknown>;
+  if (layers.approval == null || layers.store != null) return [];
+  return ['layers.approval is set but layers.store is not: runs waiting for an approval are kept in memory, lost on restart and not shared by replicas, so they cannot be resumed there; configure a store'];
 }
 
 /** A cost budget is enforced only on priced model calls (and on what remote agents report). */

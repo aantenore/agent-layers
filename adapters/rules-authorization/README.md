@@ -38,9 +38,10 @@ RFC 8693 says only the current actor counts for access control and prior actors 
 at the current actor only, and a prior actor matters only to a rule that asks for it with `actors`. A caller without
 actors never matches `actor` or `actors`.
 
-Actions (AuthorizationPort 1.2.0): tool calls ask `call`; the gateway's approval routes ask `list` to read approvals
+Actions (AuthorizationPort 1.3.0): tool calls ask `call`; the gateway's approval routes ask `list` to read approvals
 and `decide` to decide or cancel one, on a target of kind `approval` whose `risk` is the risk of the call being
-approved ([docs/gateway.md](../../docs/gateway.md#approvals)). A rule with `actions` matches those actions (a core
+approved ([docs/gateway.md](../../docs/gateway.md#approvals)); the run routes ask `resume` and `cancel` on a target
+of kind `run`, and acting on another caller's run asks `decide` ([docs/gateway.md](../../docs/gateway.md#runs)). A rule with `actions` matches those actions (a core
 value also matches values added `like` it in the stack's `vocabularies`); a rule without `actions` matches tool calls
 only. So the catch-all rules below never let anyone decide an approval: only the first rule does, for operators.
 

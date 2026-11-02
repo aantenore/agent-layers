@@ -265,7 +265,7 @@
     "Action": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_.-]{0,63}$",
-      "description": "What an access question asks about. Core values: call (a tool), decide and list (approvals, since AuthorizationPort 1.2.0); config may add values like one of them."
+      "description": "What an access question asks about. Core values: call (a tool), decide and list (approvals, since AuthorizationPort 1.2.0), resume and cancel (runs, since 1.3.0); config may add values like one of them."
     },
     "PolicyEffect": { "enum": ["allow", "ask", "deny"], "description": "What a policy rule decides. Closed." },
     "GuardStage": {
