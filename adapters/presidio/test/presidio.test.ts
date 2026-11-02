@@ -4,6 +4,12 @@ import { createMappings, Vocabularies, type MappingFn } from '@agent-layers/core
 import { createPresidioGuard, type PresidioOptions } from '../src/index.ts';
 import { mockPresidio, redirecting, type MockPresidio } from './mock-presidio.ts';
 
+// The timeout timers are unref'd on purpose; a ref'd interval keeps the event loop (and the test runner) alive while a test awaits one.
+const alive = async <T>(pending: Promise<T>): Promise<T> => {
+  const keep = setInterval(() => {}, 1000);
+  try { return await pending; } finally { clearInterval(keep); }
+};
+
 let presidio: MockPresidio;
 before(async () => { presidio = await mockPresidio(); });
 after(() => presidio.close());
@@ -146,7 +152,7 @@ test('failure reasons come from a fixed set and never from error text', async ()
   const w = await createPresidioGuard({ analyzerUrl: 'http://x', anonymizerUrl: 'http://x' }, { fetch: notJson }).check(input('hello'));
   assert.deepEqual(w, { action: 'block', reason: 'presidio unavailable: invalid response' });
   const slow = async (_u: string, init: RequestInit) => new Promise<Response>((_r, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)));
-  const t = await createPresidioGuard({ analyzerUrl: 'http://x', anonymizerUrl: 'http://x', timeoutMs: 20 }, { fetch: slow }).check(input('hello'));
+  const t = await alive(createPresidioGuard({ analyzerUrl: 'http://x', anonymizerUrl: 'http://x', timeoutMs: 20 }, { fetch: slow }).check(input('hello')));
   assert.deepEqual(t, { action: 'block', reason: 'presidio unavailable: timeout' });
 });
 

@@ -8,6 +8,11 @@ import { fakeRun, tempProject } from './helpers.ts';
 
 const service: ServiceSpec = { name: 'api', image: 'example/api:1', health: { command: ['true'] } };
 const ctx = { name: 'deploy', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
+// The timeout timers are unref'd on purpose; a ref'd interval keeps the event loop (and the test runner) alive while a test awaits one.
+const alive = async <T>(pending: Promise<T>): Promise<T> => {
+  const keep = setInterval(() => {}, 1000);
+  try { return await pending; } finally { clearInterval(keep); }
+};
 
 test('health check timing takes effect when set', () => {
   const file = composeFor([service], { healthIntervalS: 10, healthTimeoutS: 2, healthRetries: 3 });
@@ -53,14 +58,14 @@ test('commandTimeoutMs stops a slow command and fails without echoing its output
     const seen = { signals: [] as (AbortSignal | undefined)[] };
     const deploy = createComposeDeploy({ commandTimeoutMs: 1000 }, { cwd: root, run: hangingRun(seen) });
     const started = Date.now();
-    await assert.rejects(deploy.up([{ name: 'llm', layer: 'llm' }]), (err: Error) => {
+    await assert.rejects(alive(deploy.up([{ name: 'llm', layer: 'llm' }])), (err: Error) => {
       assert.equal(err.message, 'compose up timed out after 1000 ms and was stopped');
       assert.ok(!/hunter2|partial/.test(err.message));
       return true;
     });
     assert.ok(Date.now() - started < 5000);
     assert.equal(seen.signals.length, 1);
-    await assert.rejects(deploy.down([{ name: 'llm', layer: 'llm' }]), /compose down timed out/);
+    await assert.rejects(alive(deploy.down([{ name: 'llm', layer: 'llm' }])), /compose down timed out/);
   } finally {
     await cleanup();
   }
@@ -82,11 +87,11 @@ test('unbounded commandTimeoutMs never reaches a timer; a caller abort is not re
 });
 
 test('the default runner kills a command on abort: SIGTERM, then SIGKILL for one that ignores it', async () => {
-  const polite = await spawnRun(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { cwd: process.cwd(), signal: AbortSignal.timeout(200) });
+  const polite = await alive(spawnRun(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { cwd: process.cwd(), signal: AbortSignal.timeout(200) }));
   assert.notEqual(polite.code, 0);
   const stubborn = 'process.on("SIGTERM", () => {}); console.log("ready"); setTimeout(() => {}, 60000)';
   const started = Date.now();
-  const res = await spawnRun(process.execPath, ['-e', stubborn], { cwd: process.cwd(), signal: AbortSignal.timeout(1500), killGraceMs: 300 });
+  const res = await alive(spawnRun(process.execPath, ['-e', stubborn], { cwd: process.cwd(), signal: AbortSignal.timeout(1500), killGraceMs: 300 }));
   assert.notEqual(res.code, 0);
   const elapsed = Date.now() - started;
   assert.ok(elapsed >= 1750 && elapsed < 10_000, `SIGTERM was ignored, so exit came after the grace period (${elapsed} ms)`);
@@ -97,7 +102,7 @@ test('commandTimeoutMs through the real runner stops a slow command', async () =
   try {
     const slow = 'setTimeout(() => {}, 60000)';
     const deploy = createComposeDeploy({ commandTimeoutMs: 1000, command: [process.execPath, '-e', slow, '--'] }, { cwd: root });
-    await assert.rejects(deploy.up([{ name: 'llm', layer: 'llm' }]), /compose up timed out after 1000 ms/);
+    await assert.rejects(alive(deploy.up([{ name: 'llm', layer: 'llm' }])), /compose up timed out after 1000 ms/);
   } finally {
     await cleanup();
   }

@@ -8,10 +8,15 @@ const ctx = { name: 'presidio', env: {}, cwd: process.cwd(), telemetry: noopTele
 const base = { analyzerUrl: 'http://x', anonymizerUrl: 'http://x' };
 const input = { stage: 'input' as const, text: 'hello', agent: 'a', runId: 'r' };
 const hang = (_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal!.reason)));
+// The timeout timers are unref'd on purpose; a ref'd interval keeps the event loop (and the test runner) alive while a test awaits one.
+const alive = async <T>(pending: Promise<T>): Promise<T> => {
+  const keep = setInterval(() => {}, 1000);
+  try { return await pending; } finally { clearInterval(keep); }
+};
 
 test('timeoutMs takes effect; unbounded sets no timer', async () => {
   const slow = createPresidioGuard({ ...base, timeoutMs: 20 }, { fetch: hang });
-  assert.equal((await slow.check(input)).reason, 'presidio unavailable: timeout');
+  assert.equal((await alive(slow.check(input))).reason, 'presidio unavailable: timeout');
   const seen: { signal?: AbortSignal | null } = {};
   const probe = async (_url: string, init: RequestInit) => { seen.signal = init.signal; return Response.json({}); };
   await createPresidioGuard({ ...base, timeoutMs: 'unbounded' }, { fetch: probe }).check(input);

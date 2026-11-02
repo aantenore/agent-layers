@@ -4,6 +4,11 @@ import { Vocabularies } from '@agent-layers/core';
 import { createHttpGuard, parseVerdict, type HttpGuardOptions } from '../src/index.ts';
 import { redirecting, shim, type Shim } from './shim.ts';
 
+// The timeout timers are unref'd on purpose; a ref'd interval keeps the event loop (and the test runner) alive while a test awaits one.
+const alive = async <T>(pending: Promise<T>): Promise<T> => {
+  const keep = setInterval(() => {}, 1000);
+  try { return await pending; } finally { clearInterval(keep); }
+};
 let service: Shim;
 before(async () => { service = await shim(); });
 beforeEach(() => service.reset());
@@ -101,7 +106,7 @@ test('failure reasons come from a fixed set and never from error text', async ()
   assert.equal(await reasonOf(async () => new Response('<html>hello</html>')), 'guard service unavailable: invalid response');
   assert.equal(await reasonOf(async () => new Response(JSON.stringify({ action: 'maybe', reason: 'hello' }))), 'guard service unavailable: invalid response');
   assert.equal(await reasonOf(async () => new Response('echo hello', { status: 429 })), 'guard service unavailable: HTTP 429');
-  assert.equal(await reasonOf((_u, init) => new Promise((_r, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)))), 'guard service unavailable: timeout');
+  assert.equal(await alive(reasonOf((_u, init) => new Promise((_r, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason))))), 'guard service unavailable: timeout');
 });
 
 for (const status of [307, 308]) {
