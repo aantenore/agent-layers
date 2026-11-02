@@ -1,6 +1,6 @@
 {
   "name": "@agent-layers/cli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "agent-layers command line: init, dev, check, test, eval, deploy, gateway",
   "keywords": ["agent-layers", "cli", "agents", "scaffold"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/cli#readme",
@@ -40,12 +40,12 @@
     "prepack": "npm run build && node ../../scripts/copy-license.mjs"
   },
   "dependencies": {
-    "@agent-layers/conformance": "^0.3.0",
-    "@agent-layers/core": "^0.3.0",
-    "@agent-layers/gateway": "^0.3.0"
+    "@agent-layers/conformance": "^0.4.0",
+    "@agent-layers/core": "^0.4.0",
+    "@agent-layers/gateway": "^0.4.0"
   },
   "devDependencies": {
-    "@agent-layers/adapters": "0.3.0",
+    "@agent-layers/adapters": "0.4.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

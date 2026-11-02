@@ -2,7 +2,11 @@
 
 Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released with the same version. See [RELEASING.md](RELEASING.md).
 
-## 0.4.0 - unreleased
+## 0.4.0 - 2026-11-02
+
+Every package moves to 0.4.0 together: the adapters ship in the new package `@agent-layers/adapters`, which the
+core of this release loads by subpath (`ADAPTERS_PACKAGE`); the adapters and the gateway use core exports that 0.3.0
+does not have (`RunRefused`, `runControl`, `runTarget`).
 
 ### Breaking: package consolidation
 
@@ -93,6 +97,17 @@ included), tests to `packages/adapters/test/<name>`, and the adapter skeleton fr
 
 - `ApprovalPending` carries the arguments of the call that waits (`args`), kept by the host to resume the run and
   never written to the result.
+
+### Verified
+
+- Release checks: clean build of the 6 workspaces in dependency order (`core`, `adapters`, `conformance`, `gateway`,
+  `cli`, the private `examples/adapter-package`), typecheck, package tests (1044 tests: 1032 passed, 12 skipped
+  live tests without their services, 0 failed; `adapters` 815, `core` 153, `gateway` 32, `conformance` 21, `cli`
+  19, `examples/adapter-package` 4) and documentation checks.
+- Tarballs of the 5 public packages (`npm pack`) installed in an empty project: `@agent-layers/core` and the subpaths
+  `mock-model`, `sqlite-store`, `openai-compatible`, `basic-runtime` and `functions` import and export their
+  descriptors; `packageLoader` resolves `mock-model` by name and returns nothing for an unknown name; `reinloop`
+  without its optional peer fails to load naming `reinloop`; an old package name points to its subpath.
 
 ## 0.3.0 - 2026-11-02
 
