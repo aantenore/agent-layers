@@ -2,7 +2,7 @@
 
 Every package under `packages/*` and `adapters/*` is released with the same version. See [RELEASING.md](RELEASING.md).
 
-## 0.3.0 - unreleased
+## 0.3.0 - 2026-11-02
 
 Every package moves to 0.3.0 together: adapters of this release use core exports that 0.2.0 does not have
 (`ApprovalPending`, `runEndOf`, `inboundSessionId`, `ownerDigest`, `versionAtLeast`).
