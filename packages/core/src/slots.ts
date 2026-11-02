@@ -11,6 +11,7 @@ const DEFS: [string, PortName, SlotShape][] = [
   ['model', 'ModelPort', 'single'],
   ['runtime', 'RuntimePort', 'single'],
   ['state', 'StatePort', 'single'],
+  ['store', 'StorePort', 'single'],
   ['knowledge', 'KnowledgePort', 'map'],
   ['memory', 'MemoryPort', 'single'],
   ['ingestion', 'IngestionPort', 'map'],

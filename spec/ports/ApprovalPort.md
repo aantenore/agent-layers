@@ -1,6 +1,6 @@
 # ApprovalPort
 
-Layer: `identity` (L6 Identity & access) · Version: 1.1.0 · Conformance: `checkApproval`
+Layer: `identity` (L6 Identity & access) · Version: 1.2.0 · Conformance: `checkApproval`
 
 ## Purpose
 
@@ -18,6 +18,10 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
   Resolve when the approval is no longer pending, or with the still pending approval when `timeoutMs` elapses.
 - `lookup(key: String, opts?: {consume?: Boolean}) → Approval?` (optional, since 1.1.0)
   Return the latest approval requested with this `key` that has not been consumed, or nothing. With `consume: true`, an approved approval is marked consumed in the same step and is never returned again.
+- `list(opts?: {status?: ApprovalStatus, limit?: Integer}) → [Approval]` (optional, since 1.2.0)
+  Return the approvals with `status` (default `pending`), oldest first, at most `limit`. The adapter caps `limit` and uses its cap when `limit` is absent.
+- `cancel(id: String, opts?: {by?: String, reason?: String}) → Approval` (optional, since 1.2.0)
+  Withdraw a pending approval: status `cancelled`, `decidedBy` set to `by`, `reason` kept. Return the updated approval.
 
 ## Data shapes
 
@@ -26,9 +30,9 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `id` | String, required | Assigned by the port. |
-| `status` | `pending`, `approved`, `denied` or `expired`, required | State of the approval. |
+| `status` | `pending`, `approved`, `denied`, `expired` or `cancelled` (since 1.2.0), required | State of the approval. |
 | `request` | ApprovalRequest, required | What is being asked. |
-| `decidedBy?` | String | Who answered. |
+| `decidedBy?` | String | Who answered or cancelled. |
 | `reason?` | String | Why. |
 | `ext?` | Ext | Adapter-specific fields. |
 
@@ -37,24 +41,26 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 ## Semantics
 
 - A new approval is always `pending`.
-- Status changes once: `pending` → `approved`, `denied` or `expired`. A decided approval stays decided; deciding it again is an error.
+- Status changes once: `pending` → `approved`, `denied`, `expired` or `cancelled`. A decided approval stays decided; deciding or cancelling it again is an error.
 - `expired` is derived: a pending approval past its `expiresAt` reads as `expired` without any call being made. A port may also apply a default lifetime.
 - `wait` must not poll in a way that misses a decision: it returns as soon as `decide` is called. On timeout it returns the pending approval and does not fail; the caller decides what to do.
+- `list` derives `expired` as `get` does: a pending approval past its `expiresAt` is listed under `expired`, not `pending`. Listed approvals keep their `AccessQuestion` (arguments included, so a person can decide), and their caller never carries a credential.
+- `cancel` withdraws a request nobody should answer any more (the run was abandoned, the request was a mistake). A `wait` in progress resolves with `cancelled`, and the waiting call is refused. It is not a decision on the merits: a later identical call asks again, as after `expired`, while a denial stands.
 - `lookup` only sees approvals requested with a `key`. Consuming affects only `approved` approvals: a pending, denied or expired one stays visible. Consuming is atomic: two concurrent `lookup(key, {consume: true})` calls never both receive the same approved approval.
 - In the tool pipeline: for an `ask` effect, the stack computes the request key, a stable hash of the session id (the run id when there is no session), the caller (`kind:id`, or `anonymous`) and the access question with the call's arguments. When the port has `lookup`, the stack first calls `lookup(key, {consume: true})`:
   - `approved`: the call proceeds, once; the approval is consumed, so the next identical call asks again.
   - `denied`: the call is denied, with the reason when present; the denial stands for that key.
   - `pending`: the call returns the same approval id; no new approval is created.
-  - `expired` or nothing: the stack calls `request` with the key.
-  Without an approval port, `ask` denies. With one, the call waits up to a configured time (default: it does not wait); an approval decided `approved` during that wait is consumed by the waiting call. If the answer is still pending, the tool result has `ok: false`, carries `ext["sdk.approval"]` (the approval id) and `ext["sdk.outcome"] = "pending"`; inside a run the stack's tools throw `ApprovalPending` instead (for a runtime built for RuntimePort 1.1.0 or later; one built for 1.0.0 gets the pending result), and the run ends `waiting` with `ext["sdk.approval"] = {id, by?, tool?}` on its result (see [RuntimePort](RuntimePort.md)). Channels pass the pending result on in their protocol (MCP: `_meta["agent-layers/approval"] = {id}` on the tool result). A later run in the same session, by the same caller, that makes the same call (same tool, same arguments) gets the decision. Only `approved` lets the call proceed; `denied` and `expired` deny, with the reason when present. A port without `lookup` (1.0.0) is asked again on every call.
+  - `expired`, `cancelled` or nothing: the stack calls `request` with the key.
+  Without an approval port, `ask` denies. With one, the call waits up to a configured time (default: it does not wait); an approval decided `approved` during that wait is consumed by the waiting call. If the answer is still pending, the tool result has `ok: false`, carries `ext["sdk.approval"]` (the approval id) and `ext["sdk.outcome"] = "pending"`; inside a run the stack's tools throw `ApprovalPending` instead (for a runtime built for RuntimePort 1.1.0 or later; one built for 1.0.0 gets the pending result), and the run ends `waiting` with `ext["sdk.approval"] = {id, by?, tool?}` on its result (see [RuntimePort](RuntimePort.md)). Channels pass the pending result on in their protocol (MCP: `_meta["agent-layers/approval"] = {id}` on the tool result). A later run in the same session, by the same caller, that makes the same call (same tool, same arguments) gets the decision. Only `approved` lets the call proceed; `denied`, `expired` and `cancelled` deny, with the reason when present. A port without `lookup` (1.0.0) is asked again on every call.
 - Approvals contain the tool arguments. Keep them as private as the run itself and do not log them beyond what the audit trail needs.
-- Answering is not tied to a channel: any component with access to `decide` (a chat button, a web page, a command) can answer.
+- Answering is not tied to a channel: any component with access to `decide` (a chat button, a web page, a command) can answer. Record who answered in `by`: the verified identity of the person, never a value the person typed. The gateway's approval routes (see [docs/gateway.md](../../docs/gateway.md#approvals)) list, read, decide and cancel over HTTP, authorized through [AuthorizationPort](AuthorizationPort.md) with the actions `list` and `decide`, and record the verified caller as `kind:id`.
 
 ## Errors
 
 - Resolves to nothing: `get` of an unknown id.
-- Rejects: `decide` or `wait` for an unknown id; `decide` for an approval that is no longer pending; store unreachable; cancellation of `wait`.
-- Returned as a result: `denied` and `expired` are statuses, not errors.
+- Rejects: `decide`, `cancel` or `wait` for an unknown id; `decide` or `cancel` for an approval that is no longer pending; store unreachable; cancellation of `wait`.
+- Returned as a result: `denied`, `expired` and `cancelled` are statuses, not errors.
 
 ## Escape hatch
 
@@ -69,10 +75,12 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 - `wait` with a short timeout on an undecided approval resolves with status `pending`.
 - A `wait` in progress resolves with `approved` after `decide` approves the approval, and `decide` returns status `approved`.
 - When the port has `lookup`: an unknown key resolves to nothing; an approval requested with a key is found by it; consuming leaves a pending approval in place; an approved approval is returned once with `consume` and never again; a denial survives `consume`.
+- For an adapter declaring 1.2.0 or later that has `list` and `cancel`: `list` returns pending approvals only, oldest first, as `approval.json`, without a caller credential, and respects `limit`; `cancel` gives status `cancelled` with `decidedBy`, resolves a `wait` in progress, removes the approval from the pending list and adds it to `list({status: "cancelled"})`; deciding or cancelling it again rejects, and so does cancelling an unknown id.
 - `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.2.0 — optional `list({status, limit})` and `cancel(id, {by, reason})`, status `cancelled`: approvals can be reviewed and withdrawn from anywhere, for example the gateway's approval routes
 - 1.1.0 — optional `lookup(key, {consume})` and `ApprovalRequest.key`: a later identical call in the same session uses the decision instead of asking again
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `ApprovalRequest.question` (was `access`), an `AccessQuestion`; pending approvals surface as `ext["sdk.approval"]` and the run status `waiting`
 - 0.2.0 — the embedded access request may carry an `anonymous` subject; `subject.properties.authenticated` added

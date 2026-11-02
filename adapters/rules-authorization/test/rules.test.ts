@@ -91,3 +91,21 @@ test('the options schema accepts actor, actors and delegated and refuses wrong t
     await assert.rejects(registry.create('AuthorizationPort', 'rules-authorization', options(bad), ctx), /rules|when|actor|delegat|additional|invalid/i, JSON.stringify(bad));
   }
 });
+
+test('approval actions match only rules that name them; the default never allows them', async () => {
+  const question = (action: string, roles: string[]): AccessQuestion => ({
+    ...sampleQuestion({ roles }), action, target: { kind: 'approval', id: 'apr-1', layer: 'identity', risk: 'write', agent: 'support' },
+  });
+  const port = createRulesAuthorization({
+    rules: [{ effect: 'allow', actions: ['decide', 'list'], when: { roles: ['operator'] } }, { effect: 'allow', when: { authenticated: true } }],
+    default: 'allow',
+  });
+  assert.equal((await port.evaluate(question('decide', ['operator']))).allowed, true);
+  assert.equal((await port.evaluate(question('list', ['operator']))).allowed, true);
+  const other = await port.evaluate(question('decide', ['support']));
+  assert.deepEqual(other, { allowed: false, reason: 'no rule matched action "decide" (denied)' }, 'a rule without actions never opens decide');
+  assert.equal((await port.evaluate(sampleQuestion({ roles: ['support'] }))).allowed, true, 'tool calls still match rules without actions');
+  const vocab = new Vocabularies([{ action: { add: { approve: { like: 'decide' } } } }]);
+  const liked = createRulesAuthorization({ rules: [{ effect: 'allow', actions: ['decide'] }] }, 'r', () => vocab);
+  assert.equal((await liked.evaluate(question('approve', []))).allowed, true, 'a rule on a core action matches values added like it');
+});

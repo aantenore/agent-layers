@@ -52,12 +52,15 @@ export interface CredentialPort extends PortBase {
   token(audience: string, opts?: { caller?: Caller; scopes?: string[]; signal?: AbortSignal }): Promise<string>;
 }
 
-/** Actions an access question asks about. Core value `call`; config may add values `like` it. */
-export type Action = 'call' | (string & {});
+/**
+ * Actions an access question asks about. Core values: `call` (a tool), `decide` and `list` (approvals, since
+ * AuthorizationPort 1.2.0); config may add values `like` one of them.
+ */
+export type Action = 'call' | 'decide' | 'list' | (string & {});
 
 /** What is being accessed. */
 export interface AccessTarget {
-  /** `tool` today. */
+  /** `tool` for a tool call, `approval` for an approval read or decided through the gateway. */
   kind: string;
   id: string;
   layer: Layer;
@@ -89,7 +92,8 @@ export interface AuthorizationPort extends PortBase {
   evaluate(q: AccessQuestion, opts?: { signal?: AbortSignal }): Promise<AccessDecision>;
 }
 
-export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired';
+/** `cancelled` (since 1.2.0): withdrawn while pending, see `ApprovalPort.cancel`. */
+export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled';
 
 export interface ApprovalRequest {
   question: AccessQuestion;
@@ -129,6 +133,16 @@ export interface ApprovalPort extends PortBase {
    * call asks again.
    */
   lookup?(key: string, opts?: { consume?: boolean }): Promise<Approval | undefined>;
+  /**
+   * Approvals with `status` (default `pending`; an expired one counts as `expired`), oldest first, at most `limit`
+   * (capped by the adapter). Since 1.2.0.
+   */
+  list?(opts?: { status?: ApprovalStatus; limit?: number }): Promise<Approval[]>;
+  /**
+   * Withdraws a pending approval: status `cancelled`, `decidedBy` = `by`. A waiting call is refused; a later identical
+   * call asks again. Rejects like `decide` for an unknown or no longer pending approval. Since 1.2.0.
+   */
+  cancel?(id: string, opts?: { by?: string; reason?: string }): Promise<Approval>;
 }
 
 /** Copy of a caller without its credential, safe for guards, events and traces. */

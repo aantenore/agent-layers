@@ -2,14 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
-  ATTR, coerceLimits, configuredAdapters, ConfigError, EVENT, findRoute, GATEWAY_LIMITS, InboundRejected, limitList, limitValue, readiness, validateLimits,
+  ATTR, coerceLimits, configuredAdapters, ConfigError, EVENT, findRoute, routeMatches, GATEWAY_LIMITS, InboundRejected, limitList, limitValue, readiness, validateLimits,
   type Caller, type ChannelPort, type GatewayConfig, type TraceContext, type InboundContext, type InboundRoute, type Stack, type TelemetryPort,
   type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
+import { approvalRoutes } from './approvals.ts';
 import { BoundsHeaderError, delegationOf } from './bounds.ts';
 import { BodyTooLarge, errorResponse, readBody, toRequest, writeResponse } from './http.ts';
 
 export { BodyTooLarge, errorResponse } from './http.ts';
+export { DEFAULT_APPROVALS_PATH, approvalRoutes, approvalView, decidedBy } from './approvals.ts';
 export { BoundsHeaderError, delegationOf, parseAgentBounds, parseAgentLineage } from './bounds.ts';
 
 /** A channel or trigger instance of the stack that the gateway mounts. Instances listed in `stack.ports.triggers` are triggers. */
@@ -182,6 +184,17 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
         const clash = mounted.find((m) => m.route.path === route.path && (!m.route.methods || !route.methods || m.route.methods.some((x) => route.methods!.includes(x))));
         if (clash) throw new ConfigError([`gateway: ${route.path} is mounted by both "${clash.instance}" and "${name}"`]);
         mounted.push({ route, instance: name });
+      }
+    }
+    // Approval routes: off unless configured; authenticated like every route, then authorized per request.
+    const approvals = opts.approvals;
+    if (approvals?.enabled) {
+      const inbound = [...mounted];
+      for (const route of approvalRoutes(stack, approvals.path ? { path: approvals.path } : {})) {
+        const at = route.path.replace(/\/\*$/, '');
+        const clash = inbound.find((m) => routeMatches(m.route, at) || routeMatches(route, m.route.path.replace(/\/\*$/, '')));
+        if (RESERVED.some((r) => routeMatches(route, r)) || clash) throw new ConfigError([`gateway.approvals: ${route.path} clashes with ${clash ? `"${clash.instance}"` : 'a reserved path'}`]);
+        mounted.push({ route, instance: 'approvals' });
       }
     }
   } catch (err) {

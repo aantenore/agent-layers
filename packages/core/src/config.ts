@@ -21,7 +21,7 @@ import { Vocabularies, vocabularyProblems, type VocabulariesConfig } from './voc
 export interface AdapterRef { adapter: string; name?: string; options?: Record<string, unknown>; stages?: GuardStage[] }
 export interface AppendList { $merge: 'append'; items: AdapterRef[] }
 
-type SingleSlots = 'deploy' | 'secrets' | 'model' | 'runtime' | 'state' | 'memory' | 'identity' | 'credentials' | 'authorization' | 'approval' | 'router' | 'cache' | 'feedback';
+type SingleSlots = 'deploy' | 'secrets' | 'model' | 'runtime' | 'state' | 'store' | 'memory' | 'identity' | 'credentials' | 'authorization' | 'approval' | 'router' | 'cache' | 'feedback';
 type MapSlots = 'knowledge' | 'ingestion' | 'tools';
 type ListSlots = 'guardrails' | 'telemetry' | 'eval' | 'channels' | 'triggers';
 
@@ -100,6 +100,12 @@ export interface GatewayConfig {
    * of the header named by `header` (`header`, for API keys). The identity adapter verifies it either way.
    */
   auth?: { scheme?: 'bearer' | 'header'; header?: string };
+  /**
+   * HTTP routes over the approval port: `GET <path>` lists, `GET <path>/<id>` reads, `POST <path>/<id>` decides and
+   * `DELETE <path>/<id>` cancels. Off unless `enabled`; each request is authenticated and authorized through the
+   * authorization port (actions `list` and `decide`, target kind `approval`).
+   */
+  approvals?: { enabled?: boolean; path?: string };
 }
 
 /** Client sessions of inbound channels and triggers. */

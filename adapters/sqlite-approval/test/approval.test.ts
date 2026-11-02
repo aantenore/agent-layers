@@ -177,7 +177,7 @@ test('a request for a key with a pending approval reuses it, across handles on o
   await a.decide(r1.id, { approved: true });
   assert.equal((await b.lookup('k', { consume: true }))?.status, 'approved');
   const expiring = await a.request({ ...req, key: 'old', expiresAt: new Date(Date.now() + 10).toISOString() });
-  await sleep(20);
+  await sleep(30);
   assert.notEqual((await b.request({ ...req, key: 'old' })).id, expiring.id, 'an expired request is not reused');
   await Promise.all([a.close(), b.close()]);
 });
@@ -223,4 +223,22 @@ test('consumed and expired rows older than retainMs are pruned on open and on la
   await port.request({ ...req, key: 'fresh' });
   assert.equal(rows(port), 3, 'on a request a minute later: the consumed row is gone');
   await Promise.all([port.close(), reopened.close()]);
+});
+
+test('list and cancel: expired is derived, a cancel by another handle is seen by wait, cancelled rows are pruned', async (t) => {
+  const [waiter, other] = [createSqliteApproval({ path: file('cancel'), pollMs: 20 }), createSqliteApproval({ path: file('cancel') })];
+  const old = await waiter.request({ ...req, expiresAt: new Date(Date.now() + 10).toISOString() });
+  const open = await waiter.request(req);
+  await sleep(30);
+  assert.deepEqual((await other.list()).map((a) => a.id), [open.id]);
+  assert.deepEqual((await other.list({ status: 'expired' })).map((a) => a.id), [old.id]);
+  const waiting = waiter.wait(open.id, { timeoutMs: 5000 });
+  await other.cancel(open.id, { by: 'ops' });
+  assert.deepEqual([(await waiting).status, (await waiting).decidedBy], ['cancelled', 'ops']);
+  assert.deepEqual(await other.list(), []);
+  await Promise.all([waiter.close(), other.close()]);
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 2000 });
+  const pruned = createSqliteApproval({ path: file('cancel'), retainMs: 1000 });
+  assert.equal(await pruned.get(open.id), undefined, 'a cancelled row older than retainMs is pruned on open');
+  await pruned.close();
 });

@@ -2,17 +2,18 @@
 
 Maps **local rule list** → **AuthorizationPort** (layer `identity`). Tier: prototype, production.
 
-Decides whether a tool call is allowed from an ordered list of rules; the first rule that matches wins. Rules match
-tool name globs, risk levels and the caller's kind, roles, scopes and delegation chain. The core asks the ApprovalPort before it reaches
-this port, so an `ask` rule that arrives here counts as not allowed without approval. When no rule matches, the
-`default` decides (deny unless set).
+Decides whether a tool call, or an approval action, is allowed from an ordered list of rules; the first rule that
+matches wins. Rules match tool name globs, risk levels, actions and the caller's kind, roles, scopes and delegation
+chain. The core asks the ApprovalPort before it reaches this port, so an `ask` rule that arrives here counts as not
+allowed without approval. When no rule matches, the `default` decides for a tool call (deny unless set); any other
+action is denied.
 
 ## Options
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `rules` | object[] | required | Rules with `effect` (`allow`, `ask`, `deny`), optional `tools` globs, `risk` list and `when` (`roles`, `scopes`, `kind`, `authenticated`, `actor`, `actors`, `delegated`) |
-| `default` | `allow` \| `deny` | `deny` | Decision when no rule matches |
+| `rules` | object[] | required | Rules with `effect` (`allow`, `ask`, `deny`), optional `tools` globs, `risk` list, `actions` list and `when` (`roles`, `scopes`, `kind`, `authenticated`, `actor`, `actors`, `delegated`) |
+| `default` | `allow` \| `deny` | `deny` | Decision for a tool call when no rule matches; other actions are always denied then |
 
 `when.authenticated: true` matches any verified caller (user or agent) and never an anonymous one; scope allow and
 `ask` rules with it so the default posture stays anonymous denied. `risk` takes core values (`read`, `write`, `exec`)
@@ -33,6 +34,12 @@ RFC 8693 says only the current actor counts for access control and prior actors 
 at the current actor only, and a prior actor matters only to a rule that asks for it with `actors`. A caller without
 actors never matches `actor` or `actors`.
 
+Actions (AuthorizationPort 1.2.0): tool calls ask `call`; the gateway's approval routes ask `list` to read approvals
+and `decide` to decide or cancel one, on a target of kind `approval` whose `risk` is the risk of the call being
+approved ([docs/gateway.md](../../docs/gateway.md#approvals)). A rule with `actions` matches those actions (a core
+value also matches values added `like` it in the stack's `vocabularies`); a rule without `actions` matches tool calls
+only. So the catch-all rules below never let anyone decide an approval: only the first rule does, for operators.
+
 ```json
 {
   "layers": {
@@ -40,6 +47,7 @@ actors never matches `actor` or `actors`.
       "adapter": "rules-authorization",
       "options": {
         "rules": [
+          { "effect": "allow", "actions": ["decide", "list"], "when": { "roles": ["operator"] } },
           { "effect": "deny", "tools": ["shell__*"] },
           { "effect": "ask", "risk": ["write", "exec"], "when": { "authenticated": true } },
           { "effect": "allow", "tools": ["docs__*"], "when": { "actor": ["notes-agent"] } },

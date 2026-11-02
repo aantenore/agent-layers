@@ -68,6 +68,7 @@ The `gateway` block of the stack config, overridable per profile; `serveStack` t
 | `host` | string | `127.0.0.1` | Interface to listen on |
 | `inbound` | string[] | every mountable one | Instance names of the channels and triggers to mount |
 | `anonymous` | boolean | `false` | Accept requests without a credential; refused on the production tier |
+| `approvals` | `{ enabled, path }` | off, `/approvals` | Routes to list, read, decide and cancel approvals, each request authorized (actions `list`, `decide`); see [docs/gateway.md](../../docs/gateway.md#approvals) |
 | `maxBodyBytes` | integer | `1048576` | Largest request body (413 above) |
 | `requestTimeoutMs` | integer | `300000` | Time limit of one request, streams included (504) |
 | `headersTimeoutMs` | integer | `30000` | Time a client has to send the request headers |

@@ -15,6 +15,8 @@ export const MIGRATIONS: readonly string[] = [
      created_at INTEGER NOT NULL
    );
    CREATE INDEX approvals_by_key ON approvals (key) WHERE key IS NOT NULL;`,
+  // 2: `list` by status, oldest first.
+  'CREATE INDEX approvals_by_status ON approvals (status, created_at);',
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

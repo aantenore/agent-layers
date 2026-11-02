@@ -42,6 +42,7 @@ standard.
 | `POST /mcp` | Model Context Protocol (streamable HTTP) | [`mcp`](../adapters/mcp) | ToolPort, KnowledgePort as read-only tools | policy, approval, authorization, `tool_args` and `tool_result` guards, credentials for the caller |
 | `GET /.well-known/agent-card.json`, `POST /a2a/<agent>` | Agent2Agent (A2A) 1.0, 0.3 accepted | [`a2a`](../adapters/a2a) | RuntimePort | everything a run goes through |
 | `POST /v1/events` | CloudEvents 1.0 HTTP binding | [`cloudevents`](../adapters/cloudevents) | TriggerPort, then RuntimePort | the trigger's caller; everything a run goes through |
+| `GET /approvals`, `GET`/`POST`/`DELETE /approvals/<id>` (off by default) | JSON over HTTP | gateway | ApprovalPort | authorization of every request (actions `list`, `decide`); see [Approvals](#approvals) |
 | `GET /healthz`, `GET /readyz` | | gateway | liveness; readiness gate of the profile | |
 
 ```mermaid
@@ -125,6 +126,43 @@ The gateway mounts routes and never starts triggers: a trigger that only starts 
 in the `agent-layers gateway` output); run schedules with `agent-layers dev` or `stack.start()` in a process of their
 own.
 
+## Approvals
+
+A pending approval can be answered over HTTP, by a web page, a chat bot or a command, without access to the stack's
+process. The routes are off unless `gateway.approvals.enabled` is `true`; `gateway.approvals.path` moves them
+(default `/approvals`). They need an approval adapter and an authorization adapter, or the gateway refuses to start.
+
+| Request | Does | Action asked | Answers |
+|---|---|---|---|
+| `GET /approvals?status=pending&limit=50` | lists approvals, oldest first (status `pending` by default; `limit` capped by the approval adapter) | `list` | `{ "approvals": [...] }` |
+| `GET /approvals/<id>` | reads one | `list` | the approval |
+| `POST /approvals/<id>` with `{ "decision": "approve" \| "deny", "reason"?: "..." }` | decides | `decide` | the approval, or 409 when it is no longer pending |
+| `DELETE /approvals/<id>` (body `{ "reason"?: "..." }` optional) | cancels: withdraws a pending approval | `decide` | the approval, or 409 |
+
+Every request is authenticated like any route (401 without a valid credential), then the AuthorizationPort is asked
+with the verified caller, the action and a target of kind `approval` (the call's risk and agent for one approval;
+`id: "*"`, risk `read` for the list; risk `exec` for an id that does not exist, so a refused caller cannot probe ids).
+No allowing answer, or an error, is a 403. A rule written for tool calls never matches: policy rules match an action
+only when they name it in `actions` (see [AuthorizationPort](../spec/ports/AuthorizationPort.md)), and
+`rules-authorization` never applies its `default` to these actions. The decision is recorded with `decidedBy` set to
+the verified caller as `kind:id` (`user:olga`); the body cannot choose it. Listed approvals show the access question,
+arguments included, so a person can decide; the request key and any credential are left out. The list route and
+`DELETE` exist only when the approval adapter implements `list` and `cancel` (ApprovalPort 1.2.0). Each decision is the
+telemetry event `gateway.approval.decided`, and each authorization answer counts in `agent.access.decisions`.
+
+```json
+{
+  "gateway": { "approvals": { "enabled": true } },
+  "layers": {
+    "approval": { "adapter": "sqlite-approval" },
+    "authorization": {
+      "adapter": "rules-authorization",
+      "options": { "rules": [{ "effect": "allow", "actions": ["decide", "list"], "when": { "roles": ["operator"] } }] }
+    }
+  }
+}
+```
+
 ## Configure
 
 ```json
@@ -146,7 +184,8 @@ own.
 ```
 
 `gateway` takes `port`, `host`, `inbound` (instance names to mount; every mountable channel and trigger by default),
-`anonymous`, `auth` (`scheme`: `bearer` by default or `header`, with `header` the header name), `publicOrigin`, `cors`,
+`anonymous`, `auth` (`scheme`: `bearer` by default or `header`, with `header` the header name), `approvals`
+(`enabled`, `path`; see [Approvals](#approvals)), `publicOrigin`, `cors`,
 `allowedOrigins`, `allowedHosts` and the limits `maxBodyBytes`, `requestTimeoutMs`,
 `headersTimeoutMs`, `bodyTimeoutMs`, `closeGraceMs`, `corsMaxAgeS`, `maxRequestIdChars` and `maxTraceChars`, and a profile can override
 any of them. `agent-layers gateway --profile production [--port n] [--host h]` composes the

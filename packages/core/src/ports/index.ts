@@ -8,6 +8,7 @@ export type * from './identity.ts';
 export type * from './knowledge.ts';
 export type * from './model.ts';
 export type * from './runtime.ts';
+export type * from './store.ts';
 export type * from './telemetry.ts';
 export type * from './tool.ts';
 export type * from './catalog.ts';

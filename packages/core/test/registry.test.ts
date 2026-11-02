@@ -6,14 +6,15 @@ import { testAdapter } from './helpers.ts';
 const ctx = { name: 'x', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
 
 test('PORT_VERSIONS covers every port and each port names its layer', () => {
-  assert.equal(Object.keys(PORT_VERSIONS).length, 21);
+  assert.equal(Object.keys(PORT_VERSIONS).length, 22);
   const bumped: Record<string, string> = {
-    ApprovalPort: '1.1.0', RuntimePort: '1.2.0', TriggerPort: '1.1.0', ModelPort: '1.1.0', RouterPort: '1.1.0', ToolPort: '1.1.0',
-    KnowledgePort: '1.1.0', IdentityPort: '1.1.0', AuthorizationPort: '1.1.0', ChannelPort: '1.1.0',
+    ApprovalPort: '1.2.0', RuntimePort: '1.2.0', TriggerPort: '1.1.0', ModelPort: '1.1.0', RouterPort: '1.1.0', ToolPort: '1.1.0',
+    KnowledgePort: '1.1.0', IdentityPort: '1.1.0', AuthorizationPort: '1.2.0', ChannelPort: '1.1.0',
   };
   for (const p of Object.values(PORTS)) assert.equal(PORT_VERSIONS[p.port], bumped[p.port] ?? '1.0.0', p.port);
   assert.equal(PORTS.TriggerPort.layer, 'interface');
   assert.equal(PORTS.ApprovalPort.layer, 'identity');
+  assert.equal(PORTS.StorePort.layer, 'harness');
 });
 
 test('defineAdapter rejects inconsistent descriptors', () => {

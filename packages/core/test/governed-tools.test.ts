@@ -101,7 +101,7 @@ test('a throwing tool becomes an error result', async () => {
 });
 
 test('approvals are found again by session, caller and arguments; an approval decided during the wait is used once', async () => {
-  const store: { id: string; key?: string; status: 'pending' | 'approved' | 'denied' | 'expired'; used?: boolean }[] = [];
+  const store: { id: string; key?: string; status: 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled'; used?: boolean }[] = [];
   const view = (a: (typeof store)[number]) => ({ id: a.id, status: a.status, request: { question: {} as AccessQuestion, agent: 'x', runId: 'r', ...(a.key ? { key: a.key } : {}) } });
   let decideOnWait: 'approved' | undefined;
   const approval: ApprovalPort = {
@@ -133,6 +133,8 @@ test('approvals are found again by session, caller and arguments; an approval de
   assert.equal((await tools.callTool('t__pay', { n: 1 }, s1)).text, 'Denied: approval denied', 'a denial stands');
   store[4]!.status = 'expired';
   assert.equal((await tools.callTool('t__pay', { n: 1 }, s1)).ext?.['sdk.approval'], 'a6', 'expired: a new request');
+  store[5]!.status = 'cancelled';
+  assert.equal((await tools.callTool('t__pay', { n: 1 }, s1)).ext?.['sdk.approval'], 'a7', 'cancelled: a new request');
 
   decideOnWait = 'approved';
   const waiting = governedTools({ t: fakeTools([{ name: 'pay', risk: 'write' }], log) }, { policy: [{ effect: 'ask' }], approval, approvalTimeoutMs: 10 });

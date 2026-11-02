@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { accessQuestion, evaluatePolicy, governedTools, policySubject, type AccessQuestion, type AuthorizationPort, type PolicyRule } from '../src/index.ts';
+import { accessQuestion, evaluatePolicy, governedTools, policySubject, Vocabularies, type AccessQuestion, type AuthorizationPort, type PolicyRule } from '../src/index.ts';
 import { ctx, fakeTools } from './helpers.ts';
 
 const spec = { name: 'db__write', description: 'w', params: {}, risk: 'write' as const };
@@ -64,4 +64,17 @@ test('actor rules: the current actor by default, prior actors only when a rule a
   assert.equal(evaluatePolicy([{ effect: 'deny', when: { delegated: false } }], subject(plain)), 'deny');
   const q = { caller: { ...chain, actors: [...chain.actors, { id: 7 }] }, action: 'call', target: { kind: 'tool', id: 'erp__pay', layer: 'tool' as const, risk: 'write', agent: 'a' } };
   assert.deepEqual(policySubject(q as never).caller?.actors, chain.actors, 'malformed actors are dropped');
+});
+
+test('actions: a rule without actions matches tool calls only; a rule on a core action matches the values added like it', () => {
+  const vocab = new Vocabularies([{ action: { add: { approve: { like: 'decide' }, invoke: { like: 'call' } } } }]);
+  const rules: PolicyRule[] = [{ effect: 'allow', actions: ['decide'], when: { roles: ['operator'] } }, { effect: 'deny' }];
+  const operator = { id: 'o', kind: 'user' as const, roles: ['operator'], scopes: [] };
+  assert.equal(evaluatePolicy(rules, { tool: 'apr-1', risk: 'write', caller: operator, action: 'decide' }, vocab), 'allow');
+  assert.equal(evaluatePolicy(rules, { tool: 'apr-1', risk: 'write', caller: operator, action: 'approve' }, vocab), 'allow');
+  assert.equal(evaluatePolicy(rules, { tool: 'apr-1', risk: 'read', caller: operator, action: 'list' }, vocab), undefined, 'the catch-all deny has no actions: it does not match list');
+  assert.equal(evaluatePolicy(rules, { tool: 'db__write', risk: 'write', caller: operator }, vocab), 'deny', 'no action is a tool call');
+  assert.equal(evaluatePolicy(rules, { tool: 'db__write', risk: 'write', caller: operator, action: 'invoke' }, vocab), 'deny', 'an action added like call is a tool call');
+  const q: AccessQuestion = { caller: operator, action: 'list', target: { kind: 'approval', id: '*', layer: 'identity', risk: 'read', agent: '*' } };
+  assert.equal(policySubject(q).action, 'list');
 });

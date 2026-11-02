@@ -14,7 +14,7 @@ user or as its own identity.
 | [IdentityPort](../../spec/ports/IdentityPort.md) | `verify` an inbound credential into a `Caller` |
 | [CredentialPort](../../spec/ports/CredentialPort.md) | `token` for an outbound call, on behalf of the caller or as the agent |
 | [AuthorizationPort](../../spec/ports/AuthorizationPort.md) | `evaluate` an `AccessQuestion` into an `AccessDecision` |
-| [ApprovalPort](../../spec/ports/ApprovalPort.md) | Human approval for actions the policy marks `ask` |
+| [ApprovalPort](../../spec/ports/ApprovalPort.md) | Human approval for actions the policy marks `ask`: `request`, `get`, `decide`, `wait`, `lookup`, `list`, `cancel` |
 
 Data shapes: [caller.json](../../spec/schemas/caller.json), [access-question.json](../../spec/schemas/access-question.json),
 [access-decision.json](../../spec/schemas/access-decision.json), [approval.json](../../spec/schemas/approval.json).
@@ -119,7 +119,7 @@ of its chain (see [harness](harness.md#run-bounds) and [0002](../decisions/0002-
 ## Boundaries
 
 - Who may do what is identity; whether the content is acceptable is [guardrail](guardrail.md).
-- Authorization is local rules first (`allow` / `ask` / `deny` by tool, risk and `when: {roles, scopes, kind, actor, actors, delegated}`), then
+- Authorization is local rules first (`allow` / `ask` / `deny` by tool, risk, `actions` and `when: {roles, scopes, kind, actor, actors, delegated}`), then
   the external decision point. A local `deny` is final, and a failing decision point denies (fail closed).
 - Credentials and tokens never appear in events, logs or traces. Telemetry masks attribute keys that look like secrets.
 - Every access decision is emitted to [telemetry](telemetry.md) as an audit event (`agent.access.check` span,
@@ -134,6 +134,12 @@ of its chain (see [harness](harness.md#run-bounds) and [0002](../decisions/0002-
   `sessions.secret` (see [gateway](../gateway.md)). A second call for the same key while its approval is pending gets
   the same approval. See [harness](harness.md) and [ApprovalPort](../../spec/ports/ApprovalPort.md);
   `sqlite-approval` keeps approvals across restarts.
+- Answering is itself authorized. The gateway's approval routes (`gateway.approvals`, off by default; see
+  [gateway](../gateway.md#approvals)) list, read, decide and cancel approvals; every request is authenticated, then the
+  AuthorizationPort is asked with action `list` (reads) or `decide` (decisions and cancels) on a target of kind
+  `approval`. Policy rules match these actions only when they name them (`actions`), so rules written for tools never
+  open them, and no allowing answer refuses the request. The decision records the verified caller (`kind:id`) as
+  `decidedBy`. A cancelled approval refuses the waiting call; a later identical call asks again.
 
 ## How to swap
 
@@ -149,6 +155,7 @@ of its chain (see [harness](harness.md#run-bounds) and [0002](../decisions/0002-
 | `static-identity` | A static token table (development only); IdentityPort and CredentialPort |
 | `rules-authorization` | A local rule list |
 | `memory-approval` | An in-process approval store |
+| `sqlite-approval` | Durable approvals in one SQLite file |
 | `oidc` | OIDC / OAuth 2.0: JWT verification, RFC 8693 token exchange, client credentials |
 | `authzen` | OpenID AuthZEN access evaluation |
 | `opa` | Open Policy Agent data API |

@@ -6,12 +6,13 @@ export type RulesAuthorizationRule = PolicyRule;
 export interface RulesAuthorizationOptions {
   /** Rules in order; the first one that matches decides. */
   rules: RulesAuthorizationRule[];
-  /** Decision when no rule matches. */
+  /** Decision for a tool call (`call`) when no rule matches. Other actions (`decide`, `list`) are always denied then. */
   default?: 'allow' | 'deny';
 }
 
 /**
- * Authorization from a local rule list. `ask` means "not allowed without approval": the core consults
+ * Authorization from a local rule list. A rule without `actions` matches tool calls only, and `default` applies to them
+ * only: an approval action (`decide`, `list`) is allowed by a rule that names it, or denied. `ask` means "not allowed without approval": the core consults
  * the ApprovalPort before it reaches this port, so a question that gets here with `ask` is refused.
  * `vocabularies` is read at each call (the stack's, so risks added in config match the rules on their `like` value);
  * without it, or while it is unavailable, only core values count and an unknown risk is treated as `exec`.
@@ -25,11 +26,15 @@ export function createRulesAuthorization(options: RulesAuthorizationOptions, nam
     name,
     async evaluate(q) {
       const v = vocab();
-      switch (evaluatePolicy(options.rules, policySubject(q, v), v)) {
+      const subject = policySubject(q, v);
+      switch (evaluatePolicy(options.rules, subject, v)) {
         case 'allow': return { allowed: true, reason: 'allowed by rule' };
         case 'deny': return { allowed: false, reason: 'denied by rule' };
         case 'ask': return { allowed: false, reason: 'approval required' };
-        default: return { allowed: fallback === 'allow', reason: `no rule matched (default ${fallback})` };
+        default:
+          // `default` was written for tool calls: approval actions need a rule that names them.
+          if (v.core('action', subject.action ?? 'call') !== 'call') return { allowed: false, reason: `no rule matched action "${subject.action}" (denied)` };
+          return { allowed: fallback === 'allow', reason: `no rule matched (default ${fallback})` };
       }
     },
   };
@@ -45,7 +50,7 @@ export const adapter = defineAdapter<'AuthorizationPort', RulesAuthorizationOpti
   maps: { technology: 'local rule list' },
   portVersion: PORT_VERSIONS.AuthorizationPort,
   tiers: ['prototype', 'production'],
-  description: 'Decides tool access from an ordered list of allow, ask and deny rules. Fails closed by default.',
+  description: 'Decides tool calls and approval actions from an ordered list of allow, ask and deny rules. Fails closed by default.',
   optionsSchema: {
     type: 'object',
     properties: {
@@ -57,6 +62,7 @@ export const adapter = defineAdapter<'AuthorizationPort', RulesAuthorizationOpti
             effect: { enum: ['allow', 'ask', 'deny'] },
             tools: strings,
             risk: { type: 'array', items: { type: 'string', pattern: VOCAB_NAME.source } },
+            actions: { type: 'array', items: { type: 'string', pattern: VOCAB_NAME.source } },
             when: {
               type: 'object',
               properties: {

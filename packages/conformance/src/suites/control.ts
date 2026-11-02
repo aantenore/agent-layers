@@ -1,4 +1,4 @@
-import { GUARD_STAGES, validate, type AccessQuestion, type ApprovalPort, type ApprovalRequest, type AuthorizationPort, type Caller, type CredentialPort, type GuardPort, type GuardStage, type GuardVerdict, type IdentityPort } from '@agent-layers/core';
+import { GUARD_STAGES, PORT_VERSIONS, validate, versionAtLeast, type AccessQuestion, type ApprovalPort, type ApprovalRequest, type AuthorizationPort, type Caller, type CredentialPort, type GuardPort, type GuardStage, type GuardVerdict, type IdentityPort } from '@agent-layers/core';
 import { Checks } from '../check.ts';
 import { conforms, schema } from '../schemas.ts';
 
@@ -74,7 +74,12 @@ export async function checkAuthorization(port: AuthorizationPort, f: Authorizati
   return c;
 }
 
-export async function checkApproval(port: ApprovalPort, _f: unknown = {}, c = new Checks()): Promise<Checks> {
+export interface ApprovalFixtures {
+  /** ApprovalPort version the adapter implements (`checkAdapter` passes its descriptor's; default: the core's). `list` and `cancel` are checked from 1.2.0. */
+  portVersion?: string;
+}
+
+export async function checkApproval(port: ApprovalPort, f: ApprovalFixtures = {}, c = new Checks()): Promise<Checks> {
   const req = { question: sampleQuestion({ risk: 'write' }), agent: 'conformance', runId: 'conformance-run' };
   const a = await c.attempt('request', () => port.request(req));
   if (!a) return c;
@@ -91,7 +96,42 @@ export async function checkApproval(port: ApprovalPort, _f: unknown = {}, c = ne
   c.produced('decide', decided);
   c.expect((await c.attempt('wait', () => waiting))?.status === 'approved', 'wait: must resolve once decided');
   if (port.lookup) await checkApprovalLookup(port, req, c);
+  const version = f.portVersion ?? PORT_VERSIONS.ApprovalPort;
+  if (!versionAtLeast(version, '1.2.0')) c.skip(`list, cancel: ApprovalPort ${version} predates them (1.2.0)`);
+  else if (!port.list || !port.cancel) c.skip('list, cancel: optional, not implemented');
+  else await checkApprovalListCancel(port, req, c);
   return c;
+}
+
+/** `list` and `cancel` (ApprovalPort 1.2.0, optional): pending approvals oldest first; a cancelled one leaves the list. */
+async function checkApprovalListCancel(port: ApprovalPort, base: ApprovalRequest, c: Checks): Promise<void> {
+  const list = port.list!.bind(port);
+  const cancel = port.cancel!.bind(port);
+  const runId = `conformance-list-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const first = await c.attempt('request to list', () => port.request({ ...base, runId }));
+  const second = await c.attempt('request to list again', () => port.request({ ...base, runId }));
+  if (!first || !second) return;
+  const pending = await c.attempt('list', () => list());
+  if (pending) {
+    pending.forEach((a, i) => c.all(conforms('approval', a), `listed approval[${i}]`));
+    c.produced('list', pending);
+    c.expect(pending.every((a) => a.status === 'pending'), 'list: without status must return pending approvals only');
+    const ids = pending.map((a) => a.id);
+    c.expect(ids.includes(first.id) && ids.indexOf(first.id) < ids.indexOf(second.id), 'list: must return pending approvals, oldest first');
+    c.expect(!JSON.stringify(pending).includes('"credential"'), 'list: approvals must not carry a caller credential');
+  }
+  c.expect((await c.attempt('list limit', () => list({ limit: 1 })))?.length === 1, 'list: must respect limit');
+  const waiting = port.wait(second.id, { timeoutMs: 2000 });
+  const cancelled = await c.attempt('cancel', () => cancel(second.id, { by: 'conformance' }));
+  c.expect(cancelled?.status === 'cancelled' && cancelled.decidedBy === 'conformance', 'cancel: status must be cancelled, decidedBy the one who cancelled');
+  c.expect((await c.attempt('wait cancelled', () => waiting))?.status === 'cancelled', 'wait: must resolve once cancelled');
+  c.expect((await c.attempt('get cancelled', () => port.get(second.id)))?.status === 'cancelled', 'get: must return the cancelled approval');
+  c.expect(!(await c.attempt('list after cancel', () => list()))?.some((a) => a.id === second.id), 'list: a cancelled approval is no longer pending');
+  c.expect(!!(await c.attempt('list cancelled', () => list({ status: 'cancelled' })))?.some((a) => a.id === second.id), 'list: status cancelled must return it');
+  await c.rejects('decide cancelled', () => port.decide(second.id, { approved: true }));
+  await c.rejects('cancel twice', () => cancel(second.id));
+  await c.rejects('cancel unknown', () => cancel('conformance-missing'));
+  await c.attempt('cancel cleanup', () => cancel(first.id));
 }
 
 /** `lookup` (ApprovalPort 1.1.0, optional): by key, latest first; an approved approval is consumed once. */

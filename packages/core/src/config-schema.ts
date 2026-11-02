@@ -56,6 +56,7 @@ const policyRule: JsonSchema = {
     effect: { enum: ['allow', 'ask', 'deny'] },
     tools: { type: 'array', items: { type: 'string' } },
     risk: { type: 'array', items: { type: 'string', pattern: VOCAB_NAME.source }, description: 'Risk values; a core value (read, write, exec) also matches the values added like it.' },
+    actions: { type: 'array', items: { type: 'string', pattern: VOCAB_NAME.source }, description: 'Actions (call, decide, list, or values added like them); without it the rule matches tool calls (call) only.' },
     when: {
       type: 'object',
       properties: {
@@ -146,6 +147,15 @@ const gateway: JsonSchema = {
       type: 'object',
       properties: { origins: { type: 'array', items: { type: 'string', minLength: 1 } } },
       required: ['origins'],
+      additionalProperties: false,
+    },
+    approvals: {
+      type: 'object',
+      description: 'HTTP routes to list, read, decide and cancel approvals; off unless enabled. Every request is authenticated and authorized (actions list and decide).',
+      properties: {
+        enabled: { type: 'boolean', description: 'Mount the routes (default false).' },
+        path: { type: 'string', pattern: '^/[A-Za-z0-9._~/-]*[A-Za-z0-9._~-]$', description: 'Base path (default /approvals).' },
+      },
       additionalProperties: false,
     },
   },

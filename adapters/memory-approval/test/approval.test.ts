@@ -54,7 +54,9 @@ test('ttl expires pending approvals', async () => {
   const port = createMemoryApproval({ ttlMs: 30 });
   const a = await port.request(req);
   assert.ok(a.request.expiresAt);
+  // The expiry timer may fire just before the clock reaches expiresAt; wait must still resolve expired, never pending.
   assert.equal((await port.wait(a.id)).status, 'expired');
+  assert.ok(Date.now() >= Date.parse(a.request.expiresAt));
   assert.equal((await port.get(a.id))?.status, 'expired');
   await sleep(0);
   await assert.rejects(port.decide(a.id, { approved: true }), /already expired/);
@@ -106,4 +108,15 @@ test('concurrent requests for a key with a pending approval share it, so lookup 
   const expired = await short.request({ ...req, key: 'e' });
   await sleep(15);
   assert.notEqual((await short.request({ ...req, key: 'e' })).id, expired.id, 'an expired request is not reused');
+});
+
+test('list filters by status, oldest first, capped by listLimit; cancel withdraws a pending approval', async () => {
+  const port = createMemoryApproval({ listLimit: 2, ttlMs: 'unbounded' });
+  const [a, b, c] = [await port.request(req), await port.request(req), await port.request(req)];
+  assert.deepEqual((await port.list!({ limit: 10 })).map((x) => x.id), [a.id, b.id]);
+  const cancelled = await port.cancel!(b.id, { by: 'ops', reason: 'stale' });
+  assert.deepEqual([cancelled.status, cancelled.decidedBy, cancelled.reason], ['cancelled', 'ops', 'stale']);
+  assert.deepEqual((await port.list!()).map((x) => x.id), [a.id, c.id]);
+  assert.deepEqual((await port.list!({ status: 'cancelled' })).map((x) => x.id), [b.id]);
+  await assert.rejects(port.cancel!(b.id), /already cancelled/);
 });

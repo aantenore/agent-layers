@@ -10,6 +10,7 @@ import type { ApprovalPort, AuthorizationPort, Caller, CredentialPort, IdentityP
 import type { IngestionPort, KnowledgePort, MemoryPort } from './ports/knowledge.ts';
 import type { ModelPort } from './ports/model.ts';
 import type { AgentSpec, RunnableAgent, RuntimePort, StatePort, TriggerPort } from './ports/runtime.ts';
+import type { StorePort } from './ports/store.ts';
 import type { TelemetryPort } from './ports/telemetry.ts';
 import type { ToolPort } from './ports/tool.ts';
 import type { Vocabularies } from './vocab.ts';
@@ -21,6 +22,7 @@ export interface StackPorts {
   model?: ModelPort;
   runtime?: RuntimePort;
   state?: StatePort;
+  store?: StorePort;
   knowledge: Record<string, KnowledgePort>;
   memory?: MemoryPort;
   ingestion: Record<string, IngestionPort>;

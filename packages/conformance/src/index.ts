@@ -3,6 +3,7 @@ import { Checks, type CheckLimits, type ExtDeclarationCheck } from './check.ts';
 import { checkIngestion, checkKnowledge, checkMemory, checkRuntime, checkState, checkTools } from './suites/agent.ts';
 import { checkApproval, checkAuthorization, checkCredentials, checkGuard, checkIdentity } from './suites/control.ts';
 import { checkChannel, checkDeploy, checkSecrets, checkTrigger } from './suites/edge.ts';
+import { checkStore } from './suites/store.ts';
 import { checkEvaluator, checkFeedback, checkTelemetry } from './suites/insight.ts';
 import { checkCache, checkModel, checkRouter } from './suites/model.ts';
 
@@ -12,7 +13,8 @@ export { conforms, schema } from './schemas.ts';
 export { NEEDS_CALLER, sampleQuestion } from './suites/control.ts';
 export type { ModelFixtures, RouterFixtures, CacheFixtures } from './suites/model.ts';
 export type { KnowledgeFixtures, RuntimeFixtures, ToolFixtures } from './suites/agent.ts';
-export type { AuthorizationFixtures, CredentialFixtures, GuardFixtures, GuardSample, IdentityFixtures } from './suites/control.ts';
+export type { StoreFixtures } from './suites/store.ts';
+export type { ApprovalFixtures, AuthorizationFixtures, CredentialFixtures, GuardFixtures, GuardSample, IdentityFixtures } from './suites/control.ts';
 export { CONFORMANCE_APPROVAL, conformanceInput, inboundFetch } from './suites/edge.ts';
 export type { ChannelFixtures, DeployFixtures, TriggerFixtures } from './suites/edge.ts';
 export type { EvaluatorFixtures, TelemetryFixtures } from './suites/insight.ts';
@@ -21,11 +23,14 @@ type Suite = (impl: any, fixtures: any, c: Checks) => Promise<Checks>;
 
 const SUITES: Record<PortName, Suite> = {
   DeployPort: checkDeploy, SecretPort: checkSecrets, ModelPort: checkModel, RouterPort: checkRouter, CachePort: checkCache,
-  RuntimePort: checkRuntime, StatePort: checkState, KnowledgePort: checkKnowledge, MemoryPort: checkMemory,
+  RuntimePort: checkRuntime, StatePort: checkState, StorePort: checkStore, KnowledgePort: checkKnowledge, MemoryPort: checkMemory,
   IngestionPort: checkIngestion, ToolPort: checkTools, IdentityPort: checkIdentity, CredentialPort: checkCredentials,
   AuthorizationPort: checkAuthorization, ApprovalPort: checkApproval, GuardPort: checkGuard, ChannelPort: checkChannel,
   TriggerPort: checkTrigger, TelemetryPort: checkTelemetry, EvaluatorPort: checkEvaluator, FeedbackPort: checkFeedback,
 };
+
+/** Ports whose suite runs some checks only from a minor version on. */
+const VERSIONED: readonly PortName[] = ['RuntimePort', 'ChannelPort', 'ApprovalPort'];
 
 export interface ConformanceReport {
   port: PortName;
@@ -101,8 +106,8 @@ export async function checkAdapter(d: AnyAdapter, opts: CheckAdapterOptions = {}
     failures.push(`create: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!instance) return { port: d.port, adapter: d.name, ok: false, failures, skipped: [] };
-  // Suites whose checks depend on the port version (RuntimePort) read the one the descriptor declares.
-  const fixtures = d.port === 'RuntimePort' || d.port === 'ChannelPort' ? { portVersion: d.portVersion, ...(opts.fixtures ?? {}) } : opts.fixtures;
+  // Suites whose checks depend on the port version (RuntimePort, ChannelPort, ApprovalPort) read the one the descriptor declares.
+  const fixtures = VERSIONED.includes(d.port) ? { portVersion: d.portVersion, ...(opts.fixtures ?? {}) } : opts.fixtures;
   const report = await conformance(d.port, instance as never, fixtures, opts.limits, declarationOf(d));
   await instance.close?.().catch(() => {});
   const all = [...failures, ...report.failures];

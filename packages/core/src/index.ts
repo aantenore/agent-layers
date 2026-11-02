@@ -14,6 +14,7 @@ export type {
   AdapterRef, AgentConfig, AppendList, ConfiguredAdapter, GatewayConfig, LayersConfig, LayersOverlay, LimitsConfig, LoadOptions, ModelPrice, PipelineConfig, ProfileConfig, ResolvedConfig, SessionsConfig, StackConfig,
 } from './config.ts';
 export { readiness, type Readiness, type ReadinessProblem } from './readiness.ts';
+export { STORE_KEY, cloneJson, encodeStoreValue, jsonProblem, storeKeyProblem, storeOptionsProblem } from './store.ts';
 export { diffProfiles, formatDiff, type DiffRow, type DiffStatus } from './diff.ts';
 export { accessQuestion, evaluatePolicy, policySubject, riskOf, type PolicyEffect, type PolicyRule, type PolicySubject } from './policy.ts';
 export {

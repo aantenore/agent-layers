@@ -17,9 +17,10 @@ telemetry are already applied to its model and tool calls.
 |---|---|
 | [RuntimePort](../../spec/ports/RuntimePort.md) | `bind` an agent spec to a runnable agent that streams run events |
 | [StatePort](../../spec/ports/StatePort.md) | `append` / `read` / `list` / `delete` the event log of a session |
+| [StorePort](../../spec/ports/StorePort.md) | `get` / `set` / `delete` / `list` small JSON values by key, with versions for compare-and-set |
 
 Data shapes: [agent-spec.json](../../spec/schemas/agent-spec.json), [run-result.json](../../spec/schemas/run-result.json),
-[run-event.json](../../spec/schemas/run-event.json).
+[run-event.json](../../spec/schemas/run-event.json), [store-entry.json](../../spec/schemas/store-entry.json).
 
 An `AgentSpec` carries `name`, `instructions`, `model`, `tools`, `knowledge`, `settings` (`temperature`,
 `maxOutputTokens`, `stop`) and `ext`; `params` was removed at 1.0. A run ends with a `RunResult`
@@ -55,6 +56,7 @@ flowchart LR
   subgraph sg["L3 harness"]
     runtime["RuntimePort<br/>bind, run"]:::agent
     state["StatePort<br/>append, read, list, delete"]:::agent
+    store["StorePort<br/>get, set, delete, list"]:::agent
   end
   runtime -.->|"events appended by the stack"| state
   runtime -->|"stack.modelFor"| cache["L2 cache"]:::model
@@ -187,6 +189,17 @@ session's audit and replay record: no runtime reads it back yet, so a run does n
 loses them on restart. `sqlite-state` keeps them in a WAL-journaled file with a versioned schema (default
 `.agent-layers/state.db`, relative to the stack config); several processes on one host may share it, and a cluster
 needs a networked database behind another StatePort adapter.
+
+**Store.** The `store` slot (`layers.store`, `stack.ports.store`) keeps the current value of named things: a host's
+per-session state, a cursor, a counter. It belongs here, beside the event log, because this layer answers how the
+agent keeps state: the log records what happened, append-only; the store holds what is true now, read and replaced.
+It is not the cache layer's CachePort, which may drop an entry at any time. Keys are `<namespace>.<name>`, values are
+small JSON (65536 bytes by default), and every write returns a version: `set(key, value, { ifVersion })` writes only
+over that version (`0`: only a new key) and otherwise answers a conflict with the current version, so two writers never
+overwrite each other unseen. `ttlMs` makes a key expire. Nothing in the core writes to it; it is there for hosts and
+adapters. `memory-store` is for development; on the production tier the readiness gate refuses it (prototype only), so
+a profile that configures a store needs a durable adapter: `sqlite-store` (one SQLite file, compare-and-set across the
+processes sharing it, default `.agent-layers/store.db`). The slot is optional and not in the production requirements.
 
 Full list: [adapters.md](../adapters.md).
 

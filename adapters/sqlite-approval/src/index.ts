@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { AdapterError, defineAdapter, errorMessage, limitProperties, limitValue, PORT_VERSIONS, type Approval, type ApprovalPort, type ApprovalRequest, type LimitValue } from '@agent-layers/core';
+import { AdapterError, defineAdapter, errorMessage, limitProperties, limitValue, PORT_VERSIONS, type Approval, type ApprovalPort, type ApprovalRequest, type ApprovalStatus, type LimitValue } from '@agent-layers/core';
 import { LIMITS, PRUNE_EVERY_MS, SQLITE_MAX_WAIT_MS } from './limits.ts';
 import { migrate, SCHEMA_VERSION, transaction } from './migrations.ts';
 
@@ -21,9 +21,12 @@ export interface SqliteApprovalOptions {
   pollMs?: LimitValue;
   /**
    * How long consumed approvals, and pending ones past their expiry, are kept before they are deleted (default 7 days;
-   * `"unbounded"` keeps every row). Pruned on open and, at most once a minute, on `request`.
+   * `"unbounded"` keeps every row). Pruned on open and, at most once a minute, on `request`. Cancelled approvals are
+   * pruned the same way.
    */
   retainMs?: LimitValue;
+  /** Most approvals one `list` returns, and its default (default 100). */
+  listLimit?: number;
 }
 
 export const DEFAULT_PATH = '.agent-layers/approvals.db';
@@ -34,6 +37,8 @@ const ADAPTER = 'sqlite-approval';
 export interface SqliteApproval extends ApprovalPort {
   native(): DatabaseSync;
   lookup: NonNullable<ApprovalPort['lookup']>;
+  list: NonNullable<ApprovalPort['list']>;
+  cancel: NonNullable<ApprovalPort['cancel']>;
   close(): Promise<void>;
 }
 
@@ -91,14 +96,15 @@ export function createSqliteApproval(options: SqliteApprovalOptions = {}, ctx: {
   const ttlMs = limitValue(LIMITS.ttlMs, options.ttlMs);
   const pollMs = limitValue(LIMITS.pollMs, options.pollMs);
   const retainMs = limitValue(LIMITS.retainMs, options.retainMs);
+  const listLimit = limitValue(LIMITS.listLimit, options.listLimit);
   const waiters = new Set<Waiter>();
   let prunedAt = 0;
-  /** Deletes consumed approvals created, and pending ones expired, more than `retainMs` ago. */
+  /** Deletes consumed and cancelled approvals created, and pending ones expired, more than `retainMs` ago. */
   const prune = (d: DatabaseSync) => {
     if (!Number.isFinite(retainMs)) return;
     const now = Date.now();
     const before = now - retainMs;
-    d.prepare("DELETE FROM approvals WHERE (consumed = 1 AND created_at <= ?) OR (status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?)").run(before, before);
+    d.prepare("DELETE FROM approvals WHERE ((consumed = 1 OR status = 'cancelled') AND created_at <= ?) OR (status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?)").run(before, before);
     prunedAt = now;
   };
   let db: DatabaseSync | undefined;
@@ -125,6 +131,25 @@ export function createSqliteApproval(options: SqliteApprovalOptions = {}, ctx: {
     return row && view(row);
   };
   const unknown = (id: string) => fail(`unknown approval ${id}`);
+  /** Ends a pending approval (decided or cancelled) in one transaction, then wakes the waiters of this process. */
+  const settle = (id: string, status: Exclude<ApprovalStatus, 'pending' | 'expired'>, by: { by?: string; reason?: string }): Approval => {
+    const d = open();
+    const settled = transaction(d, () => {
+      const current = read(d, id);
+      if (!current) throw unknown(id);
+      if (current.status !== 'pending') throw fail(`approval ${id} is already ${current.status}`);
+      const next: Approval = {
+        ...current,
+        status,
+        ...(by.by !== undefined ? { decidedBy: by.by } : {}),
+        ...(by.reason !== undefined ? { reason: by.reason } : {}),
+      };
+      d.prepare('UPDATE approvals SET status = ?, approval = ? WHERE id = ?').run(next.status, JSON.stringify(next), id);
+      return next;
+    });
+    for (const waiter of [...waiters]) if (waiter.id === id) waiter.check();
+    return settled;
+  };
 
   return {
     name,
@@ -168,22 +193,22 @@ export function createSqliteApproval(options: SqliteApprovalOptions = {}, ctx: {
       return read(open(), id);
     },
     async decide(id, decision) {
-      const d = open();
-      const decided = transaction(d, () => {
-        const current = read(d, id);
-        if (!current) throw unknown(id);
-        if (current.status !== 'pending') throw fail(`approval ${id} is already ${current.status}`);
-        const next: Approval = {
-          ...current,
-          status: decision.approved ? 'approved' : 'denied',
-          ...(decision.by !== undefined ? { decidedBy: decision.by } : {}),
-          ...(decision.reason !== undefined ? { reason: decision.reason } : {}),
-        };
-        d.prepare('UPDATE approvals SET status = ?, approval = ? WHERE id = ?').run(next.status, JSON.stringify(next), id);
-        return next;
-      });
-      for (const waiter of [...waiters]) if (waiter.id === id) waiter.check();
-      return decided;
+      return settle(id, decision.approved ? 'approved' : 'denied', decision);
+    },
+    async cancel(id, opts = {}) {
+      return settle(id, 'cancelled', opts);
+    },
+    async list(opts = {}) {
+      const status = opts.status ?? 'pending';
+      const limit = Math.min(listLimit, Math.max(0, Math.trunc(opts.limit ?? listLimit)));
+      const now = Date.now();
+      // Expired is derived: a pending row past its expiry. Oldest first.
+      const where = status === 'pending' ? "status = 'pending' AND (expires_at IS NULL OR expires_at > ?)"
+        : status === 'expired' ? "status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?"
+        : 'status = ?';
+      const rows = open().prepare(`SELECT approval, expires_at FROM approvals WHERE ${where} ORDER BY created_at, rowid LIMIT ?`)
+        .all(status === 'pending' || status === 'expired' ? now : status, limit) as unknown as Row[];
+      return rows.map(view);
     },
     wait(id, opts = {}) {
       return new Promise<Approval>((resolve, reject) => {
@@ -243,7 +268,8 @@ export const adapter = defineAdapter<'ApprovalPort', SqliteApprovalOptions>({
         ttlMs: 'Time a pending approval stays open before it expires',
         busyTimeoutMs: 'How long a write waits for another process holding the database lock',
         pollMs: 'Interval at which a wait re-reads the database to see a decision taken by another process',
-        retainMs: 'How long consumed approvals and expired pending ones are kept before they are deleted',
+        retainMs: 'How long consumed, cancelled and expired pending approvals are kept before they are deleted',
+        listLimit: 'Most approvals one list returns, and its default',
       }),
     },
     additionalProperties: false,

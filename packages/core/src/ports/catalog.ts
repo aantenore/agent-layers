@@ -8,6 +8,7 @@ import type { ApprovalPort, AuthorizationPort, CredentialPort, IdentityPort } fr
 import type { IngestionPort, KnowledgePort, MemoryPort } from './knowledge.ts';
 import type { ModelPort } from './model.ts';
 import type { RuntimePort, StatePort, TriggerPort } from './runtime.ts';
+import type { StorePort } from './store.ts';
 import type { TelemetryPort } from './telemetry.ts';
 import type { ToolPort } from './tool.ts';
 
@@ -18,6 +19,7 @@ export interface PortTypes {
   ModelPort: ModelPort;
   RuntimePort: RuntimePort;
   StatePort: StatePort;
+  StorePort: StorePort;
   TriggerPort: TriggerPort;
   KnowledgePort: KnowledgePort;
   MemoryPort: MemoryPort;
@@ -52,6 +54,7 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   ModelPort: { port: 'ModelPort', layer: 'llm', version: '1.1.0', description: 'Model calls with tool calls, optionally streamed' },
   RuntimePort: { port: 'RuntimePort', layer: 'harness', version: '1.2.0', description: 'Bind an agent spec to a runnable agent' },
   StatePort: { port: 'StatePort', layer: 'harness', version: '1.0.0', description: 'Session event log' },
+  StorePort: { port: 'StorePort', layer: 'harness', version: '1.0.0', description: 'Durable small JSON values by key, with compare-and-set' },
   TriggerPort: { port: 'TriggerPort', layer: 'interface', version: '1.1.0', description: 'Start runs from events and schedules' },
   KnowledgePort: { port: 'KnowledgePort', layer: 'knowledge', version: '1.1.0', description: 'Search a knowledge source, answer with passages' },
   MemoryPort: { port: 'MemoryPort', layer: 'knowledge', version: '1.0.0', description: 'Long-term memory: remember, recall, forget' },
@@ -59,8 +62,8 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   ToolPort: { port: 'ToolPort', layer: 'tool', version: '1.1.0', description: 'List and call tools' },
   IdentityPort: { port: 'IdentityPort', layer: 'identity', version: '1.1.0', description: 'Verify inbound credentials into a caller' },
   CredentialPort: { port: 'CredentialPort', layer: 'identity', version: '1.0.0', description: 'Outbound tokens, on behalf of a user or as the agent' },
-  AuthorizationPort: { port: 'AuthorizationPort', layer: 'identity', version: '1.1.0', description: 'Decide whether an action is allowed' },
-  ApprovalPort: { port: 'ApprovalPort', layer: 'identity', version: '1.1.0', description: 'Human approval for actions the policy marks ask' },
+  AuthorizationPort: { port: 'AuthorizationPort', layer: 'identity', version: '1.2.0', description: 'Decide whether an action is allowed' },
+  ApprovalPort: { port: 'ApprovalPort', layer: 'identity', version: '1.2.0', description: 'Human approval for actions the policy marks ask' },
   GuardPort: { port: 'GuardPort', layer: 'guardrail', version: '1.0.0', description: 'Allow, block or redact text at four stages' },
   CachePort: { port: 'CachePort', layer: 'cache', version: '1.0.0', description: 'Key/value cache for model replies; usable by any layer' },
   RouterPort: { port: 'RouterPort', layer: 'cache', version: '1.1.0', description: 'Pick the model for a request' },

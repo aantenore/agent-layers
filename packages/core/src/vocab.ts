@@ -24,7 +24,7 @@ export const VOCABULARIES = Object.freeze({
   finish: { core: ['end', 'limit', 'tools', 'refused', 'other'], extensible: 'like', usedBy: 'ModelReply.finish' },
   risk: { core: ['read', 'write', 'exec'], extensible: 'like', usedBy: 'ToolSpec.risk, policy rules' },
   effect: { core: ['allow', 'ask', 'deny'], extensible: 'no', usedBy: 'policy rules' },
-  action: { core: ['call'], extensible: 'like', usedBy: 'AccessQuestion.action' },
+  action: { core: ['call', 'decide', 'list'], extensible: 'like', usedBy: 'AccessQuestion.action, policy rules' },
   stage: { core: [...GUARD_STAGES], extensible: 'no', usedBy: 'GuardCheck.stage' },
   guardAction: { core: ['allow', 'block', 'redact'], extensible: 'no', usedBy: 'GuardVerdict.action' },
   guardLabel: { core: ['pii', 'secret', 'injection', 'toxicity', 'policy', 'other'], extensible: 'like', usedBy: 'GuardVerdict.labels' },
@@ -35,7 +35,7 @@ export const VOCABULARIES = Object.freeze({
   },
   event: { core: ['run.start', 'model.reply', 'tool.call', 'tool.result', 'text', 'run.end'], extensible: 'namespaced', usedBy: 'RunEvent.type' },
   callerKind: { core: ['user', 'agent'], extensible: 'no', usedBy: 'Caller.kind' },
-  approvalStatus: { core: ['pending', 'approved', 'denied', 'expired'], extensible: 'no', usedBy: 'Approval.status' },
+  approvalStatus: { core: ['pending', 'approved', 'denied', 'expired', 'cancelled'], extensible: 'no', usedBy: 'Approval.status' },
 } satisfies Record<string, VocabularyInfo>) as Readonly<Record<VocabularyName, VocabularyInfo>>;
 
 export type VocabularyName =

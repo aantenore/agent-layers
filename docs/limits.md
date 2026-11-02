@@ -179,6 +179,25 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 |---|---|---|---|---|---|
 | `options.busyTimeoutMs` | `5000` ms | 0–∞ or unbounded | 0–60000 | fail if unbounded; warn outside safe range | Bounds how long a write waits for a lock held by another process. |
 
+### `memory-store` · StorePort
+
+| Setting | Default | Accepted | Safe range | On production | Why |
+|---|---|---|---|---|---|
+| `options.maxKeys` | `10000` | 1–∞ or unbounded | 1–1000000 | warn if unbounded; warn outside safe range | Caps the keys held in memory; a new key beyond it is refused once expired keys are dropped, never evicting a live value. |
+| `options.maxKeyChars` | `512` chars | 16–4096 | — | — | Longest key, so keys stay small in memory and in listings. |
+| `options.maxValueBytes` | `65536` bytes | 1024–16777216 | 1024–1048576 | warn outside safe range | Largest value as JSON; the store is for small state, not documents. |
+| `options.listLimit` | `100` | 1–10000 | — | — | Most keys one `list` returns, and its default; page with `after`. |
+
+### `sqlite-store` · StorePort
+
+| Setting | Default | Accepted | Safe range | On production | Why |
+|---|---|---|---|---|---|
+| `options.busyTimeoutMs` | `5000` ms | 0–∞ or unbounded | 0–60000 | fail if unbounded; warn outside safe range | Bounds how long a write waits for a lock held by another process. |
+| `options.maxKeyChars` | `512` chars | 16–4096 | — | — | Longest key, so keys stay small in the file and in listings. |
+| `options.maxValueBytes` | `65536` bytes | 1024–16777216 | 1024–1048576 | warn outside safe range | Largest value as JSON; the store is for small state, not documents. |
+| `options.listLimit` | `100` | 1–10000 | — | — | Most keys one `list` returns, and its default; page with `after`. |
+| `options.retainMs` | `3600000` ms | 0–∞ or unbounded | — | warn if unbounded | Deletes expired keys this long after they expired, so the file does not grow without end. |
+
 ### `sqlite-approval` · ApprovalPort
 
 | Setting | Default | Accepted | Safe range | On production | Why |
@@ -186,7 +205,8 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | `options.ttlMs` | `unbounded` | 1–∞ or unbounded | — | warn if unbounded | Lets a request nobody answers expire instead of waiting forever. |
 | `options.busyTimeoutMs` | `5000` ms | 0–∞ or unbounded | 0–60000 | fail if unbounded; warn outside safe range | Bounds how long a write waits for a lock held by another process. |
 | `options.pollMs` | `500` ms | 10–∞ | 100–10000 | warn outside safe range | Sets how soon a wait sees a decision taken by another process; too short loads the database, too long delays the answer. |
-| `options.retainMs` | `604800000` ms | 1000–∞ or unbounded | — | warn if unbounded | Deletes consumed and expired approvals after this time, so the file does not grow without end. |
+| `options.retainMs` | `604800000` ms | 1000–∞ or unbounded | — | warn if unbounded | Deletes consumed, cancelled and expired approvals after this time, so the file does not grow without end. |
+| `options.listLimit` | `100` | 1–10000 | — | — | Most approvals one `list` returns, and its default, so a backlog cannot make one answer unbounded. |
 
 ### `http-knowledge` · KnowledgePort
 
@@ -260,6 +280,7 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | Setting | Default | Accepted | Safe range | On production | Why |
 |---|---|---|---|---|---|
 | `options.ttlMs` | `unbounded` | 1–∞ or unbounded | — | warn if unbounded | Lets a request nobody answers expire instead of waiting forever. |
+| `options.listLimit` | `100` | 1–10000 | — | — | Most approvals one `list` returns, and its default, so a backlog cannot make one answer unbounded. |
 
 ### `oidc` · CredentialPort
 

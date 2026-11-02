@@ -16,7 +16,7 @@ Each layer answers one question. Layers have stable ids (`infra`, `llm`, ...); t
 | Foundation | L0 | Infrastructure & delivery (`infra`) | Where does it run and how does it get there? | DeployPort, SecretPort |
 | Model | L1 | Models (`llm`) | Who thinks? | ModelPort |
 | Model | L2 | Model access: routing, fallback, quotas, cache (`cache`) | Which model, at what cost and latency? | RouterPort, CachePort |
-| Agent | L3 | Agent runtime (`harness`) | How does the agent loop run and keep state? | RuntimePort, StatePort |
+| Agent | L3 | Agent runtime (`harness`) | How does the agent loop run and keep state? | RuntimePort, StatePort, StorePort |
 | Agent | L4 | Knowledge & memory (`knowledge`) | What does it know? | KnowledgePort, MemoryPort, IngestionPort |
 | Agent | L5 | Tools (`tool`) | What can it do? | ToolPort |
 | Control | L6 | Identity & access (`identity`) | Who is it, on whose behalf, and what is allowed? | IdentityPort, CredentialPort, AuthorizationPort, ApprovalPort |
@@ -55,7 +55,7 @@ flowchart LR
     g[L7 guardrail<br/>GuardPort]:::control
     te[L9 telemetry<br/>TelemetryPort]:::insight
     ev[L10 eval<br/>EvaluatorPort]:::insight
-    st[L3 harness<br/>StatePort]:::agent
+    st[L3 harness<br/>StatePort, StorePort]:::agent
     d[L0 infra<br/>DeployPort / SecretPort]:::foundation
   end
   ch --> host

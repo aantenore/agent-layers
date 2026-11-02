@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aantenore/agent-layers/spec/schemas/store-entry.json",
+  "title": "StoreEntry",
+  "description": "A value kept by StorePort (layer harness): small JSON with the version compare-and-set checks against.",
+  "type": "object",
+  "required": ["value", "version"],
+  "properties": {
+    "value": { "description": "Any JSON value: null, boolean, number, string, array or object." },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Grows with every write of the key and is never reused for it, even after a delete or an expiry."
+    },
+    "expiresAt": {
+      "$ref": "common.json#/$defs/Time",
+      "description": "After this time the key reads as absent."
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    { "value": { "step": 3, "owner": "u-1042" }, "version": 7, "expiresAt": "2026-11-02T12:00:00Z" }
+  ]
+}

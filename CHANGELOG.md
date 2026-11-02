@@ -104,6 +104,37 @@ Every package moves to 0.3.0 together: adapters of this release use core exports
   that a refused model call ends the run `stopped` with `limit`; `checkChannel` with a `sendBounds` fixture checks, for
   ChannelPort 1.1.0, that a caller's bounds reach the host never looser and that a run over the hop limit shows as
   stopped (`@agent-layers/conformance`).
+- StorePort 1.0.0 (layer `harness`, slot `layers.store`, `stack.ports.store`): durable small JSON values by key, for
+  the state a host keeps between runs. `get(key) → {value, version, expiresAt?}`, `set(key, value, {ifVersion?, ttlMs?})
+  → {ok: true, version} | {ok: false, version?}` (compare-and-set: `ifVersion: 0` creates only), `delete(key,
+  {ifVersion?}) → {ok: true, existed} | {ok: false, version?}`, optional `list(prefix, {limit?, after?})`. Keys are
+  `<namespace>.<name>`; versions grow with every write and are never reused for a key; an expired key reads as absent.
+  It sits beside StatePort: the log records what happened, the store holds what is true now. Schema
+  `store-entry.json`; core helpers `storeKeyProblem`, `jsonProblem`, `encodeStoreValue`, `storeOptionsProblem`; suite
+  `checkStore` ([StorePort](spec/ports/StorePort.md), [harness](docs/layers/harness.md), `@agent-layers/core`,
+  `@agent-layers/conformance`).
+- `memory-store` (prototype) and `sqlite-store` (prototype and production: one SQLite file, WAL, versioned schema,
+  every write one `BEGIN IMMEDIATE` transaction so compare-and-set holds across processes, private folder and file
+  0700/0600, expired keys pruned `retainMs` after expiry). Limits `maxKeys` (memory), `maxKeyChars`, `maxValueBytes`,
+  `listLimit`, `busyTimeoutMs` and `retainMs` (sqlite) ([adapters/memory-store](adapters/memory-store/README.md),
+  [adapters/sqlite-store](adapters/sqlite-store/README.md), [docs/limits.md](docs/limits.md)). On the production tier
+  the readiness gate refuses `memory-store` like any prototype-only adapter; the slot stays optional.
+- ApprovalPort 1.2.0: optional `list({status?, limit?})` (pending by default, oldest first, capped by the adapter's
+  `listLimit`, default 100) and `cancel(id, {by?, reason?})`, which withdraws a pending approval with the new status
+  `cancelled`: a waiting call is refused, a later identical call asks again (a denial still stands). `memory-approval`
+  and `sqlite-approval` implement both; `sqlite-approval` adds an index by status (schema v2) and prunes cancelled
+  rows after `retainMs`. `checkApproval` checks them for adapters declaring 1.2.0 (`checkAdapter` passes the
+  descriptor's version) ([ApprovalPort](spec/ports/ApprovalPort.md)).
+- Gateway approval routes, off unless `gateway.approvals.enabled` (`path`, default `/approvals`): `GET /approvals`
+  (`?status=`, `?limit=`), `GET /approvals/<id>`, `POST /approvals/<id>` with `{ "decision": "approve" | "deny",
+  "reason"? }`, `DELETE /approvals/<id>` (cancel). Every request is authenticated like any route, then authorized
+  through the AuthorizationPort with action `list` (reads) or `decide` (decisions and cancels) on a target of kind
+  `approval`; no authorization adapter, an error or no allowing answer refuses it (403). The verified caller is recorded
+  as `decidedBy` (`kind:id`); the request key and any credential are left out of the answers. The gateway refuses to
+  start with the routes enabled and no approval or authorization adapter ([docs/gateway.md](docs/gateway.md#approvals),
+  `@agent-layers/gateway`).
+- Policy rules (stack `policy` and `rules-authorization`): `actions`, the actions a rule matches (`call`, `decide`,
+  `list`, or values added like them).
 ### Changed
 
 - SDK language 1.0 → 1.1 and port minors: ModelPort, RouterPort, ToolPort, KnowledgePort, IdentityPort,
@@ -113,11 +144,20 @@ Every package moves to 0.3.0 together: adapters of this release use core exports
   `Bounds`, `Lineage` and `Delegation`, the stop code `hop_limit` appears in `run-result.json`, and
   `stack-config.json` gains `limits.run`, `limits.delegation`, `pipeline.pricing` and the policy conditions `actor`,
   `actors`, `delegated`. A validator pinned to the old schemas with `additionalProperties: false` rejects them.
+- AuthorizationPort 1.2.0: core actions `decide` and `list` and target kind `approval`. A policy rule without
+  `actions` now matches tool calls only (`call` and values added like it), so rules written for tools never open the
+  approval routes; questions with an action outside the vocabulary no longer match such rules either.
+  `rules-authorization` applies its `default` to tool calls only and denies any other action no rule matches. An
+  engine behind `opa` or `authzen` receives the new actions; a policy there that ignores `action` answers them like
+  tool calls ([AuthorizationPort](spec/ports/AuthorizationPort.md)). The `approvalStatus` vocabulary gains `cancelled`
+  (`common.json`), breaking for strict validators pinned to the old enum, like the other schema additions above.
 - Every run now has a deadline (`limits.run.timeoutMs`, 5 minutes by default) and a hop limit (4); a caller of kind
   `agent` counts as one hop. `basic-runtime` `maxTurns` and `reinloop` `budget` stay as extra limits.
 
 ### Fixed
 
+- `memory-approval`: `wait` on an approval with an expiry could resolve `pending` when its timer fired a millisecond
+  before the clock reached `expiresAt`; it now re-arms until the approval reads `expired`.
 - `compatibleVersion` refuses an adapter whose port minor is newer than the core's (for example a RuntimePort 1.2.0
   runtime on a 1.1.0 core): it may rely on fields this core does not have. Majors must still match; adapters built for
   an older minor still load ([spec/VERSIONING.md](spec/VERSIONING.md), `@agent-layers/core`).

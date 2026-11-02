@@ -46,12 +46,13 @@ Every shape has an optional `ext` unless its schema says otherwise. Fixed shapes
 | `AgentSpec` | [`agent-spec.json`](schemas/agent-spec.json) | [`RuntimePort`](ports/RuntimePort.md) |
 | `RunResult` | [`run-result.json`](schemas/run-result.json) | [`RuntimePort`](ports/RuntimePort.md), [`ChannelPort`](ports/ChannelPort.md) |
 | `RunEvent` | [`run-event.json`](schemas/run-event.json) | [`StatePort`](ports/StatePort.md), [`RuntimePort`](ports/RuntimePort.md) |
+| `StoreEntry` | [`store-entry.json`](schemas/store-entry.json) | [`StorePort`](ports/StorePort.md) |
 | `Trigger` | [`trigger.json`](schemas/trigger.json) | [`TriggerPort`](ports/TriggerPort.md) |
 | `EvalCase` | [`eval-case.json`](schemas/eval-case.json) | [`EvaluatorPort`](ports/EvaluatorPort.md) |
 | `EvalResult` (with `EvalScore`) | [`eval-result.json`](schemas/eval-result.json) | [`EvaluatorPort`](ports/EvaluatorPort.md) |
 | `Feedback` | [`feedback.json`](schemas/feedback.json) | [`FeedbackPort`](ports/FeedbackPort.md) |
 
-Shapes defined on their port page only: `KnowledgeQuery`, `MemoryScope`, `MemoryItem`, `CallContext`, `InboundContext`. Shared definitions (`Ext`, `Attrs`, `AttrFilter`, `Part`, `Usage`, `StopReason`, `PublicCaller`, `Actor`, `Bounds`, `Lineage`, `Delegation` and every vocabulary) are in [`schemas/common.json`](schemas/common.json).
+Shapes defined on their port page only: `KnowledgeQuery`, `MemoryScope`, `MemoryItem`, `StoreKey`, `CallContext`, `InboundContext`. Shared definitions (`Ext`, `Attrs`, `AttrFilter`, `Part`, `Usage`, `StopReason`, `PublicCaller`, `Actor`, `Bounds`, `Lineage`, `Delegation` and every vocabulary) are in [`schemas/common.json`](schemas/common.json).
 
 Rules that cross shapes:
 
@@ -73,7 +74,7 @@ A vocabulary is a set of values defined by the SDK. The core branches only on co
 | `finish` | `end`, `limit`, `tools`, `refused`, `other` | values with `like` | `ModelReply.finish` |
 | `risk` | `read`, `write`, `exec` | values with `like` | `ToolSpec.risk`, policy rules |
 | `effect` | `allow`, `ask`, `deny` | no | policy rules |
-| `action` | `call` | values with `like` | `AccessQuestion.action` |
+| `action` | `call`, `decide`, `list` | values with `like` | `AccessQuestion.action`, policy rules |
 | `stage` | `input`, `output`, `tool_args`, `tool_result` | no | `GuardCheck.stage` |
 | `guardAction` | `allow`, `block`, `redact` | no | `GuardVerdict.action` |
 | `guardLabel` | `pii`, `secret`, `injection`, `toxicity`, `policy`, `other` | values with `like` | `GuardVerdict.labels` |
@@ -81,7 +82,7 @@ A vocabulary is a set of values defined by the SDK. The core branches only on co
 | `stopCode` | `guard_block`, `denied`, `aborted`, `timeout`, `limit`, `hop_limit`, `needs_input`, `needs_auth`, `rejected`, `error` | values with `like` | `RunResult.reason.code` |
 | `event` | `run.start`, `model.reply`, `tool.call`, `tool.result`, `text`, `run.end` | namespaced types | `RunEvent.type` |
 | `callerKind` | `user`, `agent` (`anonymous` only inside `AccessQuestion`) | no | `Caller.kind` |
-| `approvalStatus` | `pending`, `approved`, `denied`, `expired` | no | `Approval.status` |
+| `approvalStatus` | `pending`, `approved`, `denied`, `expired`, `cancelled` | no | `Approval.status` |
 
 In the schemas, closed vocabularies are enums. Vocabularies config can extend (`finish`, `risk`, `action`, `guardLabel`, `stopCode`) are strings that match `^[a-z][a-z0-9_.-]{0,63}$`, with the core values in the description.
 

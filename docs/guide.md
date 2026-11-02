@@ -230,7 +230,7 @@ Slots under `layers`:
 | `deploy`, `secrets` | DeployPort, SecretPort | single |
 | `model` | ModelPort | single |
 | `router`, `cache` | RouterPort, CachePort | single |
-| `runtime`, `state` | RuntimePort, StatePort | single |
+| `runtime`, `state`, `store` | RuntimePort, StatePort, StorePort | single |
 | `knowledge`, `ingestion` | KnowledgePort, IngestionPort | keyed by source name |
 | `memory` | MemoryPort | single |
 | `tools` | ToolPort | keyed by source name (tool names become `<source>__<tool>`; no source name may start with another one followed by `__`) |

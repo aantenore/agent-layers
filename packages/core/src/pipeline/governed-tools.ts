@@ -131,13 +131,13 @@ export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: G
   /**
    * Approval for one call, undefined when it may proceed. A decision already taken for the same key (session, caller,
    * question with arguments) is used first: approved proceeds once (consumed), denied denies, pending keeps its id.
-   * An expired approval, or none, means a new request.
+   * An expired or cancelled approval, or none, means a new request.
    */
   async function approve(port: ApprovalPort, question: AccessQuestion, ctx: CallContext): Promise<Denial | undefined> {
     const key = approvalKey(question, ctx);
     const lookup = port.lookup?.bind(port);
     let current = lookup ? await lookup(key, { consume: true }) : undefined;
-    if (!current || current.status === 'expired') current = await port.request({ question, agent: ctx.agent, runId: ctx.runId, key });
+    if (!current || current.status === 'expired' || current.status === 'cancelled') current = await port.request({ question, agent: ctx.agent, runId: ctx.runId, key });
     if (current.status === 'pending' && opts.approvalTimeoutMs) {
       current = await port.wait(current.id, { timeoutMs: opts.approvalTimeoutMs, ...(ctx.signal ? { signal: ctx.signal } : {}) });
       // Decided while this call waited: consume it, so it lets this call (and no later one) through.

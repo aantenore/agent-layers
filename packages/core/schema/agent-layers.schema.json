@@ -208,6 +208,17 @@
           ],
           "description": "StatePort (harness)"
         },
+        "store": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "StorePort (harness)"
+        },
         "knowledge": {
           "type": [
             "object",
@@ -501,6 +512,17 @@
           ],
           "description": "StatePort (harness)"
         },
+        "store": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/adapterRefOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "StorePort (harness)"
+        },
         "knowledge": {
           "type": [
             "object",
@@ -761,6 +783,14 @@
             "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
           },
           "description": "Risk values; a core value (read, write, exec) also matches the values added like it."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+          },
+          "description": "Actions (call, decide, list, or values added like them); without it the rule matches tool calls (call) only."
         },
         "when": {
           "type": "object",
@@ -1195,6 +1225,22 @@
           "required": [
             "origins"
           ],
+          "additionalProperties": false
+        },
+        "approvals": {
+          "type": "object",
+          "description": "HTTP routes to list, read, decide and cancel approvals; off unless enabled. Every request is authenticated and authorized (actions list and decide).",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Mount the routes (default false)."
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/[A-Za-z0-9._~/-]*[A-Za-z0-9._~-]$",
+              "description": "Base path (default /approvals)."
+            }
+          },
           "additionalProperties": false
         }
       },
@@ -1723,7 +1769,7 @@
         },
         "action": {
           "type": "object",
-          "description": "AccessQuestion.action. Core values: call. Extensible: like.",
+          "description": "AccessQuestion.action, policy rules. Core values: call, decide, list. Extensible: like.",
           "properties": {
             "add": {
               "type": "object",
@@ -1739,7 +1785,9 @@
                 "properties": {
                   "like": {
                     "enum": [
-                      "call"
+                      "call",
+                      "decide",
+                      "list"
                     ]
                   }
                 },
@@ -2055,7 +2103,7 @@
         },
         "approvalStatus": {
           "type": "object",
-          "description": "Approval.status. Core values: pending, approved, denied, expired. Extensible: no.",
+          "description": "Approval.status. Core values: pending, approved, denied, expired, cancelled. Extensible: no.",
           "properties": {
             "add": {
               "type": "object",
@@ -2074,7 +2122,8 @@
                       "pending",
                       "approved",
                       "denied",
-                      "expired"
+                      "expired",
+                      "cancelled"
                     ]
                   }
                 },
@@ -2259,6 +2308,7 @@
               "model",
               "runtime",
               "state",
+              "store",
               "knowledge",
               "memory",
               "ingestion",

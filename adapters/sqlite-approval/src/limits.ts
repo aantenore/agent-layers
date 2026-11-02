@@ -6,6 +6,7 @@ export const LIMITS = defineLimits({
   busyTimeoutMs: { path: 'options.busyTimeoutMs', default: 5000, unit: 'ms', min: 0, unbounded: 'fail', safe: { max: 60_000 } },
   pollMs: { path: 'options.pollMs', default: 500, unit: 'ms', min: 10, safe: { min: 100, max: 10_000 } },
   retainMs: { path: 'options.retainMs', default: 604_800_000, unit: 'ms', min: 1000, unbounded: 'warn' },
+  listLimit: { path: 'options.listLimit', default: 100, unit: 'count', min: 1, max: 10_000 },
 });
 
 /** How often writes prune rows past `retainMs` (besides once on open). */

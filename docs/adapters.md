@@ -50,8 +50,10 @@ Generated from each package's descriptor by `npm run docs:adapters`; `npm run do
 | `harness` | [`a2a`](../adapters/a2a) | outbound | RuntimePort | standard: Agent2Agent (A2A) protocol | prototype, production | experimental |
 | `harness` | [`basic-runtime`](../adapters/basic-runtime) | outbound | RuntimePort | technology: in-process tool-calling loop | prototype | experimental |
 | `harness` | [`memory-state`](../adapters/memory-state) | outbound | StatePort | technology: in-process Map | prototype | experimental |
+| `harness` | [`memory-store`](../adapters/memory-store) | outbound | StorePort | technology: in-process Map | prototype | experimental |
 | `harness` | [`reinloop`](../adapters/reinloop) | outbound | RuntimePort | technology: reinloop | prototype, production | experimental |
 | `harness` | [`sqlite-state`](../adapters/sqlite-state) | outbound | StatePort | technology: SQLite | prototype, production | experimental |
+| `harness` | [`sqlite-store`](../adapters/sqlite-store) | outbound | StorePort | technology: SQLite | prototype, production | experimental |
 | `knowledge` | [`http-knowledge`](../adapters/http-knowledge) | outbound | KnowledgePort | standard: agent-layers knowledge HTTP contract | prototype, production | experimental |
 | `knowledge` | [`markdown-knowledge`](../adapters/markdown-knowledge) | outbound | KnowledgePort | technology: Markdown files | prototype, production | experimental |
 | `knowledge` | [`mcp`](../adapters/mcp) | outbound | KnowledgePort | standard: Model Context Protocol | prototype, production | experimental |
@@ -100,7 +102,7 @@ Generated from each package's descriptor by `npm run docs:adapters`; `npm run do
 | `eval` | [`judge-eval`](../adapters/judge-eval) | outbound | EvaluatorPort | technology: LLM as judge | prototype, production | experimental |
 | `eval` | [`layer-signals`](../adapters/layer-signals) | outbound | EvaluatorPort | technology: per-layer signals from run events and telemetry | prototype, production | experimental |
 
-43 adapters in 37 packages.
+45 adapters in 39 packages.
 <!-- adapters:end -->
 
 ### Planned
