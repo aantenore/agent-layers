@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { checkAdapter } from '@agent-layers/conformance';
 import { compose, LAYERS, resolveProfile, validate } from '@agent-layers/core';
-import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
-import { adapter as functions, createFunctionTools, defineTool } from '@agent-layers/adapter-functions';
-import { adapter as layerSignals } from '@agent-layers/adapter-layer-signals';
-import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
+import { adapter as basicRuntime } from '@agent-layers/adapters/basic-runtime';
+import { adapter as functions, createFunctionTools, defineTool } from '@agent-layers/adapters/functions';
+import { adapter as layerSignals } from '@agent-layers/adapters/layer-signals';
+import { adapter as mockModel } from '@agent-layers/adapters/mock-model';
 import { createAgentStack, layerScores } from '../agent-provider.mjs';
 import { baseUrl, llmSkipReason, model } from './helpers.mjs';
 

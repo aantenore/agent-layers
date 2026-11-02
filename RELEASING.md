@@ -1,7 +1,8 @@
 # Releasing
 
-Every package under `packages/*` and `adapters/*` (except the private `adapters/_template`) is published to npm
-under the `@agent-layers` scope, all with the same version. `runtimes/pydantic-ai` is a Python project and is not
+Every package under `packages/*` is published to npm under the `@agent-layers` scope, all with the same version:
+`core`, `gateway`, `cli`, `conformance` and `adapters` (every adapter, one subpath export each). The private
+`examples/adapter-package` is not published. `runtimes/pydantic-ai` is a Python project and is not
 part of the npm release.
 
 ## First release

@@ -13,7 +13,7 @@ const ref: JsonSchema = {
   type: 'object',
   required: ['adapter'],
   properties: {
-    adapter: { type: 'string', minLength: 1, description: 'Adapter name; resolved from the registry or the package @agent-layers/adapter-<name>.' },
+    adapter: { type: 'string', minLength: 1, description: 'Adapter name; resolved from the registry or the subpath export @agent-layers/adapters/<name>.' },
     name: { type: 'string', description: 'Instance name for list slots.' },
     options: { type: 'object', description: 'Validated against the adapter optionsSchema.' },
     stages: { type: 'array', items: { enum: [...GUARD_STAGES] }, description: 'Guardrails only: stages this guard runs at.' },

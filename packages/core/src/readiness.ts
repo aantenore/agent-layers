@@ -1,4 +1,4 @@
-import type { AdapterRegistry } from './adapter.ts';
+import { ADAPTERS_PACKAGE, type AdapterRegistry } from './adapter.ts';
 import { languageCheck } from './compose.ts';
 import { configuredAdapters, PRODUCTION_REQUIRES, type ResolvedConfig } from './config.ts';
 import { errorMessage } from './errors.ts';
@@ -48,7 +48,7 @@ export async function readiness(config: ResolvedConfig, registry: AdapterRegistr
       continue;
     }
     if (!found) {
-      problems.push({ kind: 'not-installed', slot: a.slot, adapter: a.ref.adapter, message: `${a.slot}: adapter "${a.ref.adapter}" is not installed (npm install @agent-layers/adapter-${a.ref.adapter}, or add a plugin)` });
+      problems.push({ kind: 'not-installed', slot: a.slot, adapter: a.ref.adapter, message: `${a.slot}: adapter "${a.ref.adapter}" is not installed (no such adapter in ${ADAPTERS_PACKAGE}: check the name, npm install ${ADAPTERS_PACKAGE}, or add a plugin)` });
     } else if (config.tier === 'production' && !found.tiers.includes('production')) {
       problems.push({ kind: 'prototype-only', slot: a.slot, adapter: a.ref.adapter, message: `${a.slot}: adapter "${a.ref.adapter}" is prototype-only and cannot be used on the production tier` });
     }

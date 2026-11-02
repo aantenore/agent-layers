@@ -11,7 +11,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { McpSession } from '@agent-layers/adapter-mcp';
+import { McpSession } from '@agent-layers/adapters/mcp';
 import { QDRANT_COLLECTION, QDRANT_URL, qdrantServer } from './qdrant-server.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));

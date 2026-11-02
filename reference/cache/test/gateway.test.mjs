@@ -3,10 +3,10 @@ import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { ATTR, compose, recordingTelemetry, resolveProfile, SPAN } from '@agent-layers/core';
-import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
-import { adapter as functions, functionTools } from '@agent-layers/adapter-functions';
-import { adapter as openaiCompatible } from '@agent-layers/adapter-openai-compatible';
-import { adapter as ruleRouter } from '@agent-layers/adapter-rule-router';
+import { adapter as basicRuntime } from '@agent-layers/adapters/basic-runtime';
+import { adapter as functions, functionTools } from '@agent-layers/adapters/functions';
+import { adapter as openaiCompatible } from '@agent-layers/adapters/openai-compatible';
+import { adapter as ruleRouter } from '@agent-layers/adapters/rule-router';
 
 try { process.loadEnvFile(resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env')); } catch { /* .env is optional */ }
 

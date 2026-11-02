@@ -10,8 +10,8 @@ How an agent acts on the world: call an API, run a function, use an MCP server.
 |---|---|
 | MCP server, stdio and streamable HTTP | Model Context Protocol |
 | API with a spec | OpenAPI 3 (JSON) |
-| One-off endpoint | declarative HTTP tool (`@agent-layers/adapter-http-tools`) |
-| Anything else | `defineTool` from `@agent-layers/adapter-functions`: any JS function (the universal escape hatch) |
+| One-off endpoint | declarative HTTP tool (`@agent-layers/adapters/http-tools`) |
+| Anything else | `defineTool` from `@agent-layers/adapters/functions`: any JS function (the universal escape hatch) |
 
 Tool results are `{ ok, text, data? }`. Port: [ToolPort](../../spec/ports/ToolPort.md).
 
@@ -40,7 +40,7 @@ probes it.
 
 ## Use it from the SDK
 
-Native OpenAPI import (`@agent-layers/adapter-openapi`, no bridge needed); tool names are `<source>__<operationId>`:
+Native OpenAPI import (`@agent-layers/adapters/openapi`, no bridge needed); tool names are `<source>__<operationId>`:
 
 ```json
 {
@@ -49,7 +49,7 @@ Native OpenAPI import (`@agent-layers/adapter-openapi`, no bridge needed); tool 
 }
 ```
 
-Same API through the bridge (`@agent-layers/adapter-mcp`; any MCP client works, not only this SDK):
+Same API through the bridge (`@agent-layers/adapters/mcp`; any MCP client works, not only this SDK):
 
 ```json
 {

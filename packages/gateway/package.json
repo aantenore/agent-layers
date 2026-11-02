@@ -40,11 +40,7 @@
     "@agent-layers/core": "^0.3.0"
   },
   "devDependencies": {
-    "@agent-layers/adapter-basic-runtime": "0.3.0",
-    "@agent-layers/adapter-memory-approval": "0.3.0",
-    "@agent-layers/adapter-mock-model": "0.3.0",
-    "@agent-layers/adapter-rules-authorization": "0.3.0",
-    "@agent-layers/adapter-static-identity": "0.3.0",
+    "@agent-layers/adapters": "0.3.0",
     "@types/node": "^24.19.0",
     "typescript": "^7.0.2"
   }

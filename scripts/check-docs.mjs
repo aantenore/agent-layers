@@ -13,7 +13,8 @@
 //   limits   every limit declared in code (STACK_LIMITS in packages/core, `limits` on adapter descriptors, LIMITS in
 //            runtimes/pydantic-ai settings.py) has a row in docs/limits.md with the same default, accepted range,
 //            safe range and production check, and every row there is a declared limit
-//   stale    forbidden strings: old paths, old layer folder names, old model name, assistant-tooling mentions
+//   stale    forbidden strings: old paths, old layer folder names, old package names, old model name, assistant-tooling
+//            mentions
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { ensureSourceCondition, importSource, proseLines, read, rel, ROOT, walk } from './lib/common.mjs';
@@ -251,7 +252,7 @@ for (const file of markdown) {
   for (const row of planned.split('\n').filter((l) => l.startsWith('|'))) {
     const first = row.split('|')[1]?.trim() ?? '';
     for (const m of first.matchAll(/(?:^|, )`([a-z0-9-]+)`(?=,|$)/g)) {
-      if (existsSync(join(ROOT, 'adapters', m[1]))) warnings.push(`docs/adapters.md: planned adapter "${m[1]}" exists in adapters/; move it out of Planned`);
+      if (existsSync(join(ROOT, 'packages/adapters/src', m[1]))) warnings.push(`docs/adapters.md: planned adapter "${m[1]}" exists in packages/adapters/src/; move it out of Planned`);
     }
   }
 }
@@ -342,6 +343,7 @@ for (const file of markdown) {
     { re: /layers\/l\d/, msg: '`layers/l<n>` path (now reference/<id>)' },
     { re: /docs\/layers\/L\d/, msg: '`docs/layers/L<n>` path (now docs/layers/<id>.md)' },
     { re: /LAYER=l\d/, msg: 'old LAYER=l<n>-* name (use the layer id)' },
+    { re: /@agent-layers\/adapter-/, msg: 'old adapter package name (now @agent-layers/adapters/<name>)' },
     { re: /\bl\d{1,2}-(infra|llm|harness|knowledge|tools?|identity|guardrails?|cache-router|telemetry|eval)\b/, msg: 'old layer folder name' },
   ];
   for (const file of texts.filter(scoped)) {

@@ -5,10 +5,10 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compose, resolveProfile } from '@agent-layers/core';
-import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
-import { adapter as functions, createFunctionTools, defineTool } from '@agent-layers/adapter-functions';
-import { adapter as layerSignals } from '@agent-layers/adapter-layer-signals';
-import { adapter as openaiCompatible } from '@agent-layers/adapter-openai-compatible';
+import { adapter as basicRuntime } from '@agent-layers/adapters/basic-runtime';
+import { adapter as functions, createFunctionTools, defineTool } from '@agent-layers/adapters/functions';
+import { adapter as layerSignals } from '@agent-layers/adapters/layer-signals';
+import { adapter as openaiCompatible } from '@agent-layers/adapters/openai-compatible';
 
 const here = dirname(fileURLToPath(import.meta.url));
 try { process.loadEnvFile(resolve(here, '../../.env')); } catch { /* .env is optional */ }

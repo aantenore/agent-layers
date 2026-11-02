@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import {
-  AdapterRegistry, callsOf, compose, defineAdapter, messageText, packageLoader, PORT_VERSIONS, recordingTelemetry, resolveProfile, textMessage, toolInfos,
+  AdapterRegistry, callsOf, compose, defineAdapter, importAdapters, messageText, packageLoader, PORT_VERSIONS, recordingTelemetry, resolveProfile, textMessage, toolInfos,
   type Message, type RuntimePort, type StackConfig, type TelemetryRecord,
 } from '@agent-layers/core';
-import { adapter as functionsAdapter, createFunctionTools, defineTool } from '@agent-layers/adapter-functions';
+import { adapter as functionsAdapter, createFunctionTools, defineTool } from '@agent-layers/adapters/functions';
 import { REPO } from './helpers.ts';
 
 /** The smallest possible runtime: proves any loop can drive the composed ports. */
@@ -130,4 +130,11 @@ test('in-process run: every port composes around a runtime and an OpenAI-compati
   assert.match(denied.output, /^The ledger says: Denied: no rule matched \(default deny\)/, 'without a harbourmaster caller the tool call is denied');
   assert.equal(denied.status, 'completed');
   await stack.close();
+});
+
+test('adapters load by name from @agent-layers/adapters; an old package name points to its subpath', async () => {
+  const load = packageLoader(REPO);
+  assert.ok((await load('ModelPort', 'mock-model'))?.some((a) => a.name === 'mock-model'));
+  assert.equal(await load('ModelPort', 'no-such-adapter'), undefined);
+  await assert.rejects(importAdapters('@agent-layers/adapter-mock-model', REPO), /is now @agent-layers\/adapters\/mock-model/);
 });

@@ -73,7 +73,7 @@
         "adapter": {
           "type": "string",
           "minLength": 1,
-          "description": "Adapter name; resolved from the registry or the package @agent-layers/adapter-<name>."
+          "description": "Adapter name; resolved from the registry or the subpath export @agent-layers/adapters/<name>."
         },
         "name": {
           "type": "string",
@@ -105,7 +105,7 @@
         "adapter": {
           "type": "string",
           "minLength": 1,
-          "description": "Adapter name; resolved from the registry or the package @agent-layers/adapter-<name>."
+          "description": "Adapter name; resolved from the registry or the subpath export @agent-layers/adapters/<name>."
         },
         "name": {
           "type": "string",

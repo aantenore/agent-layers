@@ -108,7 +108,7 @@ Identity with role `analyst`; the on-behalf-of exchange yields a token with `aud
 adapter sends them, allows alice and denies bob on a write tool, denies exec to both and denies the anonymous caller;
 a composed stack served by `@agent-layers/gateway` (`openai-compatible` channel) answers 401 without a token and
 runs as alice with hers; `checkAdapter` passes for the `oidc` identity and credential adapters. The adapter-level live
-test (oidc, opa, token exchange through a composed stack) is [adapters/oidc/test/live.test.ts](../../adapters/oidc/test/live.test.ts).
+test (oidc, opa, token exchange through a composed stack) is [packages/adapters/test/oidc/live.test.ts](../../packages/adapters/test/oidc/live.test.ts).
 
 ## Threat notes
 

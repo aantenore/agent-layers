@@ -34,7 +34,7 @@ import { isPlainObject, newRunId } from './util.ts';
 import { Vocabularies } from './vocab.ts';
 
 export interface ComposeOptions {
-  /** Registry to resolve adapters from; defaults to one that loads `@agent-layers/adapter-<name>` packages. */
+  /** Registry to resolve adapters from; defaults to one that loads `@agent-layers/adapters/<name>`. */
   registry?: AdapterRegistry;
   /** Extra adapter descriptors, registered before resolution (useful in code and tests). */
   adapters?: readonly AnyAdapter[];

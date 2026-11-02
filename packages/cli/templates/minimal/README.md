@@ -63,7 +63,8 @@ file, not the tools, not the tests.
 Profiles extend each other (`prototype` → `local` → `pilot` → `production`) and list only the layers that differ.
 Move one layer at a time:
 
-1. Install the adapter for the target system (`npm install @agent-layers/adapter-<name>`) if it is not a dependency yet.
+1. Pick the adapter for the target system: every adapter of `@agent-layers/adapters` is installed already; one from
+   another package needs `npm install` and an entry in `plugins`.
 2. Set it in the next profile up, with options from environment variables (`.env.example` lists them).
 3. `npx agent-layers diff pilot production` shows what moves; `npx agent-layers check --profile production` fails
    while any layer still uses a prototype-only adapter or a required layer is missing.

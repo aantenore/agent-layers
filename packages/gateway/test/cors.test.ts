@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { compose, defineAdapter, PORT_VERSIONS, resolveProfile, type ChannelPort } from '@agent-layers/core';
-import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
-import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
+import { adapter as basicRuntime } from '@agent-layers/adapters/basic-runtime';
+import { adapter as mockModel } from '@agent-layers/adapters/mock-model';
 import { serveStack } from '../src/index.ts';
 
 const channel = (name: string, exposeHeaders?: string[]) => defineAdapter<'ChannelPort'>({

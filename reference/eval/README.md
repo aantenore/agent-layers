@@ -23,11 +23,11 @@ const { failures } = await checkAdapter(myEvaluatorAdapter); // [] = conformant
 | Role | Default | License | Swap for |
 |---|---|---|---|
 | Test runner, assertions, comparison UI | [promptfoo](https://github.com/promptfoo/promptfoo) (pinned `0.125.1`) | MIT | [Inspect AI](https://github.com/UKGovernmentBEIS/inspect_ai) (MIT), DeepEval (Apache-2.0) |
-| Per-layer attribution | `@agent-layers/adapter-layer-signals` | MIT | any `Evaluator` |
+| Per-layer attribution | `@agent-layers/adapters/layer-signals` | MIT | any `Evaluator` |
 | Retrieval quality (`knowledge`) | not bundled | | [RAGAS](https://github.com/explodinggradients/ragas) (Apache-2.0) |
 | Prompt optimisation | not bundled | | [DSPy](https://github.com/stanfordnlp/dspy) (MIT), [Opik](https://github.com/comet-ml/opik) (Apache-2.0) |
-| Expected answers | `@agent-layers/adapter-expected-eval` | MIT | any `Evaluator` |
-| Judge | `@agent-layers/adapter-judge-eval` (the stack's model) | MIT | DeepEval metrics (Apache-2.0), promptfoo `llm-rubric` |
+| Expected answers | `@agent-layers/adapters/expected-eval` | MIT | any `Evaluator` |
+| Judge | `@agent-layers/adapters/judge-eval` (the stack's model) | MIT | DeepEval metrics (Apache-2.0), promptfoo `llm-rubric` |
 
 ## Contents
 

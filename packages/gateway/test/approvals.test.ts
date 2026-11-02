@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { compose, ConfigError, recordingTelemetry, resolveProfile, type AccessQuestion, type Approval, type Stack } from '@agent-layers/core';
-import { adapter as approvalAdapter } from '@agent-layers/adapter-memory-approval';
-import { adapter as rulesAdapter } from '@agent-layers/adapter-rules-authorization';
-import { identityAdapter } from '@agent-layers/adapter-static-identity';
+import { adapter as approvalAdapter } from '@agent-layers/adapters/memory-approval';
+import { adapter as rulesAdapter } from '@agent-layers/adapters/rules-authorization';
+import { identityAdapter } from '@agent-layers/adapters/static-identity';
 import { serveStack } from '../src/index.ts';
 
 const tokens = { 'op-key': { subject: 'olga', roles: ['operator'] }, 'user-key': { subject: 'ugo', roles: ['support'] } };

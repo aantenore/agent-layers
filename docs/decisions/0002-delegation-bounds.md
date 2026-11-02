@@ -15,7 +15,7 @@ caller, the trace context and, on the way back, usage and cost. Four things were
 
 | # | Gap | Where it showed | Effect |
 |---|---|---|---|
-| 1 | Who acted in between is lost | `oidc` credentials sent `subject_token` only (`adapters/oidc/src/credentials.ts`); the `act` claim was not read into `Caller` | A tool or a policy saw the user, never the agent chain that reached it. Least privilege per agent could not be expressed. |
+| 1 | Who acted in between is lost | `oidc` credentials sent `subject_token` only (`packages/adapters/src/oidc/credentials.ts`); the `act` claim was not read into `Caller` | A tool or a policy saw the user, never the agent chain that reached it. Least privilege per agent could not be expressed. |
 | 2 | No deadline that shrinks across hops | Time limits were per hop: `gateway.requestTimeoutMs` 300000, `a2a` `timeoutMs` 300000 | A chain of three agents could run for three times the limit; a caller that gave up still paid for the work below it. |
 | 3 | No budget that crosses a hop | Budgets lived in one runtime adapter (`reinloop` `options.budget.*`, `basic-runtime` `maxTurns`); usage and cost came back after the fact (`metadata["agent-layers"]`) | A delegated agent could spend more than the caller had left. Swapping the runtime removed the budget. |
 | 4 | No hop count, no stop reason for it | Nothing counted agent-to-agent calls; `stopCode` had no value for it | A loop A → B → A was stopped only by timeouts. An orchestrator could not tell "too deep" from "out of budget". |

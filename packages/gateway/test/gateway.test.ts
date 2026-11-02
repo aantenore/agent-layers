@@ -5,9 +5,9 @@ import {
   compose, defineAdapter, PORT_VERSIONS, recordingTelemetry, resolveProfile,
   type ChannelPort, type StackConfig, type TelemetryRecord, type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
-import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
-import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
-import { identityAdapter } from '@agent-layers/adapter-static-identity';
+import { adapter as basicRuntime } from '@agent-layers/adapters/basic-runtime';
+import { adapter as mockModel } from '@agent-layers/adapters/mock-model';
+import { identityAdapter } from '@agent-layers/adapters/static-identity';
 import { serveStack, traceOf } from '../src/index.ts';
 
 let sink: TriggerSink | undefined;

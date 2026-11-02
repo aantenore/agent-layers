@@ -2,7 +2,7 @@ export * from './layers.ts';
 export * from './ports/index.ts';
 export * from './errors.ts';
 export { validate, type JsonSchema } from './schema.ts';
-export { TIERS, AdapterRegistry, defineAdapter, descriptorsOf, importAdapters, isAdapterDescriptor, packageLoader } from './adapter.ts';
+export { ADAPTERS_PACKAGE, TIERS, AdapterRegistry, defineAdapter, descriptorsOf, importAdapters, isAdapterDescriptor, packageLoader } from './adapter.ts';
 export type { AdapterContext, AdapterContextInit, AdapterDescriptor, AdapterLoader, AdapterMaps, AnyAdapter, Direction, RegistryOptions, Tier } from './adapter.ts';
 export { SLOTS, slotInfo, type SlotInfo, type SlotName, type SlotShape } from './slots.ts';
 export { configSchema } from './config-schema.ts';

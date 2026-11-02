@@ -1,5 +1,5 @@
 // The tools of the slice, identical in every profile. The functions adapter loads this module.
-import type { ToolDef } from '@agent-layers/adapter-functions';
+import type { ToolDef } from '@agent-layers/adapters/functions';
 
 export const tools: ToolDef[] = [
   {

@@ -42,7 +42,8 @@ repository, use `node --conditions=@agent-layers/source packages/cli/src/cli.ts 
 
 ## Write an adapter
 
-An adapter is a package `@agent-layers/adapter-<name>` with a factory and a descriptor. A guard that blocks a list of
+An adapter is a module with a factory and a descriptor: `packages/adapters/src/<name>` in this repository (published
+as `@agent-layers/adapters/<name>`), or a package of your own listed under `plugins`. A guard that blocks a list of
 words:
 
 ```ts
@@ -82,10 +83,11 @@ test('word-guard passes GuardPort conformance', async () => {
 });
 ```
 
-Start from [`adapters/_template`](../adapters/_template); [CONTRIBUTING.md](../CONTRIBUTING.md) has the checklist.
+Start from [`examples/adapter-package`](../examples/adapter-package); [CONTRIBUTING.md](../CONTRIBUTING.md) has the
+checklist.
 Rules:
 
-- Name the package after the standard or technology it maps. If it speaks a standard, set `maps.standard`;
+- Name the adapter after the standard or technology it maps. If it speaks a standard, set `maps.standard`;
   otherwise `maps.technology`.
 - Translate at the edge. Your standard's names stay inside the adapter; what crosses the port is the SDK language
   ([spec/language.md](../spec/language.md): `ModelRequest`, `ToolResult`, `Caller`, `GuardCheck`, ...).
@@ -210,7 +212,7 @@ in as a remote runtime (the `a2a` adapter) or uses the gateway's OpenAI-compatib
 | Key | Meaning |
 |---|---|
 | `name` | Project name |
-| `plugins` | Modules that export adapter descriptors, for adapters outside `@agent-layers/adapter-*` |
+| `plugins` | Modules that export adapter descriptors, for adapters outside `@agent-layers/adapters` |
 | `profile` | Default profile; `--profile` or `AGENT_LAYERS_PROFILE` override it |
 | `layers` | Base slots shared by all profiles |
 | `profiles.<name>` | `extends`, `tier`, `requires`, `layers` (only what differs), `policy`, `pipeline`, `gateway`, `limits`, `vocabularies`, `mappings`, `description` |

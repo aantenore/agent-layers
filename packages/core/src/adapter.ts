@@ -201,17 +201,40 @@ export async function importAdapters(specifier: string, cwd: string): Promise<An
   try {
     url = pathToFileURL(createRequire(join(cwd, 'package.json')).resolve(specifier)).href;
   } catch { /* fall back to resolution from the core package */ }
-  return descriptorsOf(await import(url) as Record<string, unknown>);
+  try {
+    return descriptorsOf(await import(url) as Record<string, unknown>);
+  } catch (err) {
+    const moved = MOVED_PACKAGE.exec(specifier);
+    if (moved && unresolved(err, specifier)) {
+      throw new Error(`${specifier} is now ${ADAPTERS_PACKAGE}/${moved[1]} (the adapter packages were merged into ${ADAPTERS_PACKAGE} in 0.4.0)`, { cause: err });
+    }
+    throw err;
+  }
 }
 
-/** Default loader: adapter `<name>` lives in the package `@agent-layers/adapter-<name>`. */
-export function packageLoader(cwd: string, prefix = '@agent-layers/adapter-'): AdapterLoader {
+/** The package that holds every adapter of this repository, one subpath export per adapter name. */
+export const ADAPTERS_PACKAGE = '@agent-layers/adapters';
+/** Package names used before 0.4.0, one package per adapter. */
+const MOVED_PACKAGE = /^@agent-layers\/adapter-([a-z0-9][a-z0-9-]*)$/;
+
+/** True when `err` says that `specifier` itself does not resolve: no such package, or no such subpath export. */
+function unresolved(err: unknown, specifier: string): boolean {
+  const code = (err as { code?: string }).code;
+  const message = errorMessage(err);
+  const root = specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
+  if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') return message.includes(`'${specifier}'`) || message.includes(`'${root}'`);
+  if (code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') return message.includes(`'.${specifier.slice(root.length)}'`);
+  return false;
+}
+
+/** Default loader: adapter `<name>` is the subpath export `@agent-layers/adapters/<name>`. */
+export function packageLoader(cwd: string, prefix = `${ADAPTERS_PACKAGE}/`): AdapterLoader {
   return async (_port, name) => {
+    const specifier = `${prefix}${name}`;
     try {
-      return await importAdapters(`${prefix}${name}`, cwd);
+      return await importAdapters(specifier, cwd);
     } catch (err) {
-      const code = (err as { code?: string }).code;
-      if ((code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') && errorMessage(err).includes(`${prefix}${name}`)) return undefined;
+      if (unresolved(err, specifier)) return undefined;
       throw err;
     }
   };

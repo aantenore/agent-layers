@@ -1,8 +1,67 @@
 # Changelog
 
-Every package under `packages/*` and `adapters/*` is released with the same version. See [RELEASING.md](RELEASING.md).
+Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released with the same version. See [RELEASING.md](RELEASING.md).
 
 ## 0.4.0 - unreleased
+
+### Breaking: package consolidation
+
+The 39 adapter packages `@agent-layers/adapter-<name>` are merged into one package, `@agent-layers/adapters`, with one
+subpath export per adapter: a release now publishes 5 packages (`core`, `gateway`, `cli`, `conformance`,
+`adapters`) instead of 43. Sources moved from `adapters/<name>` to `packages/adapters/src/<name>` (README
+included), tests to `packages/adapters/test/<name>`, and the adapter skeleton from `adapters/_template` to
+`examples/adapter-package`.
+
+- Stack configs are unchanged: `"adapter": "<name>"` now loads `@agent-layers/adapters/<name>`
+  (`packageLoader`, prefix `ADAPTERS_PACKAGE`). A `plugins` entry that names an old package fails with a message
+  naming the new subpath; `agent-layers layers` lists the subpaths of the installed `@agent-layers/adapters`.
+- Dependencies: replace every `@agent-layers/adapter-*` with `@agent-layers/adapters`. `@agent-layers/core` is a
+  dependency of `@agent-layers/adapters` (it was a peer of each adapter). `reinloop` is an optional peer dependency:
+  a project that uses the `reinloop` runtime adds `reinloop` (`^0.3.0`) to its own dependencies, as
+  `agent-layers init` and `examples/minimal` now do.
+- Imports: `@agent-layers/adapter-<name>` becomes `@agent-layers/adapters/<name>`, with the same exports.
+
+| Before 0.4.0 | From 0.4.0 |
+|---|---|
+| `@agent-layers/adapter-a2a` | `@agent-layers/adapters/a2a` |
+| `@agent-layers/adapter-authzen` | `@agent-layers/adapters/authzen` |
+| `@agent-layers/adapter-basic-runtime` | `@agent-layers/adapters/basic-runtime` |
+| `@agent-layers/adapter-cloudevents` | `@agent-layers/adapters/cloudevents` |
+| `@agent-layers/adapter-compose-deploy` | `@agent-layers/adapters/compose-deploy` |
+| `@agent-layers/adapter-console-telemetry` | `@agent-layers/adapters/console-telemetry` |
+| `@agent-layers/adapter-cron-trigger` | `@agent-layers/adapters/cron-trigger` |
+| `@agent-layers/adapter-expected-eval` | `@agent-layers/adapters/expected-eval` |
+| `@agent-layers/adapter-functions` | `@agent-layers/adapters/functions` |
+| `@agent-layers/adapter-http-guard` | `@agent-layers/adapters/http-guard` |
+| `@agent-layers/adapter-http-knowledge` | `@agent-layers/adapters/http-knowledge` |
+| `@agent-layers/adapter-http-tools` | `@agent-layers/adapters/http-tools` |
+| `@agent-layers/adapter-jsonl-telemetry` | `@agent-layers/adapters/jsonl-telemetry` |
+| `@agent-layers/adapter-judge-eval` | `@agent-layers/adapters/judge-eval` |
+| `@agent-layers/adapter-layer-signals` | `@agent-layers/adapters/layer-signals` |
+| `@agent-layers/adapter-llm-guard` | `@agent-layers/adapters/llm-guard` |
+| `@agent-layers/adapter-markdown-knowledge` | `@agent-layers/adapters/markdown-knowledge` |
+| `@agent-layers/adapter-mcp` | `@agent-layers/adapters/mcp` |
+| `@agent-layers/adapter-memory-approval` | `@agent-layers/adapters/memory-approval` |
+| `@agent-layers/adapter-memory-cache` | `@agent-layers/adapters/memory-cache` |
+| `@agent-layers/adapter-memory-state` | `@agent-layers/adapters/memory-state` |
+| `@agent-layers/adapter-memory-store` | `@agent-layers/adapters/memory-store` |
+| `@agent-layers/adapter-mock-model` | `@agent-layers/adapters/mock-model` |
+| `@agent-layers/adapter-oidc` | `@agent-layers/adapters/oidc` |
+| `@agent-layers/adapter-opa` | `@agent-layers/adapters/opa` |
+| `@agent-layers/adapter-openai-compatible` | `@agent-layers/adapters/openai-compatible` |
+| `@agent-layers/adapter-openapi` | `@agent-layers/adapters/openapi` |
+| `@agent-layers/adapter-otlp` | `@agent-layers/adapters/otlp` |
+| `@agent-layers/adapter-presidio` | `@agent-layers/adapters/presidio` |
+| `@agent-layers/adapter-regex-guard` | `@agent-layers/adapters/regex-guard` |
+| `@agent-layers/adapter-reinloop` | `@agent-layers/adapters/reinloop` |
+| `@agent-layers/adapter-rule-router` | `@agent-layers/adapters/rule-router` |
+| `@agent-layers/adapter-rules-authorization` | `@agent-layers/adapters/rules-authorization` |
+| `@agent-layers/adapter-sqlite-approval` | `@agent-layers/adapters/sqlite-approval` |
+| `@agent-layers/adapter-sqlite-state` | `@agent-layers/adapters/sqlite-state` |
+| `@agent-layers/adapter-sqlite-store` | `@agent-layers/adapters/sqlite-store` |
+| `@agent-layers/adapter-static-identity` | `@agent-layers/adapters/static-identity` |
+| `@agent-layers/adapter-static-router` | `@agent-layers/adapters/static-router` |
+| `@agent-layers/adapter-terminal-channel` | `@agent-layers/adapters/terminal-channel` |
 
 ### Added
 
@@ -46,7 +105,7 @@ Every package moves to 0.3.0 together: adapters of this release use core exports
   expression (UTC, Vixie day rule), with timers in the running process. Prototype tier; a firing is skipped while the
   previous run of its schedule is still going, a failed run is reported as the telemetry event
   `cron-trigger.run.failed`, and `start` rejects a schedule naming an agent the stack does not have. The gateway does
-  not run it and says so at start-up ([adapters/cron-trigger](adapters/cron-trigger/README.md)).
+  not run it and says so at start-up ([adapters/cron-trigger](packages/adapters/src/cron-trigger/README.md)).
 - `InboundMount.exposeHeaders`: response headers a mounted channel or trigger needs a browser client to read. The
   gateway adds them to `Access-Control-Expose-Headers` next to `x-request-id` and `mcp-session-id`, which stays a
   default until the MCP channel declares it (`@agent-layers/core`, `@agent-layers/gateway`,
@@ -67,7 +126,7 @@ Every package moves to 0.3.0 together: adapters of this release use core exports
   production tiers. Same semantics as `memory-approval`; `lookup` consumes atomically across processes and `wait`
   sees a decision taken by another process within `pollMs`. The folder and file it creates are private (0700, 0600);
   consumed and expired rows are pruned after `retainMs` (default 7 days). The slice's production profile uses it
-  ([adapters/sqlite-approval](adapters/sqlite-approval/README.md)).
+  ([adapters/sqlite-approval](packages/adapters/src/sqlite-approval/README.md)).
 - `ApprovalPending` and `runEndOf(err)`: inside a run the stack's tools throw `ApprovalPending` for a call waiting for
   an approval, and the stack ends the run `waiting` with reason `needs_input`, whether the runtime lets the error
   through or ends the run with its stop reason. Only runtimes whose descriptor declares RuntimePort 1.1.0 or later get
@@ -149,8 +208,8 @@ Every package moves to 0.3.0 together: adapters of this release use core exports
 - `memory-store` (prototype) and `sqlite-store` (prototype and production: one SQLite file, WAL, versioned schema,
   every write one `BEGIN IMMEDIATE` transaction so compare-and-set holds across processes, private folder and file
   0700/0600, expired keys pruned `retainMs` after expiry). Limits `maxKeys` (memory), `maxKeyChars`, `maxValueBytes`,
-  `listLimit`, `busyTimeoutMs` and `retainMs` (sqlite) ([adapters/memory-store](adapters/memory-store/README.md),
-  [adapters/sqlite-store](adapters/sqlite-store/README.md), [docs/limits.md](docs/limits.md)). On the production tier
+  `listLimit`, `busyTimeoutMs` and `retainMs` (sqlite) ([adapters/memory-store](packages/adapters/src/memory-store/README.md),
+  [adapters/sqlite-store](packages/adapters/src/sqlite-store/README.md), [docs/limits.md](docs/limits.md)). On the production tier
   the readiness gate refuses `memory-store` like any prototype-only adapter; the slot stays optional.
 - ApprovalPort 1.2.0: optional `list({status?, limit?})` (pending by default, oldest first, capped by the adapter's
   `listLimit`, default 100) and `cancel(id, {by?, reason?})`, which withdraws a pending approval with the new status

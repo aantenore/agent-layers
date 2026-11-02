@@ -1,0 +1,248 @@
+{
+  "name": "@agent-layers/adapters",
+  "version": "0.3.0",
+  "description": "Every agent-layers adapter in one package: one subpath export per standard or technology",
+  "keywords": ["agent-layers", "agent-layers-adapter", "adapters"],
+  "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/adapters#readme",
+  "bugs": {
+    "url": "https://github.com/aantenore/agent-layers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aantenore/agent-layers.git",
+    "directory": "packages/adapters"
+  },
+  "license": "MIT",
+  "author": "Antonio Antenore",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "exports": {
+    "./a2a": {
+      "@agent-layers/source": "./src/a2a/index.ts",
+      "types": "./dist/a2a/index.d.ts",
+      "default": "./dist/a2a/index.js"
+    },
+    "./authzen": {
+      "@agent-layers/source": "./src/authzen/index.ts",
+      "types": "./dist/authzen/index.d.ts",
+      "default": "./dist/authzen/index.js"
+    },
+    "./basic-runtime": {
+      "@agent-layers/source": "./src/basic-runtime/index.ts",
+      "types": "./dist/basic-runtime/index.d.ts",
+      "default": "./dist/basic-runtime/index.js"
+    },
+    "./cloudevents": {
+      "@agent-layers/source": "./src/cloudevents/index.ts",
+      "types": "./dist/cloudevents/index.d.ts",
+      "default": "./dist/cloudevents/index.js"
+    },
+    "./compose-deploy": {
+      "@agent-layers/source": "./src/compose-deploy/index.ts",
+      "types": "./dist/compose-deploy/index.d.ts",
+      "default": "./dist/compose-deploy/index.js"
+    },
+    "./console-telemetry": {
+      "@agent-layers/source": "./src/console-telemetry/index.ts",
+      "types": "./dist/console-telemetry/index.d.ts",
+      "default": "./dist/console-telemetry/index.js"
+    },
+    "./cron-trigger": {
+      "@agent-layers/source": "./src/cron-trigger/index.ts",
+      "types": "./dist/cron-trigger/index.d.ts",
+      "default": "./dist/cron-trigger/index.js"
+    },
+    "./expected-eval": {
+      "@agent-layers/source": "./src/expected-eval/index.ts",
+      "types": "./dist/expected-eval/index.d.ts",
+      "default": "./dist/expected-eval/index.js"
+    },
+    "./functions": {
+      "@agent-layers/source": "./src/functions/index.ts",
+      "types": "./dist/functions/index.d.ts",
+      "default": "./dist/functions/index.js"
+    },
+    "./http-guard": {
+      "@agent-layers/source": "./src/http-guard/index.ts",
+      "types": "./dist/http-guard/index.d.ts",
+      "default": "./dist/http-guard/index.js"
+    },
+    "./http-knowledge": {
+      "@agent-layers/source": "./src/http-knowledge/index.ts",
+      "types": "./dist/http-knowledge/index.d.ts",
+      "default": "./dist/http-knowledge/index.js"
+    },
+    "./http-tools": {
+      "@agent-layers/source": "./src/http-tools/index.ts",
+      "types": "./dist/http-tools/index.d.ts",
+      "default": "./dist/http-tools/index.js"
+    },
+    "./jsonl-telemetry": {
+      "@agent-layers/source": "./src/jsonl-telemetry/index.ts",
+      "types": "./dist/jsonl-telemetry/index.d.ts",
+      "default": "./dist/jsonl-telemetry/index.js"
+    },
+    "./judge-eval": {
+      "@agent-layers/source": "./src/judge-eval/index.ts",
+      "types": "./dist/judge-eval/index.d.ts",
+      "default": "./dist/judge-eval/index.js"
+    },
+    "./layer-signals": {
+      "@agent-layers/source": "./src/layer-signals/index.ts",
+      "types": "./dist/layer-signals/index.d.ts",
+      "default": "./dist/layer-signals/index.js"
+    },
+    "./llm-guard": {
+      "@agent-layers/source": "./src/llm-guard/index.ts",
+      "types": "./dist/llm-guard/index.d.ts",
+      "default": "./dist/llm-guard/index.js"
+    },
+    "./markdown-knowledge": {
+      "@agent-layers/source": "./src/markdown-knowledge/index.ts",
+      "types": "./dist/markdown-knowledge/index.d.ts",
+      "default": "./dist/markdown-knowledge/index.js"
+    },
+    "./mcp": {
+      "@agent-layers/source": "./src/mcp/index.ts",
+      "types": "./dist/mcp/index.d.ts",
+      "default": "./dist/mcp/index.js"
+    },
+    "./memory-approval": {
+      "@agent-layers/source": "./src/memory-approval/index.ts",
+      "types": "./dist/memory-approval/index.d.ts",
+      "default": "./dist/memory-approval/index.js"
+    },
+    "./memory-cache": {
+      "@agent-layers/source": "./src/memory-cache/index.ts",
+      "types": "./dist/memory-cache/index.d.ts",
+      "default": "./dist/memory-cache/index.js"
+    },
+    "./memory-state": {
+      "@agent-layers/source": "./src/memory-state/index.ts",
+      "types": "./dist/memory-state/index.d.ts",
+      "default": "./dist/memory-state/index.js"
+    },
+    "./memory-store": {
+      "@agent-layers/source": "./src/memory-store/index.ts",
+      "types": "./dist/memory-store/index.d.ts",
+      "default": "./dist/memory-store/index.js"
+    },
+    "./mock-model": {
+      "@agent-layers/source": "./src/mock-model/index.ts",
+      "types": "./dist/mock-model/index.d.ts",
+      "default": "./dist/mock-model/index.js"
+    },
+    "./oidc": {
+      "@agent-layers/source": "./src/oidc/index.ts",
+      "types": "./dist/oidc/index.d.ts",
+      "default": "./dist/oidc/index.js"
+    },
+    "./opa": {
+      "@agent-layers/source": "./src/opa/index.ts",
+      "types": "./dist/opa/index.d.ts",
+      "default": "./dist/opa/index.js"
+    },
+    "./openai-compatible": {
+      "@agent-layers/source": "./src/openai-compatible/index.ts",
+      "types": "./dist/openai-compatible/index.d.ts",
+      "default": "./dist/openai-compatible/index.js"
+    },
+    "./openapi": {
+      "@agent-layers/source": "./src/openapi/index.ts",
+      "types": "./dist/openapi/index.d.ts",
+      "default": "./dist/openapi/index.js"
+    },
+    "./otlp": {
+      "@agent-layers/source": "./src/otlp/index.ts",
+      "types": "./dist/otlp/index.d.ts",
+      "default": "./dist/otlp/index.js"
+    },
+    "./presidio": {
+      "@agent-layers/source": "./src/presidio/index.ts",
+      "types": "./dist/presidio/index.d.ts",
+      "default": "./dist/presidio/index.js"
+    },
+    "./regex-guard": {
+      "@agent-layers/source": "./src/regex-guard/index.ts",
+      "types": "./dist/regex-guard/index.d.ts",
+      "default": "./dist/regex-guard/index.js"
+    },
+    "./reinloop": {
+      "@agent-layers/source": "./src/reinloop/index.ts",
+      "types": "./dist/reinloop/index.d.ts",
+      "default": "./dist/reinloop/index.js"
+    },
+    "./rule-router": {
+      "@agent-layers/source": "./src/rule-router/index.ts",
+      "types": "./dist/rule-router/index.d.ts",
+      "default": "./dist/rule-router/index.js"
+    },
+    "./rules-authorization": {
+      "@agent-layers/source": "./src/rules-authorization/index.ts",
+      "types": "./dist/rules-authorization/index.d.ts",
+      "default": "./dist/rules-authorization/index.js"
+    },
+    "./sqlite-approval": {
+      "@agent-layers/source": "./src/sqlite-approval/index.ts",
+      "types": "./dist/sqlite-approval/index.d.ts",
+      "default": "./dist/sqlite-approval/index.js"
+    },
+    "./sqlite-state": {
+      "@agent-layers/source": "./src/sqlite-state/index.ts",
+      "types": "./dist/sqlite-state/index.d.ts",
+      "default": "./dist/sqlite-state/index.js"
+    },
+    "./sqlite-store": {
+      "@agent-layers/source": "./src/sqlite-store/index.ts",
+      "types": "./dist/sqlite-store/index.d.ts",
+      "default": "./dist/sqlite-store/index.js"
+    },
+    "./static-identity": {
+      "@agent-layers/source": "./src/static-identity/index.ts",
+      "types": "./dist/static-identity/index.d.ts",
+      "default": "./dist/static-identity/index.js"
+    },
+    "./static-router": {
+      "@agent-layers/source": "./src/static-router/index.ts",
+      "types": "./dist/static-router/index.d.ts",
+      "default": "./dist/static-router/index.js"
+    },
+    "./terminal-channel": {
+      "@agent-layers/source": "./src/terminal-channel/index.ts",
+      "types": "./dist/terminal-channel/index.d.ts",
+      "default": "./dist/terminal-channel/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --conditions=@agent-layers/source --test \"test/**/*.test.ts\"",
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
+  },
+  "dependencies": {
+    "@agent-layers/core": "^0.3.0"
+  },
+  "peerDependencies": {
+    "reinloop": "^0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "reinloop": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@agent-layers/conformance": "0.3.0",
+    "@agent-layers/gateway": "0.3.0",
+    "@types/node": "^24.19.0",
+    "reinloop": "^0.3.0",
+    "typescript": "^7.0.2"
+  }
+}

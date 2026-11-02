@@ -314,7 +314,7 @@ No judge model was run (`judge-eval`). It grades answers, not layers, and would 
   the budget enforcement is untested live.
 - Costs are priced with an illustrative table, not real prices; the Pydantic AI agent has no cost budget of its own.
 - Approvals (`ask` policy) and their resume in a later run of the same session are covered by unit tests and an A2A
-  test through the gateway (`adapters/a2a/test/approval-resume.test.ts`), not by the slice. Conversation continuity
+  test through the gateway (`packages/adapters/test/a2a/approval-resume.test.ts`), not by the slice. Conversation continuity
   across runs is not provided by `basic-runtime` or `reinloop`: a session carries approval decisions only.
 - Streaming runs, CloudEvents triggers, the deploy layer and HTTP MCP tool servers (`reference/tool`).
 - `layer-signals` itself does not pick a single layer: the driver applies "worst non-harness layer".

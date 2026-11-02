@@ -38,10 +38,10 @@ standard.
 
 | Endpoint | Standard | Adapter | Reaches | Enforced on the way |
 |---|---|---|---|---|
-| `GET /v1/models`, `POST /v1/chat/completions` | OpenAI Chat Completions | [`openai-compatible`](../adapters/openai-compatible) | ModelPort (model aliases); RuntimePort (`agent:<name>`) | input and output guards, cache, router, token usage, traces |
-| `POST /mcp` | Model Context Protocol (streamable HTTP) | [`mcp`](../adapters/mcp) | ToolPort, KnowledgePort as read-only tools | policy, approval, authorization, `tool_args` and `tool_result` guards, credentials for the caller |
-| `GET /.well-known/agent-card.json`, `POST /a2a/<agent>` | Agent2Agent (A2A) 1.0, 0.3 accepted | [`a2a`](../adapters/a2a) | RuntimePort | everything a run goes through |
-| `POST /v1/events` | CloudEvents 1.0 HTTP binding | [`cloudevents`](../adapters/cloudevents) | TriggerPort, then RuntimePort | the trigger's caller; everything a run goes through |
+| `GET /v1/models`, `POST /v1/chat/completions` | OpenAI Chat Completions | [`openai-compatible`](../packages/adapters/src/openai-compatible) | ModelPort (model aliases); RuntimePort (`agent:<name>`) | input and output guards, cache, router, token usage, traces |
+| `POST /mcp` | Model Context Protocol (streamable HTTP) | [`mcp`](../packages/adapters/src/mcp) | ToolPort, KnowledgePort as read-only tools | policy, approval, authorization, `tool_args` and `tool_result` guards, credentials for the caller |
+| `GET /.well-known/agent-card.json`, `POST /a2a/<agent>` | Agent2Agent (A2A) 1.0, 0.3 accepted | [`a2a`](../packages/adapters/src/a2a) | RuntimePort | everything a run goes through |
+| `POST /v1/events` | CloudEvents 1.0 HTTP binding | [`cloudevents`](../packages/adapters/src/cloudevents) | TriggerPort, then RuntimePort | the trigger's caller; everything a run goes through |
 | `GET /approvals`, `GET`/`POST`/`DELETE /approvals/<id>` (off by default) | JSON over HTTP | gateway | ApprovalPort | authorization of every request (actions `list`, `decide`); see [Approvals](#approvals) |
 | `POST /runs/<id>/resume`, `POST /runs/<id>/cancel` (off by default) | JSON over HTTP | gateway | RuntimePort (`Stack.resume`, `Stack.cancel`) | authorization of every request (actions `resume`, `cancel`), then the stack's own rules; see [Runs](#runs) |
 | `GET /healthz`, `GET /readyz` | | gateway | liveness; readiness gate of the profile | |

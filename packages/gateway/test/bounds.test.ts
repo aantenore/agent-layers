@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { compose, defineAdapter, formatAgentBounds, formatAgentLineage, PORT_VERSIONS, resolveProfile, SF_MAX_INTEGER, type ChannelPort } from '@agent-layers/core';
-import { identityAdapter } from '@agent-layers/adapter-static-identity';
+import { identityAdapter } from '@agent-layers/adapters/static-identity';
 import { BoundsHeaderError, delegationOf, parseAgentBounds, parseAgentLineage, serveStack } from '../src/index.ts';
 
 const MAX = 512;

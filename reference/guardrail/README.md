@@ -55,7 +55,7 @@ Effects: `block` on `input` or `output` ends the run `stopped` with reason `{ co
 }
 ```
 
-Guards apply to every agent; options of each adapter are in [presidio](../../adapters/presidio/README.md), [llm-guard](../../adapters/llm-guard/README.md) and [regex-guard](../../adapters/regex-guard/README.md).
+Guards apply to every agent; options of each adapter are in [presidio](../../packages/adapters/src/presidio/README.md), [llm-guard](../../packages/adapters/src/llm-guard/README.md) and [regex-guard](../../packages/adapters/src/regex-guard/README.md).
 
 ## Swap it
 

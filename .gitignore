@@ -23,6 +23,6 @@ __pycache__/
 
 # package build output (LICENSE is copied in by prepack, schemas by the conformance build)
 packages/*/LICENSE
-adapters/*/LICENSE
+examples/adapter-package/LICENSE
 packages/conformance/schemas/
 *.tgz

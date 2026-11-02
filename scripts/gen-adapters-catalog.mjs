@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Rewrites the adapter catalog in docs/adapters.md (between the adapters:begin and adapters:end markers)
-// from adapters/*/package.json and the descriptors each package exports.
+// from the subpath exports of packages/adapters/package.json and the descriptors each one exports.
 //
 //   npm run docs:adapters           rewrite the section
 //   node scripts/gen-adapters-catalog.mjs --check   exit 1 when the section is out of date
 //
-// Adapter packages ship TypeScript behind the `@agent-layers/source` export condition, so the script re-runs itself with
-// `node --conditions=@agent-layers/source`. A package that fails to import is listed as "load error" instead of aborting.
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+// Adapters ship TypeScript behind the `@agent-layers/source` export condition, so the script re-runs itself with
+// `node --conditions=@agent-layers/source`. An adapter that fails to import is listed as "load error" instead of aborting.
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ensureSourceCondition, importSource, read, ROOT } from './lib/common.mjs';
@@ -15,14 +15,15 @@ import { ensureSourceCondition, importSource, read, ROOT } from './lib/common.mj
 export const DOC = join(ROOT, 'docs/adapters.md');
 export const BEGIN = '<!-- adapters:begin -->';
 export const END = '<!-- adapters:end -->';
-const ADAPTERS_DIR = join(ROOT, 'adapters');
+const ADAPTERS_DIR = join(ROOT, 'packages/adapters');
 
 const cell = (value) => String(value ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
 
-function entryOf(pkg) {
-  const dot = pkg.exports?.['.'];
-  const entry = typeof dot === 'string' ? dot : dot?.['@agent-layers/source'] ?? dot?.import ?? dot?.default ?? pkg.main ?? 'index.js';
-  return typeof entry === 'string' ? entry : entry?.default ?? 'index.js';
+/** Source entry of a subpath export (`@agent-layers/source`, else `import` or `default`). */
+function entryOf(target) {
+  if (typeof target === 'string') return target;
+  const entry = target?.['@agent-layers/source'] ?? target?.import ?? target?.default;
+  return typeof entry === 'string' ? entry : entry?.default;
 }
 
 function descriptorsOf(mod) {
@@ -40,25 +41,28 @@ function shortError(err) {
   return `${err?.code ? `${err.code}: ` : ''}${first}`.slice(0, 120);
 }
 
-/** Reads every adapter package. Returns descriptors and the packages that failed to load. */
+/** Reads every adapter subpath of packages/adapters. Returns descriptors and the subpaths that failed to load. */
 export async function collectAdapters() {
   const rows = [];
   const failed = [];
-  const dirs = existsSync(ADAPTERS_DIR) ? readdirSync(ADAPTERS_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()) : [];
-  for (const { name: dir } of dirs.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (dir.startsWith('_') || dir.startsWith('.')) continue;
-    const pkgPath = join(ADAPTERS_DIR, dir, 'package.json');
-    if (!existsSync(pkgPath)) continue;
-    let pkg;
-    try { pkg = JSON.parse(read(pkgPath)); } catch (err) { failed.push({ dir, name: dir, error: shortError(err) }); continue; }
-    if (pkg.private) continue;
+  const pkgPath = join(ADAPTERS_DIR, 'package.json');
+  if (!existsSync(pkgPath)) return { rows, failed };
+  const pkg = JSON.parse(read(pkgPath));
+  const subpaths = Object.entries(pkg.exports ?? {})
+    .filter(([key]) => /^\.\/[a-z0-9][a-z0-9-]*$/.test(key))
+    .sort(([x], [y]) => x.localeCompare(y));
+  for (const [key, target] of subpaths) {
+    const dir = key.slice(2);
+    const name = `${pkg.name}/${dir}`;
     try {
-      const mod = await import(pathToFileURL(join(ADAPTERS_DIR, dir, entryOf(pkg))).href);
+      const entry = entryOf(target);
+      if (!entry) throw new Error('no entry in exports');
+      const mod = await import(pathToFileURL(join(ADAPTERS_DIR, entry)).href);
       const found = descriptorsOf(mod);
       if (!found.length) throw new Error('no adapter descriptor exported');
-      for (const d of found) rows.push({ dir, pkg: pkg.name, descriptor: d, maturity: d.maturity ?? pkg.agentLayers?.maturity ?? 'experimental' });
+      for (const d of found) rows.push({ dir, pkg: name, descriptor: d, maturity: d.maturity ?? 'experimental' });
     } catch (err) {
-      failed.push({ dir, name: pkg.name ?? dir, error: shortError(err) });
+      failed.push({ dir, name, error: shortError(err) });
     }
   }
   return { rows, failed };
@@ -80,23 +84,23 @@ export async function renderCatalog() {
     out.push(`#### ${plane.name}`, '', '| Layer | Adapter | Direction | Port | Maps | Tiers | Maturity |', '|---|---|---|---|---|---|---|');
     for (const { dir, descriptor: d, maturity } of mine) {
       const maps = d.maps?.standard ? `standard: ${d.maps.standard}` : `technology: ${d.maps?.technology ?? '?'}`;
-      out.push(`| \`${d.layer}\` | [\`${d.name}\`](../adapters/${dir}) | ${d.direction} | ${d.port} | ${cell(maps)} | ${(d.tiers ?? []).join(', ')} | ${cell(maturity)} |`);
+      out.push(`| \`${d.layer}\` | [\`${d.name}\`](../packages/adapters/src/${dir}) | ${d.direction} | ${d.port} | ${cell(maps)} | ${(d.tiers ?? []).join(', ')} | ${cell(maturity)} |`);
     }
     out.push('');
   }
   const unknown = rows.filter((r) => !order.has(r.descriptor.layer));
   if (unknown.length) {
     out.push('#### Unknown layer', '', '| Layer | Adapter | Port |', '|---|---|---|');
-    for (const { dir, descriptor: d } of unknown) out.push(`| \`${cell(d.layer)}\` | [\`${d.name}\`](../adapters/${dir}) | ${d.port} |`);
+    for (const { dir, descriptor: d } of unknown) out.push(`| \`${cell(d.layer)}\` | [\`${d.name}\`](../packages/adapters/src/${dir}) | ${d.port} |`);
     out.push('');
   }
   if (failed.length) {
-    out.push('#### Not loaded', '', '| Package | Status | Detail |', '|---|---|---|');
-    for (const f of failed) out.push(`| [\`${f.name}\`](../adapters/${f.dir}) | load error | ${cell(f.error)} |`);
+    out.push('#### Not loaded', '', '| Module | Status | Detail |', '|---|---|---|');
+    for (const f of failed) out.push(`| [\`${f.name}\`](../packages/adapters/src/${f.dir}) | load error | ${cell(f.error)} |`);
     out.push('');
   }
-  const packages = new Set(rows.map((r) => r.dir)).size;
-  out.push(`${rows.length} adapters in ${packages} packages${failed.length ? `, ${failed.length} not loaded` : ''}.`);
+  const modules = new Set(rows.map((r) => r.dir)).size;
+  out.push(`${rows.length} adapters in ${modules} modules of @agent-layers/adapters${failed.length ? `, ${failed.length} not loaded` : ''}.`);
   return out.join('\n');
 }
 

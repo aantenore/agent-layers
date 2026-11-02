@@ -99,8 +99,9 @@ flowchart LR
   by themselves (a terminal), `mount` when a host server (the gateway) serves their routes on the web-standard
   `Request`/`Response` types. They reach the stack through its `ChannelHost` (agents, run, stream, verify, and the
   governed model and tools) or, for triggers, a `TriggerSink`.
-- An adapter package is named after what it maps (`adapter-openai-compatible`, `adapter-markdown-knowledge`) and may
-  ship both directions as separate descriptors.
+- An adapter is named after what it maps (`openai-compatible`, `markdown-knowledge`) and may ship both directions as
+  separate descriptors. The adapters of this repository ship in one package, `@agent-layers/adapters`, one subpath
+  export per adapter (`@agent-layers/adapters/openai-compatible`).
 
 ## Composition pipelines
 
@@ -202,7 +203,7 @@ sequenceDiagram
 1. A new technology is an adapter plus its conformance test, never a core change.
 2. A core change starts with a spec change: the port page in `spec/ports/`, its schema, and a version bump.
 3. Adapters depend only on `@agent-layers/core` (peer) and test with `@agent-layers/conformance` (dev).
-4. Technology and standard names appear only in adapter packages and reference setups, never in the core. The core
+4. Technology and standard names appear only in adapters and reference setups, never in the core. The core
    speaks one language; each adapter translates its standard to it and back.
 5. Extra data goes in `ext`, never in a new field: keys are `<adapter>.<name>`, declared in the descriptor
    (`ext: { produces, reads, safe? }`) and checked by conformance (`checkExt`). The core never reads an adapter key.
@@ -216,8 +217,8 @@ sequenceDiagram
 |---|---|---|
 | Layer id | stable lowercase word | `knowledge` |
 | Port | `<Name>Port` | `KnowledgePort` |
-| Adapter package | `@agent-layers/adapter-<standard or technology>` | `@agent-layers/adapter-markdown-knowledge` |
-| Adapter name in config | the package suffix | `"adapter": "markdown-knowledge"` |
+| Adapter module | `@agent-layers/adapters/<standard or technology>` | `@agent-layers/adapters/markdown-knowledge` |
+| Adapter name in config | the subpath | `"adapter": "markdown-knowledge"` |
 | Slot | config key under `layers` | `knowledge`, `guardrails`, `telemetry` |
 | Tool name seen by the model | `<source>__<tool>` | `util__convert_temperature` |
 | Reference setup | `reference/<layer id>/` | `reference/knowledge/` |

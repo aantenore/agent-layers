@@ -3,12 +3,14 @@
 /packages/core/           @aantenore
 /packages/conformance/    @aantenore
 /packages/cli/            @aantenore
-/adapters/_template/      @aantenore
+/packages/adapters/package.json  @aantenore
+/examples/adapter-package/       @aantenore
 /docs/architecture.md     @aantenore
 /scripts/                 @aantenore
 /.github/                 @aantenore
 /package.json             @aantenore
 /tsconfig*.json           @aantenore
 
-# Adapters: one line per adapter and its maintainers, for example
-# /adapters/qdrant/        @your-github-handle
+# Adapters: one line per adapter folder and its maintainers, for example
+# /packages/adapters/src/qdrant/   @your-github-handle
+# /packages/adapters/test/qdrant/  @your-github-handle

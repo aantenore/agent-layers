@@ -119,6 +119,7 @@ const r = await (await stack.agent('assistant')).run('refund A1', { caller });
 await stack.resume(r.runId, { approval: { id: 'ap-1', approved: true } }, { caller: reviewer });
 await stack.resume(otherRun, { input: 'the order number is A2' }, { caller });
 await stack.cancel(runId, { by: caller, reason: 'no longer needed' });
+await stack.runTarget(runId); // { kind: 'run', id, agent, attrs?: { tool } }: authorize on it before resume or cancel
 ```
 
 | Answer | Does |
@@ -133,8 +134,9 @@ of the last answer, `reinloop` its own event log; each runs exactly the call tha
 its result, and goes on with the next turn, so the model is not asked the first answer again. The `a2a` runtime
 continues the remote task with a follow-up message (input only: the remote agent decides its own approvals). A
 runtime without `resume` is run again from its input, which with a real model is not deterministic. `cancel` aborts a
-run in flight in this process, or withdraws a waiting run and its approval; a cancelled run cannot be resumed. Over the
-network: the gateway's [run routes](../gateway.md#runs), A2A follow-ups that name an `input-required` task, and A2A
+run in flight in this process, or withdraws a waiting run and its approval; a cancelled run cannot be resumed.
+`runTarget` gives the access target of a run (its agent and the tool it waits for, kind `run`), undefined for an unknown
+run: a host authorizes an action on the run on that target first, as the gateway does. Over the network: the gateway's [run routes](../gateway.md#runs), A2A follow-ups that name an `input-required` task, and A2A
 CancelTask.
 
 ## How to swap
@@ -151,7 +153,7 @@ runtime.
 
 | Runtime | Runs | Reaches the model and tools through | Slot |
 |---|---|---|---|
-| [`reinloop`](../../adapters/reinloop) | In process (TypeScript) | `stack.modelFor` and `stack.toolsFor` | `"runtime": { "adapter": "reinloop" }` |
+| [`reinloop`](../../packages/adapters/src/reinloop) | In process (TypeScript) | `stack.modelFor` and `stack.toolsFor` | `"runtime": { "adapter": "reinloop" }` |
 | [Pydantic AI](../../runtimes/pydantic-ai/README.md) | Own process (Python), served over A2A 1.0 | The gateway: `/v1` (OpenAI-compatible, model alias) and `/mcp` | `"runtime": { "adapter": "a2a", "options": { "url": "http://localhost:9100", "auth": { "audience": "agent-gateway" } } }` |
 
 ### Remote: Pydantic AI over A2A
@@ -207,9 +209,9 @@ sequenceDiagram
 | Adapter | Maps |
 |---|---|
 | `basic-runtime` | An in-process tool-calling loop (prototype) |
-| [`reinloop`](../../adapters/reinloop) | The [reinloop](https://github.com/aantenore/reinloop) (MIT) agent loop: budgets, compaction, parallel tool batches (prototype, production) |
+| [`reinloop`](../../packages/adapters/src/reinloop) | The [reinloop](https://github.com/aantenore/reinloop) (MIT) agent loop: budgets, compaction, parallel tool batches (prototype, production) |
 | `memory-state` | An in-process event log (prototype) |
-| [`sqlite-state`](../../adapters/sqlite-state) | An event log in one SQLite file through `node:sqlite` (prototype, production on a single node) |
+| [`sqlite-state`](../../packages/adapters/src/sqlite-state) | An event log in one SQLite file through `node:sqlite` (prototype, production on a single node) |
 
 **Runtime.** `reinloop` runs the loop and leaves governance to the stack: its model is `stack.modelFor` wrapped as a
 reinloop provider and its tools are `stack.toolsFor`, so guards, cache, routing, knowledge, authorization, approvals,

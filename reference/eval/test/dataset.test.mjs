@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { checkAdapter } from '@agent-layers/conformance';
 import { main } from '@agent-layers/cli';
 import { LAYERS } from '@agent-layers/core';
-import { adapter as expectedEval } from '@agent-layers/adapter-expected-eval';
+import { adapter as expectedEval } from '@agent-layers/adapters/expected-eval';
 import { layerDir } from './helpers.mjs';
 
 const LAYER_IDS = LAYERS.map((l) => l.layer);
@@ -42,7 +42,7 @@ test('eval: the expected-eval adapter passes the EvaluatorPort conformance suite
 });
 
 test('eval: "agent-layers eval" writes contract-shaped rows for the dataset (mock model)', async () => {
-  // Inside the layer directory, so the adapter packages resolve like they do for the reference tests.
+  // Inside the layer directory, so @agent-layers/adapters resolves like they do for the reference tests.
   const dir = await mkdtemp(join(layerDir, '.run-'));
   try {
     await writeFile(join(dir, 'agent-layers.json'), JSON.stringify({

@@ -95,7 +95,7 @@ reserved for the call with `usage` and `costUsd`; a figure that is not reported 
 
 ## Implementations
 
-- The [`a2a`](../../adapters/a2a/README.md) adapter of agent-layers: the runtime sends the data on every message from
+- The [`a2a`](../../packages/adapters/src/a2a/README.md) adapter of agent-layers: the runtime sends the data on every message from
   `outboundBounds(ctx)` and settles with the report; the channel declares the extension, reads the data into the run's
   bounds and writes the report. Both accept the alias URI.
 - agent-plexus `a2a-member` sends the data under the alias URI.

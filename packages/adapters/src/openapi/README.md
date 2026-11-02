@@ -1,0 +1,72 @@
+# @agent-layers/adapters/openapi
+
+Maps **OpenAPI 3** → **ToolPort** (layer `tool`). Direction: outbound. Tier: prototype, production. Maturity:
+experimental.
+
+Turns each operation of an OpenAPI 3 document into a tool. The document is JSON (YAML is not read: convert it first),
+given as a file path relative to the config directory, an `http(s)` URL, or inline.
+
+- **Names and schemas**: the tool is named after the `operationId` (or `<method>_<path>`), characters outside
+  `[A-Za-z0-9_.-]` replaced. Path, query and header parameters and the JSON request body become one input schema; a
+  body object with properties is flattened into the arguments, any other body is the argument `body`; the result is
+  the tool's `params`. Local `$ref`s
+  are inlined (a reference back into itself is cut), `nullable` becomes a type union. `Authorization`, `Accept` and
+  `Content-Type` header parameters are left to the transport. Operations whose body is not JSON are skipped.
+- **Include**: `include` lists operationId globs; the default is all operations.
+- **Risk**: `read` for GET and HEAD, `write` otherwise; `risk` overrides it by method (a core value or one added to the
+  `risk` vocabulary).
+- **Mappings**: `in` rules on `ToolSpec` (instance key `tools.<name>`) run over each operation object, with `$ref`s
+  inlined and `method` and `path` added, so `x-*` extensions can become attributes or risk:
+  `[{ "from": "/x-owner", "to": "/attrs/owner" }, { "from": "/x-risk", "to": "/risk" }]`. The tool name and the request
+  stay the operation's.
+- **Server**: `baseUrl`, or the first `servers` entry (variables take their defaults; a relative one resolves against
+  the URL the document came from).
+- **Requests, auth, results**: as in `http-tools`. With `auth` every operation carries a bearer token from
+  `ctx.credentials`, never sends without it, and redacts the token from responses. Results are `{ ok, text, data? }`;
+  non-2xx is `ok: false`. Operation requests never follow redirects (a 3xx is `ok: false`); the spec download, which
+  carries no headers, does.
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `spec` | string or object | required | OpenAPI 3 JSON: path, URL, or the document |
+| `baseUrl` | string | `servers[0]` | Server the operations are called on |
+| `include` | string[] | all | operationId globs to import |
+| `risk` | object | by method | Risk by upper-case method, for example `{ "DELETE": "exec" }` |
+| `auth` | `{ audience, scopes? }` | none | Bearer token from the caller credentials |
+| `headers` | object | none | Static headers on every call; `${env:NAME}` works |
+| `timeoutMs` | integer | 30000 | Time limit per request |
+| `maxResultChars` | integer | 16000 | Response text cap |
+| `errorBodyChars` | integer | 500 | Characters of an error body kept in the error result, after masking |
+| `minSecretChars` | integer | 4 | Header and token values shorter than this are not masked |
+| `specTimeoutMs` | integer | 30000 | Time limit to fetch the spec when it is a URL |
+| `maxDescriptionChars` | integer | 1000 | Characters kept of a tool description |
+| `maxRefDepth` | integer | 24 | Nesting depth at which `$ref` inlining stops |
+
+Limits accept `${env:NAME}`; `timeoutMs`, `maxResultChars` and `specTimeoutMs` also accept `"unbounded"`, which `agent-layers check` fails on
+the production tier. Ranges and checks: [docs/limits.md](../../../../docs/limits.md).
+
+```json
+{
+  "layers": {
+    "tools": {
+      "petstore": {
+        "adapter": "openapi",
+        "options": {
+          "spec": "specs/petstore.json",
+          "baseUrl": "${env:PETSTORE_URL}",
+          "include": ["listPets", "showPetById"],
+          "auth": { "audience": "petstore-api" }
+        }
+      }
+    }
+  }
+}
+```
+
+The same document can be served as an MCP server by a bridge; use the `mcp` adapter for that.
+
+## Tests
+
+`npm test -w @agent-layers/adapters/openapi`. Unit tests use a local fixture API and the SDK conformance suite.
+`packages/adapters/test/openapi/live.test.ts` runs the reference document `reference/tool/openapi.json` against httpbin (`HTTPBIN_URL`) and skips
+when it is down.

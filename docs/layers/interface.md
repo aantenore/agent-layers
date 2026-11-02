@@ -82,7 +82,7 @@ that errors surface as channel-native errors.
 | `mcp` | Model Context Protocol server: the governed tools and knowledge, mounted by the gateway |
 | `a2a` | Agent2Agent (A2A) 1.0: agent cards and JSON-RPC, mounted by the gateway |
 | `cloudevents` | CloudEvents 1.0 HTTP binding as a trigger, mounted by the gateway |
-| [`cron-trigger`](../../adapters/cron-trigger) | A fixed interval or a cron expression (UTC) as a trigger, with timers in the running process (prototype) |
+| [`cron-trigger`](../../packages/adapters/src/cron-trigger) | A fixed interval or a cron expression (UTC) as a trigger, with timers in the running process (prototype) |
 
 How the gateway hosts them: [gateway.md](../gateway.md). Full list: [adapters.md](../adapters.md).
 

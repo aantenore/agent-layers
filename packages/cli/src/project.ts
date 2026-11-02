@@ -1,7 +1,7 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import {
-  AdapterRegistry, ConfigError, importAdapters, packageLoader, parseConfig, readRawConfig, type AnyAdapter, type ResolvedConfig, type StackConfig,
+  ADAPTERS_PACKAGE, AdapterRegistry, ConfigError, importAdapters, packageLoader, parseConfig, readRawConfig, type AnyAdapter, type ResolvedConfig, type StackConfig,
 } from '@agent-layers/core';
 import { readFile } from 'node:fs/promises';
 import { parseEnv } from 'node:util';
@@ -25,7 +25,7 @@ export function configPath(io: Io, flag?: string): string {
   return file;
 }
 
-/** Loads the config with one profile applied and a registry that finds adapter packages and plugins. */
+/** Loads the config with one profile applied and a registry that finds the adapters of @agent-layers/adapters and plugins. */
 export async function openProject(io: Io, opts: { config?: string; profile?: string }): Promise<Project> {
   const file = configPath(io, opts.config);
   const dir = dirname(file);
@@ -49,17 +49,21 @@ export function dotenv(dir: string): Record<string, string> {
   return existsSync(file) ? parseEnv(readFileSync(file, 'utf8')) as Record<string, string> : {};
 }
 
-/** Every adapter package installed where the project can resolve it (node_modules/@agent-layers/adapter-*). */
+/** Every adapter installed where the project resolves it: the subpath exports of the nearest `@agent-layers/adapters`. */
 export async function installedAdapters(dir: string): Promise<AnyAdapter[]> {
-  const names = new Set<string>();
+  const specifiers: string[] = [];
   for (let d = resolve(dir); ; d = dirname(d)) {
-    const scope = join(d, 'node_modules', '@agent-layers');
-    if (existsSync(scope)) for (const n of readdirSync(scope)) if (n.startsWith('adapter-') && n !== 'adapter-template') names.add(n);
+    const manifest = join(d, 'node_modules', ADAPTERS_PACKAGE, 'package.json');
+    if (existsSync(manifest)) {
+      const { exports = {} } = JSON.parse(readFileSync(manifest, 'utf8')) as { exports?: Record<string, unknown> };
+      for (const key of Object.keys(exports).sort()) if (/^\.\/[a-z0-9][a-z0-9-]*$/.test(key)) specifiers.push(`${ADAPTERS_PACKAGE}${key.slice(1)}`);
+      break;
+    }
     if (dirname(d) === d) break;
   }
   const found: AnyAdapter[] = [];
-  for (const n of [...names].sort()) {
-    try { found.push(...await importAdapters(`@agent-layers/${n}`, dir)); } catch { /* a broken package is reported by check */ }
+  for (const specifier of specifiers) {
+    try { found.push(...await importAdapters(specifier, dir)); } catch { /* a broken adapter is reported by check */ }
   }
   return found;
 }

@@ -1,0 +1,205 @@
+# @agent-layers/adapters/mcp
+
+Maps **Model Context Protocol** → **ToolPort** (layer `tool`) and **KnowledgePort** (layer `knowledge`), outbound,
+and exposes **ChannelPort** through **Model Context Protocol** (layer `interface`), inbound. Tier: prototype,
+production. Maturity: experimental.
+
+One module, three descriptors, all named `mcp`. Each outbound instance talks to one MCP server, over stdio (a child process) or
+streamable HTTP (JSON or SSE responses, `Mcp-Session-Id`). A lost HTTP session (404) is reopened once; a stdio server
+that exited is restarted on the next call.
+
+## Tools (`tools` slot)
+
+Lists the tools of the server and calls them. Tool names are the server's own, with characters outside
+`[A-Za-z0-9_.-]` replaced by `_`; the stack adds the source name, so a tool `search` of the source `docs` is
+`docs__search`.
+
+- **Spec**: `inputSchema` becomes `params`; `annotations` and `_meta` are kept in `ext["mcp.annotations"]` and
+  `ext["mcp.meta"]`, and the server's own name in `ext["mcp.name"]` when it had to be changed.
+- **Risk**: `risk` forces a level for every tool; otherwise a tool matching `readOnly` is `read`; otherwise the `in`
+  mapping rules on `ToolSpec` decide, by default `exec`, `write` when `destructiveHint` is false, `read` when
+  `readOnlyHint` is true:
+
+  ```json
+  [{ "to": "/risk", "default": "exec" },
+   { "from": "/annotations/destructiveHint", "to": "/risk", "map": { "true": "exec", "false": "write" } },
+   { "from": "/annotations/readOnlyHint", "to": "/risk", "map": { "true": "read" } }]
+  ```
+
+  A `mappings` entry for `tools.<name>` replaces them (or adds to them with `$merge: "append"`); the rule source is the
+  MCP tool as listed, so `{ "from": "/_meta/owner", "to": "/attrs/owner" }` gives policies an attribute.
+- **Results**: `{ ok, text, data? }`: the text items of `content[]` joined, `ok` = `!isError`, `structuredContent` in
+  `data`. Images, audio and resources go to `ext["mcp.content"]` (without any text item the text is the structured
+  content as JSON, or a marker such as `[image]`). Secrets are masked in all three. A JSON-RPC error answering a call is
+  a result with `ok: false`. An unreachable server, an HTTP error status and a cancelled call reject. Redirects are
+  never followed over HTTP (a 3xx rejects), so arguments, the session and credentials stay with the configured server.
+- **Auth**: with `auth: { audience, scopes }` (HTTP only) every call carries `Authorization: Bearer <token>` from
+  `ctx.credentials`, which replaces a static `authorization` header. Without credentials nothing is sent and the call
+  is an error result. A token echoed back by the server is redacted. The connection requests (initialize, tool list)
+  use the `credentials` given to the factory, or else those of the call that opens the connection.
+- The tool list is cached for `toolsTtlMs`. `tools/list` is read page by page up to `maxToolPages` pages; a server
+  that answers with more, or repeats a cursor, is refused instead of being read forever.
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `command`, `args`, `env`, `cwd` | string, string[], object, string | none | stdio transport (set `command` or `url`, not both) |
+| `url` | string | none | Streamable HTTP endpoint |
+| `headers` | object | none | Static headers (HTTP) |
+| `auth` | `{ audience, scopes? }` | none | Per-call bearer token from the caller credentials (HTTP) |
+| `timeoutMs` | integer | 60000 | Time limit per request |
+| `errorBodyChars` | integer | 300 | Characters of an error body kept in the error message, after masking |
+| `minSecretChars` | integer | 4 | Header and token values shorter than this are not masked in errors |
+| `stderrChars` | integer | 2000 | stdio: characters of the server's stderr kept for error messages |
+| `risk` | string | derived | Risk of every tool: a core value or one added to the `risk` vocabulary |
+| `readOnly` | string[] | `[]` | Globs of tools that are read-only |
+| `include`, `exclude` | string[] | all, none | Globs of tool names to expose or hide |
+| `toolsTtlMs` | integer | 60000 | How long the tool list is cached |
+| `maxToolPages` | integer | 100 | Pages of `tools/list` read before the server is refused |
+| `bounds` | boolean | `true` | Send the run's bounds in `params._meta` of every `tools/call`; `false` for a server that refuses unknown `_meta` keys |
+
+Limits accept `${env:NAME}`; `timeoutMs` and `maxToolPages` also accept `"unbounded"`, which `agent-layers check` fails
+on the production tier. Ranges and checks: [docs/limits.md](../../../../docs/limits.md).
+
+`${env:NAME}` and `${env:NAME:-default}` in the options are resolved when the instance is created.
+
+Inside a run, every `tools/call` carries the run's bounds in `params._meta["agent-layers/bounds"]` (time left minus the
+margin, hops plus one, max hops, lineage), unless `bounds: false`. A call with no run of its own that received bounds
+(a tool this stack serves over MCP) passes those on, so a chain keeps counting hops. A tool server is mostly not an
+agent, so the call is never refused locally and no budget is reserved; a server that is an agent refuses on its side.
+
+```json
+{
+  "layers": {
+    "tools": {
+      "files": { "adapter": "mcp", "options": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything@2.1.0", "stdio"], "readOnly": ["echo"] } },
+      "orders": { "adapter": "mcp", "options": { "url": "${env:ORDERS_MCP_URL}", "auth": { "audience": "orders-api" } } }
+    }
+  }
+}
+```
+
+## Knowledge (`knowledge` slot)
+
+Calls one retrieval tool of the server and turns its output into passages. The default parser understands, in order:
+
+1. JSON: an array of passages (or strings), or an object with a `passages`, `results`, `documents`, `points`, `items` or
+   `data` array. Items may use `text`, `content`, `document`, `page_content` or `passage` for the text.
+2. `<entry><content>…</content><metadata>{json}</metadata></entry>`, the output of `mcp-server-qdrant`; the metadata
+   `id` becomes the passage id.
+3. Anything else is one passage ("No information found…" is none).
+
+Passages: `source` is the instance name; item metadata (`attrs`, `metadata` or `payload`) becomes `attrs` (plain values;
+a string `title` or `url` becomes the field of that name, other values `ext["mcp.metadata"]`); `score` is the backend's
+raw score (the core fuses scores across sources). The `in` mapping rules on `Passage` run over each item (the JSON
+item, `{ content, metadata }` for an entry, `{ text }` for plain text); the default rule keeps an item's own `source`
+as `attrs.source`.
+
+The query text goes to `queryArg`; `k` goes to `kArg` and the filter to `filterArg` when set. Without `filterArg` the
+filter is applied to the `attrs` of the returned passages (equality; a list means any of). The result is cut to `k`. In
+code, `parse` (`({ text, isError }, query) => Passage[]`) replaces the parser.
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| transport options | | | As above (`command`, `url`, `headers`, `timeoutMs`, ...) |
+| `tool` | string | required | Retrieval tool, for example `qdrant-find` |
+| `queryArg` | string | `query` | Argument that receives the query |
+| `kArg` | string | none | Argument that receives `k` |
+| `filterArg` | string | none | Argument that receives the filter |
+| `toolArgs` | object | `{}` | Fixed arguments sent with every query |
+| `k` | integer | 4 | Passages when the query has no `k` |
+
+The transport options include `errorBodyChars`, `minSecretChars` and `stderrChars`. Limits accept `${env:NAME}`;
+`timeoutMs` also accepts `"unbounded"` (fails `agent-layers check` on the production tier). Ranges and checks:
+[docs/limits.md](../../../../docs/limits.md).
+
+Qdrant, Chroma and similar vector stores need no adapter of their own: run their MCP server and point this adapter at
+it. [`reference/knowledge`](../../../../reference/knowledge) has Qdrant with `mcp-server-qdrant==0.8.1` and the ingestion
+script:
+
+```json
+{
+  "layers": {
+    "knowledge": {
+      "docs": {
+        "adapter": "mcp",
+        "options": {
+          "command": "uvx",
+          "args": ["--python", "3.12", "mcp-server-qdrant==0.8.1"],
+          "env": { "QDRANT_URL": "${env:QDRANT_URL}", "COLLECTION_NAME": "docs", "EMBEDDING_MODEL": "sentence-transformers/all-MiniLM-L6-v2" },
+          "tool": "qdrant-find",
+          "timeoutMs": 300000
+        }
+      }
+    }
+  }
+}
+```
+
+## Server (`channels` slot): exposes ChannelPort through Model Context Protocol
+
+Mounted by the gateway at `/mcp` (streamable HTTP), so any MCP client, in any language, uses the stack's tools with
+the enforcement of the stack: policy, approval, authorization, `tool_args` and `tool_result` guards, credentials bound
+to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge__<source>` with a `query` argument.
+
+- The gateway authenticates every request (`Authorization: Bearer ...`); the MCP session belongs to that caller
+  (`caller.kind` and `caller.id`), and a session id presented by another caller is answered like an unknown one (404).
+- Two eras on the same endpoint. Legacy (2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05): `initialize` (returns
+  `Mcp-Session-Id`; it answers the asked revision when served, else 2025-11-25, never an error), `ping`, `tools/list`,
+  `tools/call`, `notifications/cancelled` (aborts the call in flight). Modern (2026-07-28, stateless, no session):
+  `server/discover`, `tools/list`, `tools/call`, with the version in `params._meta` and the `MCP-Protocol-Version`,
+  `Mcp-Method` and `Mcp-Name` headers (mismatch: 400 `-32020`; unknown revision: 400 `-32022` listing the served ones;
+  unknown method: 404 `-32601`). Other legacy methods answer `-32601`; batches are refused. `DELETE /mcp` ends a session; `GET /mcp` (server-initiated streams) is not offered (405).
+- A call waiting for an approval answers a tool result with `isError: true` and `_meta["agent-layers/approval"] =
+  {id}`, so a client (a runtime in another process) can end its run waiting. Calls in an MCP session are keyed by it,
+  so a repeated call finds its approval; a stateless request names its session in
+  `params._meta["agent-layers/session"]` (key set by `sessionMetaKey`), scoped to the caller; an anonymous stateless
+  request gets no session.
+- Run bounds: a `tools/call` may carry the calling agent's bounds in `params._meta["agent-layers/bounds"]` (the fields of
+  `Delegation`: `remainingMs`, `hops`, `maxHops`, optional `tokens`, `costUsd`, `rootRunId`, `parentRunId`). They are
+  combined with the gateway's `Agent-Bounds` by taking the tighter value of each field, and can only tighten the stack's
+  limits. Invalid bounds are refused with `-32602` and the tool does not run. The stack applies them to the call like
+  to a run: a ledger with the stack's limits tightened by the bounds, the deadline on the call's signal, and
+  `ctx.bounds`, so a tool that calls further (over MCP or A2A) sends hops plus one. A call over the hop limit, or with
+  less than `limits.delegation.minRemainingMs` left, answers `isError: true` (`Stopped by the run bounds: hop_limit`)
+  without running the tool; a loop A → B → A over MCP stops at `limits.run.maxHops`.
+- Sessions expire after `sessionTtlMs` idle and after `maxSessionAgeMs` in any case. They are capped per caller and in
+  total: a caller over its cap loses its own least recently used session (calls running in it are aborted); a full
+  server makes room by evicting the least recently used session of the authenticated caller that holds the most.
+- Anonymous callers (only with `gateway.anonymous: true`) cannot be told apart: each anonymous session is its own
+  owner, reachable only with its id and never by an authenticated caller. Anonymous sessions share one pool of
+  `maxSessionsPerCaller`; a full pool answers 429 and no anonymous session is evicted for a new one.
+- Requests must be `Content-Type: application/json` (415 otherwise). The gateway refuses foreign `Origin` headers and,
+  on loopback, unknown `Host` names, as the MCP transport requires against DNS rebinding.
+- Answers are JSON, or a one-event SSE stream when the client accepts only `text/event-stream` (or `sse: true`).
+- Tool names are the stack's `<source>__<tool>`, `params` is served as `inputSchema`; the risk (a value added to the
+  vocabulary counts as the core value it is `like`, an unknown one as `exec`) becomes `readOnlyHint` (`read`) and
+  `destructiveHint` (`exec`). A result is `{ content: [{ type: "text", text }], structuredContent: data, isError: !ok }`;
+  a denied or blocked call is a tool result with `isError: true`, so the client's model can react; an unknown tool is
+  `-32602`.
+  Errors outside the protocol answer `internal error`, never the error text.
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `path` | string | `/mcp` | Endpoint path |
+| `include` / `exclude` | string[] | all / none | Globs of tool names to expose or hide |
+| `serverName` | string | `agent-layers` | `serverInfo.name` |
+| `sse` | boolean | `false` | Always answer with an SSE stream |
+| `sessionMetaKey` | string | `agent-layers/session` | `params._meta` key a stateless request carries its session in |
+| `sessionTtlMs` | integer | `1800000` | Idle time before a session is forgotten |
+| `maxSessionAgeMs` | integer | `3600000` | Absolute lifetime of a session |
+| `maxSessions` | integer | `1000` | Sessions in total |
+| `maxSessionsPerCaller` | integer | `10` | Sessions per caller, and of the anonymous pool; at most a quarter of `maxSessions` |
+
+Limits accept `${env:NAME}` and `"unbounded"`, which `agent-layers check` fails on the production tier. Ranges and
+checks: [docs/limits.md](../../../../docs/limits.md).
+
+```json
+{ "layers": { "channels": [{ "adapter": "mcp", "options": { "exclude": ["admin__*"] } }] } }
+```
+
+## Tests
+
+`npm test -w @agent-layers/adapters/mcp`. Unit tests use a local fixture server (HTTP with JSON and SSE, stdio) and the
+SDK conformance suites. `packages/adapters/test/mcp/live.test.ts` runs against the reference setups and skips when a service is missing: the
+OpenAPI bridge (`OPENAPI_MCP_URL`), `@modelcontextprotocol/server-everything@2.1.0` through `npx`, and Qdrant through
+`uvx mcp-server-qdrant==0.8.1` (`QDRANT_URL`).

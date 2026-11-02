@@ -7,7 +7,7 @@ The core defines one port per layer of an agent. Adapters map a standard or a te
 (`agent-layers.json`) picks one adapter per slot, per profile; `compose` turns the config into a running stack.
 
 ```bash
-npm install @agent-layers/core @agent-layers/adapter-mock-model @agent-layers/adapter-basic-runtime
+npm install @agent-layers/core @agent-layers/adapters
 ```
 
 ```ts

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
-import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
-import { adapter as functions, createFunctionTools, defineTool } from '@agent-layers/adapter-functions';
-import { adapter as llmGuard } from '@agent-layers/adapter-llm-guard';
-import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
-import { adapter as presidio } from '@agent-layers/adapter-presidio';
+import { adapter as basicRuntime } from '@agent-layers/adapters/basic-runtime';
+import { adapter as functions, createFunctionTools, defineTool } from '@agent-layers/adapters/functions';
+import { adapter as llmGuard } from '@agent-layers/adapters/llm-guard';
+import { adapter as mockModel } from '@agent-layers/adapters/mock-model';
+import { adapter as presidio } from '@agent-layers/adapters/presidio';
 import { checkAdapter } from '@agent-layers/conformance';
 import { compose, resolveProfile } from '@agent-layers/core';
 import { reachable } from '../../../lib/wait.mjs';

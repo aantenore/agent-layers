@@ -2,11 +2,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { compose, ConfigError, defineAdapter, PORT_VERSIONS, resolveProfile, type AuthorizationPort, type Stack, type ToolPort } from '@agent-layers/core';
-import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
-import { adapter as approvalAdapter } from '@agent-layers/adapter-memory-approval';
-import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
-import { adapter as rulesAdapter } from '@agent-layers/adapter-rules-authorization';
-import { identityAdapter } from '@agent-layers/adapter-static-identity';
+import { adapter as basicRuntime } from '@agent-layers/adapters/basic-runtime';
+import { adapter as approvalAdapter } from '@agent-layers/adapters/memory-approval';
+import { adapter as mockModel } from '@agent-layers/adapters/mock-model';
+import { adapter as rulesAdapter } from '@agent-layers/adapters/rules-authorization';
+import { identityAdapter } from '@agent-layers/adapters/static-identity';
 import { serveStack } from '../src/index.ts';
 
 const refunds: string[] = [];

@@ -108,6 +108,10 @@ answer, ctx)` ([0003](../../docs/decisions/0003-run-resume.md)):
   with `aborted`), or marks a waiting run cancelled and withdraws its pending approval (`ApprovalPort.cancel`). A
   cancelled run cannot be resumed. Refusals are `RunRefused` with `kind` `not_found`, `forbidden`, `conflict` or
   `invalid`.
+- `Stack.runTarget(runId)` returns the access target of a run in flight in this process or kept waiting:
+  `{kind: "run", id: runId, layer: "harness", risk: "exec", agent, attrs?: {tool}}`, `tool` being the call a waiting run
+  waits for; undefined when there is no such run. A host authorizes an action on the run (the gateway's `resume` and
+  `cancel`) on that target before asking for it, so a policy scoped to an agent or a tool applies.
 
 ## Semantics
 

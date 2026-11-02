@@ -114,8 +114,8 @@ spec/            language-neutral source of truth: schemas/, ports/, VERSIONING.
 packages/core    @agent-layers/core: ports, adapter registry, pipelines, stack config, compose (zero dependencies)
 packages/conformance  @agent-layers/conformance: one suite per port
 packages/cli     @agent-layers/cli: init, dev, check, test, eval, deploy, diff, layers
-adapters/<name>  @agent-layers/adapter-<name>: one package per standard or technology; _template to start one
-examples/        sample projects (minimal)
+packages/adapters  @agent-layers/adapters: every adapter, one subpath export per standard or technology (src/<name>)
+examples/        sample projects (minimal, slice, swap) and adapter-package, the skeleton of an adapter
 reference/<id>/  reference setup per layer id: compose files, configs and live tests
 scripts/         docs tooling: adapter catalog generator and docs check
 docs/            product, architecture, stack, guide, adapters, layers/<id>.md, cross-cutting/

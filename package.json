@@ -10,7 +10,7 @@
   },
   "workspaces": [
     "packages/*",
-    "adapters/*",
+    "examples/adapter-package",
     "runtimes/*"
   ],
   "scripts": {

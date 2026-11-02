@@ -22,28 +22,28 @@ Line numbers refer to commit `f02598b`.
 | 4 | `ports/model.ts:23` (`Usage`) | `prompt_tokens`, `completion_tokens`, `total_tokens` | OpenAI |
 | 5 | `ports/model.ts:25-35` (`ChatRequest`) | `tool_choice`, `max_tokens`, `extra`; the comment says names "follow the most common wire format" | OpenAI |
 | 6 | `ports/model.ts:38-67` | `FinishReason` values `stop`, `length`, `tool_calls`, `content_filter`; `choices[]` with `index`; `ChatChunk.delta`, `ToolCallDelta` | OpenAI |
-| 7 | `adapters/openai-compatible/src/wire.ts:14` | `messages: req.messages` sent as is: the core shape *is* the wire | OpenAI |
+| 7 | `packages/adapters/src/openai-compatible/wire.ts:14` | `messages: req.messages` sent as is: the core shape *is* the wire | OpenAI |
 | 8 | `ports/tool.ts:11`, `ports/tool.ts:22-26` | `ToolSpec.inputSchema`; `ToolOutcome.content`, `isError` | MCP |
 | 9 | `ports/identity.ts:27-32` (`AccessRequest`) | `subject` / `action` / `resource` / `context`, each with `properties` | OpenID AuthZEN |
 | 10 | `ports/identity.ts:36-39` (`AccessDecision`) | `decision: boolean`, `context.reason` | AuthZEN |
-| 11 | `adapters/opa/src/pdp.ts` = `adapters/authzen/src/pdp.ts` (identical files) | OPA's free-form `input` is AuthZEN-shaped: one standard leaks into another technology | AuthZEN |
+| 11 | `packages/adapters/src/opa/pdp.ts` = `packages/adapters/src/authzen/pdp.ts` (identical files) | OPA's free-form `input` is AuthZEN-shaped: one standard leaks into another technology | AuthZEN |
 | 12 | `ports/identity.ts:5,9` (`Identity.subject`, `claims`) | JWT `sub` and the full claim set, passed to guards through `publicIdentity` (`ports/guard.ts:14`) | JWT / OIDC |
-| 13 | `adapters/oidc/src/identity.ts:91` (`rolesOf`) | Keycloak claim layout (`realm_access`, `resource_access`) hard-coded as the meaning of roles | Keycloak |
+| 13 | `packages/adapters/src/oidc/identity.ts:91` (`rolesOf`) | Keycloak claim layout (`realm_access`, `resource_access`) hard-coded as the meaning of roles | Keycloak |
 | 14 | `telemetry.ts:8` (`SAFE_PREFIX = 'gen_ai.'`), `compose.ts:201`, `pipeline/guarded-model.ts:108-124`, `pipeline/governed-tools.ts:61,141`, `pipeline/guards.ts:34`, `packages/gateway/src/index.ts:114` | `gen_ai.*` attributes, metric `gen_ai.client.token.usage`, span names `chat`, `execute_tool`, `invoke_agent`; mixed with unprefixed `run.id`, `guard.name`, `cache.hit` | OpenTelemetry GenAI semantic conventions |
-| 15 | `adapters/layer-signals/src/signals.ts`, `packages/cli/src/trace.ts:4` | evaluation and the CLI parse `gen_ai.tool.name` back out of telemetry | OpenTelemetry |
+| 15 | `packages/adapters/src/layer-signals/signals.ts`, `packages/cli/src/trace.ts:4` | evaluation and the CLI parse `gen_ai.tool.name` back out of telemetry | OpenTelemetry |
 | 16 | `ports/telemetry.ts:17-21` (`TraceContext`) | field names `traceparent`, `tracestate` | W3C Trace Context |
 | 17 | `ports/runtime.ts:58-66` (`Trigger`) | `id`, `type`, `source`, `time`, `data` | CloudEvents |
-| 18 | `adapters/cloudevents/src/index.ts:186` | the event `id` is replaced by a random one; `subject` is dropped | CloudEvents |
-| 19 | `ports/runtime.ts:17` (`AgentSpec.params`), `adapters/basic-runtime/src/loop.ts:16`, `adapters/reinloop/src/index.ts:48` | agent files carry `temperature`, `max_tokens`, `stop` | OpenAI |
+| 18 | `packages/adapters/src/cloudevents/index.ts:186` | the event `id` is replaced by a random one; `subject` is dropped | CloudEvents |
+| 19 | `ports/runtime.ts:17` (`AgentSpec.params`), `packages/adapters/src/basic-runtime/loop.ts:16`, `packages/adapters/src/reinloop/index.ts:48` | agent files carry `temperature`, `max_tokens`, `stop` | OpenAI |
 | 20 | `ports/runtime.ts:33`, `errors.ts:40` | `RunResult.reason` is the string `guardrail:<guard>:<stage>`, parsed by `a2a/src/server.ts:48` (`stateOfRun`) and `layer-signals` (`GUARDRAIL_REASON`) | implicit, unversioned |
 | 21 | `ports/runtime.ts:24` (`RunEvent`) | event types `run_start`, `model_response` (with `finish_reason`), `tool_call`, `tool_result` exist only in adapters (`basic-runtime`, `reinloop`) and are consumed by `layer-signals` | implicit, OpenAI-flavoured |
-| 22 | `adapters/a2a/src/client.ts:53` (`runStatus`), `a2a/src/wire.ts:16` | A2A task states squeezed into free-text reasons; A2A metadata carries usage in OpenAI shape | A2A, OpenAI |
-| 23 | `adapters/presidio/src/index.ts:60` | `GuardVerdict.reason` = `PII detected: <Presidio entity types>`, read by telemetry and eval | Presidio |
+| 22 | `packages/adapters/src/a2a/client.ts:53` (`runStatus`), `a2a/src/wire.ts:16` | A2A task states squeezed into free-text reasons; A2A metadata carries usage in OpenAI shape | A2A, OpenAI |
+| 23 | `packages/adapters/src/presidio/index.ts:60` | `GuardVerdict.reason` = `PII detected: <Presidio entity types>`, read by telemetry and eval | Presidio |
 | 24 | `ports/knowledge.ts:5-11`, `pipeline/knowledge.ts:50` | `Passage.metadata` is a free bag; passages from all sources are sorted by raw `score` (BM25 and cosine mixed) | none (missing rule) |
 | 25 | `ChatRequest.extra`, `ChatResponse.extra`, `ToolSpec.meta` (`mcp/src/tools.ts:76` writes un-namespaced `meta.mcp`), `Passage.metadata`, `Identity.claims`, `AgentSpec.params` | six escape hatches with six conventions | none |
 
 Two effects follow. First, every adapter that is not OpenAI pays a translation through OpenAI: `reinloop`
-(`adapters/reinloop/src/convert.ts`) converts the core shape into its own neutral parts and back, and an MCP tool's
+(`packages/adapters/src/reinloop/convert.ts`) converts the core shape into its own neutral parts and back, and an MCP tool's
 JSON arguments travel as a JSON string. Second, the parts of the language that matter most to composition (run
 reasons, run events, telemetry names) are not written down anywhere, so adapters written independently agree only by
 reading each other's code.

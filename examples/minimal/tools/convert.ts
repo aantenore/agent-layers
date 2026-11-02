@@ -1,6 +1,6 @@
 // Tools are plain objects: name, description, JSON Schema of the arguments, risk, and a run function.
 // The functions adapter loads this module (see layers.tools in agent-layers.json).
-import type { ToolDef } from '@agent-layers/adapter-functions';
+import type { ToolDef } from '@agent-layers/adapters/functions';
 
 export const tools: ToolDef[] = [
   {

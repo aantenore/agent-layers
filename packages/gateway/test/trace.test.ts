@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { compose, defineAdapter, PORT_VERSIONS, resolveProfile, type ChannelPort, type SpanOptions, type TelemetryPort } from '@agent-layers/core';
-import { identityAdapter } from '@agent-layers/adapter-static-identity';
+import { identityAdapter } from '@agent-layers/adapters/static-identity';
 import { serveStack } from '../src/index.ts';
 
 const traceChannel = defineAdapter<'ChannelPort'>({

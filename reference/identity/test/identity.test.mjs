@@ -5,11 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { compose, resolveProfile } from '@agent-layers/core';
 import { checkAdapter } from '@agent-layers/conformance';
 import { serveStack } from '@agent-layers/gateway';
-import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
-import { adapter as functions, functionTools } from '@agent-layers/adapter-functions';
-import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
-import { channelAdapter } from '@agent-layers/adapter-openai-compatible';
-import { createOidcCredentials, createOidcIdentity, credentialAdapter, identityAdapter } from '@agent-layers/adapter-oidc';
+import { adapter as basicRuntime } from '@agent-layers/adapters/basic-runtime';
+import { adapter as functions, functionTools } from '@agent-layers/adapters/functions';
+import { adapter as mockModel } from '@agent-layers/adapters/mock-model';
+import { channelAdapter } from '@agent-layers/adapters/openai-compatible';
+import { createOidcCredentials, createOidcIdentity, credentialAdapter, identityAdapter } from '@agent-layers/adapters/oidc';
 import { reachable } from '../../../lib/wait.mjs';
 
 try { process.loadEnvFile(resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env')); } catch { /* .env is optional */ }
@@ -92,7 +92,7 @@ describe('l5 identity (Keycloak + OPA)', { skip }, () => {
   });
 
   it('OPA decides on AccessQuestions in SDK names: alice writes, bob reads only, exec and anonymous denied', async () => {
-    // The question the `opa` adapter sends (adapters/opa): caller and target in SDK names, never a credential.
+    // The question the `opa` adapter sends (packages/adapters/src/opa): caller and target in SDK names, never a credential.
     const question = (identity, risk) => ({
       caller: identity ? { id: identity.id, kind: identity.kind, roles: identity.roles ?? [], scopes: identity.scopes ?? [] } : { kind: 'anonymous', id: 'anonymous', roles: [], scopes: [] },
       action: 'call',

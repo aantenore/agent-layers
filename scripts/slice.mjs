@@ -51,7 +51,7 @@ const REAL_MODEL = process.env.HOSTED_MODEL ? 'hosted' : 'fast';
 // Model group of the fault injections (--inject-model), so faults can run on the local model while the cells use the hosted one.
 const INJECT_MODEL = opt('inject-model') ?? REAL_MODEL;
 
-const [{ scoreLayers }, { ATTR, SPAN }] = await Promise.all([import('@agent-layers/adapter-layer-signals'), import('@agent-layers/core')]).catch(() => {
+const [{ scoreLayers }, { ATTR, SPAN }] = await Promise.all([import('@agent-layers/adapters/layer-signals'), import('@agent-layers/core')]).catch(() => {
   console.error('run with: node --conditions=@agent-layers/source scripts/slice.mjs');
   process.exit(2);
 });
