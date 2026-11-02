@@ -65,6 +65,12 @@ on the production tier. Ranges and checks: [docs/limits.md](../../../../docs/lim
 }
 ```
 
+### Provider notes
+
+- Some providers' compatible endpoints need extra headers, for example a workspace id header for keys not scoped to a
+  workspace. Set them with the `headers` option and take the values from the environment: `"headers": { "X-Workspace-Id": "${env:WORKSPACE_ID}" }`.
+- Some models reject `temperature` (deprecated for them). Leave `settings.temperature` unset for those models.
+
 The live contract test (`packages/adapters/test/openai-compatible/live.test.ts`) runs against `LLM_BASE_URL` (default `http://localhost:11434/v1`) and
 `LLM_MODEL` (default `qwen3:4b`), and skips itself when the endpoint or model is not available.
 
