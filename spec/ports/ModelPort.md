@@ -57,7 +57,7 @@ Every part and message may carry `ext?`.
 | Delta | Meaning |
 | --- | --- |
 | `{type: "text", text}` | Streamed text. |
-| `{type: "reasoning", text}` | Streamed reasoning. |
+| `{type: "reasoning", text, ext?}` | Streamed reasoning. `ext` (for example the provider signature of the thinking) is merged into the `ext` of the assembled reasoning part, so signed reasoning survives a stream. A delta with empty `text` and an `ext` is valid. |
 | `{type: "call", index, id?, tool?, argsText?}` | Fragments of call `index`; the `argsText` fragments concatenate to the JSON arguments. |
 | `{type: "end", finish, usage?, model?, id?, ext?}` | Exactly one, last. |
 

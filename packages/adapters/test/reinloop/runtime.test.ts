@@ -248,3 +248,17 @@ test('signed reasoning from the model is replayed with its signature on the next
   assert.deepEqual(replayed, { type: 'reasoning', text: 'think', ext: { 'anthropic.signature': 'sig-1' } });
   await s.close();
 });
+
+test('signed reasoning streamed as deltas is replayed with its signature on the next turn (stream)', async () => {
+  const script = scriptedModel([
+    callReply([{ type: 'reasoning', text: 'think', ext: { 'anthropic.signature': 'sig-2' } }, { type: 'call', id: 'c1', tool: 'math__add', args: { a: '1', b: '2' } }]),
+    textReply('done'),
+  ]);
+  const { s } = await stack({}, { layers: { model: { adapter: 'test-script' } } }, { adapters: [script.adapter] });
+  const events: Record<string, unknown>[] = [];
+  for await (const e of (await s.agent('calc')).stream!('go')) events.push(e as Record<string, unknown>);
+  assert.equal(events.at(-1)?.status, 'completed');
+  const replayed = script.requests[1]?.messages.flatMap((m) => m.parts).find((p) => p.type === 'reasoning');
+  assert.deepEqual(replayed, { type: 'reasoning', text: 'think', ext: { 'anthropic.signature': 'sig-2' } });
+  await s.close();
+});

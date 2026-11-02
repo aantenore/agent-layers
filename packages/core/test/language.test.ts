@@ -109,6 +109,17 @@ test('deltas and replies: reasoning, calls with object args, invalid args kept, 
   assert.equal(assembleDeltas([{ type: 'text', text: 'x' }]).finish, 'other', 'no end delta: other');
 });
 
+test('reasoning ext on deltas is merged into the assembled reasoning part and survives the round trip', () => {
+  const reply = assembleDeltas([
+    { type: 'reasoning', text: 'think ' }, { type: 'reasoning', text: 'more', ext: { 'anthropic.signature': 'sig-0', 'a.b': 1 } },
+    { type: 'reasoning', text: '', ext: { 'anthropic.signature': 'sig-1' } },
+    { type: 'end', finish: 'end' },
+  ], 'm');
+  assert.deepEqual(reply.message.parts, [{ type: 'reasoning', text: 'think more', ext: { 'anthropic.signature': 'sig-1', 'a.b': 1 } }]);
+  assert.deepEqual(assembleDeltas(replyToDeltas(reply)), reply, 'reply → deltas → reply keeps the ext');
+  assert.deepEqual(assembleDeltas([{ type: 'reasoning', text: 'x' }]).message.parts, [{ type: 'reasoning', text: 'x' }], 'no ext: none added');
+});
+
 test('stop reasons are structured; error text never becomes the reason', () => {
   assert.deepEqual(stopReasonOf(new GuardrailBlocked('pii', 'output', 'found an email')), { code: 'guard_block', layer: 'guardrail', by: 'pii', stage: 'output' });
   assert.deepEqual(stopReasonOf(Object.assign(new Error('x'), { name: 'AbortError' })), { code: 'aborted' });

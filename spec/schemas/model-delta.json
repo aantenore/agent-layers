@@ -20,7 +20,11 @@
     "ReasoningDelta": {
       "type": "object",
       "required": ["type", "text"],
-      "properties": { "type": { "const": "reasoning" }, "text": { "type": "string" } },
+      "properties": {
+        "type": { "const": "reasoning" },
+        "text": { "type": "string" },
+        "ext": { "$ref": "common.json#/$defs/Ext", "description": "Merged into the ext of the assembled reasoning part, for example the provider signature of the thinking." }
+      },
       "additionalProperties": false,
       "description": "Streamed reasoning."
     },

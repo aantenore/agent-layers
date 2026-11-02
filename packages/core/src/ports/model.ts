@@ -65,7 +65,8 @@ export interface ModelReply {
 /** One streamed fragment. Schema: spec/schemas/model-delta.json. A stream ends with exactly one `end`. */
 export type ModelDelta =
   | { type: 'text'; text: string }
-  | { type: 'reasoning'; text: string }
+  /** `ext` (for example a provider signature of the thinking) merges into the `ext` of the assembled reasoning part. */
+  | { type: 'reasoning'; text: string; ext?: Ext }
   /** Fragments of call `index`; `argsText` fragments concatenate to the JSON arguments. */
   | { type: 'call'; index: number; id?: string; tool?: string; argsText?: string }
   | { type: 'end'; finish: Finish; usage?: Usage; model?: string; id?: string; ext?: Ext };

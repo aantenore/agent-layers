@@ -1,4 +1,5 @@
-import type { CallPart, Finish, Message, ModelDelta, ModelReply, Part, TextPart, ToolInfo, Usage } from './ports/model.ts';
+import type { Ext } from './ports/base.ts';
+import type { CallPart, Finish, Message, ModelDelta, ModelReply, Part, ReasoningPart, TextPart, ToolInfo, Usage } from './ports/model.ts';
 import type { ToolSpec } from './ports/tool.ts';
 
 /** Text of a list of parts: the text parts joined by newlines. Reasoning, calls and other parts are left out. */
@@ -58,11 +59,15 @@ export function parseArgs(text: string | undefined): { args: Record<string, unkn
 export function assembleDeltas(deltas: Iterable<ModelDelta>, model = ''): ModelReply {
   let text = '';
   let reasoning = '';
+  let reasoningExt: Ext | undefined;
   let end: Extract<ModelDelta, { type: 'end' }> | undefined;
   const calls: { id: string; tool: string; argsText: string }[] = [];
   for (const d of deltas) {
     if (d.type === 'text') text += d.text;
-    else if (d.type === 'reasoning') reasoning += d.text;
+    else if (d.type === 'reasoning') {
+      reasoning += d.text;
+      if (d.ext) reasoningExt = { ...reasoningExt, ...d.ext };
+    }
     else if (d.type === 'call') {
       const c = (calls[d.index] ??= { id: '', tool: '', argsText: '' });
       if (d.id) c.id = d.id;
@@ -71,7 +76,7 @@ export function assembleDeltas(deltas: Iterable<ModelDelta>, model = ''): ModelR
     } else if (d.type === 'end') end = d;
   }
   const parts: Part[] = [];
-  if (reasoning) parts.push({ type: 'reasoning', text: reasoning });
+  if (reasoning || reasoningExt) parts.push({ type: 'reasoning', text: reasoning, ...(reasoningExt ? { ext: reasoningExt } : {}) });
   if (text) parts.push({ type: 'text', text });
   for (const c of calls.filter(Boolean)) {
     const { args, invalid } = parseArgs(c.argsText);
@@ -93,7 +98,10 @@ export function assembleDeltas(deltas: Iterable<ModelDelta>, model = ''): ModelR
 export function* replyToDeltas(reply: ModelReply): Generator<ModelDelta> {
   let index = 0;
   for (const p of reply.message.parts) {
-    if (p.type === 'reasoning') yield { type: 'reasoning', text: (p as { text: string }).text };
+    if (p.type === 'reasoning') {
+      const r = p as ReasoningPart;
+      yield { type: 'reasoning', text: r.text, ...(r.ext ? { ext: r.ext } : {}) };
+    }
     else if (p.type === 'text') yield { type: 'text', text: (p as TextPart).text };
     else if (p.type === 'call') {
       const c = p as CallPart;

@@ -80,7 +80,11 @@ export function governedTool(tools: ToolPort, spec: ToolSpec, ctx: CallContext, 
           const pending = new ApprovalPending(waitingOn, { tool: spec.name, ...(approval ? { by: approval } : {}) });
           return stop({ status: 'waiting', reason: pending.stopReason }, 'needs_input');
         }
-        return { content: out.text, ...(out.ok ? (out.ext?.['reinloop.stop'] === true ? { stop: true } : {}) : { isError: true }) };
+        return {
+          content: out.text,
+          ...(out.data !== undefined ? { data: out.data } : {}),
+          ...(out.ok ? (out.ext?.['reinloop.stop'] === true ? { stop: true } : {}) : { isError: true }),
+        };
       } catch (err) {
         if (err instanceof ApprovalPending) return stop({ status: 'waiting', reason: err.stopReason }, 'needs_input');
         if (err instanceof RunStop || !(err instanceof GuardrailBlocked)) throw err;

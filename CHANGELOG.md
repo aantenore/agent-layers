@@ -96,7 +96,10 @@ included), tests to `packages/adapters/test/<name>`, and the adapter skeleton fr
   `"unbounded"`) tightens the runtime budget for that agent only, the smallest value per limit; an invalid one is a
   `ConfigError` when the agent is bound. A tool result with `ext["reinloop.stop"] === true` ends the run after that
   tool (reinloop `{ stop: true }`), with its text as the output. The thinking signature of reinloop round-trips through
-  `ReasoningPart.ext["anthropic.signature"]`, so thinking with tool calls replays signed.
+  `ReasoningPart.ext["anthropic.signature"]`, so thinking with tool calls replays signed. The `data` of a governed tool
+  result goes to reinloop's tool output.
+- ModelDelta: a `reasoning` delta may carry `ext`; `assembleDeltas` merges it into the assembled reasoning part (and
+  `replyToDeltas` emits it), so a provider signature of the thinking survives `stream` as well as `chat`.
 
 ### Changed
 

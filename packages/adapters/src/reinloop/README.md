@@ -66,8 +66,8 @@ waiting result.
   committed plan or a ballot. Ignored on a result with `ok: false`.
 - `ext["anthropic.signature"]` (string) on a `reasoning` part is the signature of reinloop's `thinking` part, in both
   directions, so signed thinking is replayed with its tool calls on the next turn (providers reject it otherwise). A
-  model adapter that returns signed reasoning sets it on the reply's reasoning part. Streamed reasoning deltas carry
-  no `ext`, so a signature travels only on replies from `chat`.
+  model adapter that returns signed reasoning sets it on the reply's reasoning part, or on a streamed reasoning delta
+  (its `ext` is merged into the assembled part), so a signature also travels over `stream`.
 
 A waiting result carries the run's reinloop event log as its checkpoint (RuntimePort 1.3.0). `resume` (through
 `Stack.resume`) replays it: reinloop runs the tool calls without a result, the waiting one first, then the loop goes
