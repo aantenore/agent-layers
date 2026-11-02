@@ -153,7 +153,8 @@ test('host for mounted channels: stream fallback, governed model without injecti
   const events: RunEvent[] = [];
   for await (const e of host.stream!('a', 'hello', { runId: 'run-9' })) events.push(e);
   assert.deepEqual(events.map((e) => e.type), ['text', 'run.end']);
-  assert.deepEqual(events[1], { type: 'run.end', status: 'completed' });
+  // The runtime reports no usage: the host fills it from the run's ledger.
+  assert.deepEqual(events[1], { type: 'run.end', status: 'completed', usage: { inputTokens: 3, outputTokens: 2 } });
   await host.model!().chat({ model: 'm', messages: [{ role: 'user', parts: [{ type: 'text', text: 'q' }] }] }, s.context({ agent: 'gateway' }));
   assert.ok(!JSON.stringify(requests.at(-1)).includes('ferry'), 'the hosted model does not inject knowledge');
   const tools = await host.tools!().listTools(s.context({ agent: 'gateway' }));

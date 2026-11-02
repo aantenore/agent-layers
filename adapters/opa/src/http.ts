@@ -1,4 +1,4 @@
-import { ANONYMOUS, anySignal, timeoutSignal, type AccessQuestion, type PublicCaller } from '@agent-layers/core';
+import { ANONYMOUS, anySignal, timeoutSignal, type AccessQuestion, type Actor, type PublicCaller } from '@agent-layers/core';
 
 /** Failure to reach or understand OPA. The stack turns it into a deny. */
 export class PdpError extends Error {
@@ -83,18 +83,31 @@ export async function postJson(fetchImpl: FetchLike, url: string, payload: unkno
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
+/** The well-formed entries of a delegation chain (`id` and kind `user` or `agent`; name and issuer when strings). */
+function actorsOf(v: unknown): Actor[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((a): a is Record<string, unknown> => isObject(a) && typeof a.id === 'string' && a.id !== '' && (a.kind === 'user' || a.kind === 'agent'))
+    .map((a) => ({
+      id: a.id as string, kind: a.kind as Actor['kind'],
+      ...(typeof a.name === 'string' ? { name: a.name } : {}),
+      ...(typeof a.issuer === 'string' ? { issuer: a.issuer } : {}),
+    }));
+}
+
 /**
  * The question as it may leave the stack. Only a caller of kind exactly `user` or `agent` with a non-empty id is kept
- * (roles and scopes as string lists, never a credential); anything else becomes the explicit anonymous caller, so a
+ * (roles and scopes as string lists, its well-formed `actors`, never a credential); anything else becomes the explicit anonymous caller, so a
  * policy cannot mistake it for the agent. Tool arguments are kept only with `includeArgs`.
  */
 export function publicQuestion(q: AccessQuestion, includeArgs: boolean): AccessQuestion {
   const c = (isObject(q?.caller) ? q.caller : {}) as Partial<PublicCaller> & Record<string, unknown>;
+  const actors = actorsOf(c.actors);
   const known = (c.kind === 'user' || c.kind === 'agent') && typeof c.id === 'string' && c.id !== '';
   const caller: AccessQuestion['caller'] = known
     ? {
       id: c.id!, kind: c.kind!, roles: strings(c.roles), scopes: strings(c.scopes),
       ...(typeof c.name === 'string' ? { name: c.name } : {}),
+      ...(actors.length ? { actors } : {}),
       ...(isObject(c.ext) ? { ext: structuredClone(c.ext) } : {}),
     }
     : { ...ANONYMOUS, roles: [], scopes: [] };

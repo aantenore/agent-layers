@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { defineLimits, limitValue, ownerDigest, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type RunResult, type TraceContext } from '@agent-layers/core';
 import {
-  A2A_VERSION, ERRORS, getResult, LEGACY_VERSION, METHODS, partsText, sendResult, streamEvent, TERMINAL,
-  type TaskRunMetadata, type TaskState, type TaskValue, type WireVersion,
+  defineLimits, delegationProblems, limitValue, ownerDigest, tighterDelegation,
+  type ChannelHost, type ChannelPort, type Delegation, type InboundContext, type InboundRoute, type LimitValue, type RunResult, type TraceContext,
+} from '@agent-layers/core';
+import {
+  A2A_VERSION, BOUNDS_STOPS, BOUNDS_URI, BOUNDS_URIS, ERRORS, getResult, LEGACY_VERSION, METHODS, partsText, sendResult, streamEvent, TERMINAL,
+  type BoundsReport, type TaskRunMetadata, type TaskState, type TaskValue, type WireVersion,
 } from './wire.ts';
 
 /** Options of the inbound descriptor. */
@@ -19,6 +22,11 @@ export interface A2AServerOptions {
   version?: string;
   /** `provider` of the cards. */
   provider?: { organization: string; url: string };
+  /**
+   * A2A extensions the server declares in its cards and activates when a client requests them. Default: the bounds
+   * extension (`BOUNDS_URI`), whose agent-plexus URI is then accepted as an alias; `[]` turns it off.
+   */
+  extensions?: string[];
   /** Tasks kept per authenticated caller, and of all anonymous callers together (default 100; at most a quarter of `maxTasks`). */
   maxTasksPerCaller?: LimitValue;
   /** Tasks kept in total (default 10000). */
@@ -43,13 +51,46 @@ class RpcError extends Error {
 }
 
 const ACCEPTED_VERSIONS = ['1.0', '1', '0.3', '0.3.0'];
+const EXTENSION_HEADER = 'a2a-extensions';
+const BOUNDS_DESCRIPTION = 'Run bounds: remaining time, hop count and budget passed from agent to agent; they only tighten this agent\'s own limits.';
+
+/** Extension URIs a request activates: listed in the `A2A-Extensions` header or in the message's `extensions`. */
+function requested(req: Request, message: Record<string, any>): Set<string> {
+  const header = (req.headers.get(EXTENSION_HEADER) ?? '').split(',').map((u) => u.trim()).filter(Boolean);
+  const listed = Array.isArray(message.extensions) ? message.extensions.filter((u: unknown): u is string => typeof u === 'string') : [];
+  return new Set([...header, ...listed]);
+}
+
+/** The bounds report of a run for its task: its figures and, when its own bounds stopped it, the stop code alone. */
+function boundsReport(r: RunResult, figures: TaskRunMetadata): BoundsReport {
+  const code = r.reason?.code;
+  const own = r.status === 'stopped' && typeof code === 'string' && BOUNDS_STOPS.includes(code) && !!r.reason?.by?.startsWith('sdk.');
+  return { ...figures, ...(own ? { stop: code } : {}) };
+}
 /**
  * The owner of a task: an authenticated caller's kind and id. Anonymous callers cannot be told apart, so an
  * anonymous task is its own owner (keyed by its id): reachable only with its id, never by an authenticated caller.
  */
 const ownerOf = (ctx: InboundContext, taskId: string) => (ctx.caller ? `id:${ctx.caller.kind}:${ctx.caller.id}` : `anon:${taskId}`);
 const isJson = (req: Request) => /^application\/json\s*(;|$)/i.test(req.headers.get('content-type') ?? '');
-const rpcResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const rpcResponse = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
+
+/** A send's message: its text and context, and the bounds extension when the client activated it. */
+interface Inbound { text: string; contextId: string; boundsUri?: string; bounds?: Delegation }
+
+/** The response header that tells the client which extension the server activated. */
+const activated = (m: Inbound): Record<string, string> => (m.boundsUri ? { [EXTENSION_HEADER]: m.boundsUri } : {});
+
+/** The bounds fields of valid extension data, nothing else. */
+function pickBounds(data: Record<string, unknown>): Delegation {
+  const n = (k: string) => (typeof data[k] === 'number' ? { [k]: data[k] as number } : {});
+  const str = (k: string) => (typeof data[k] === 'string' ? { [k]: data[k] as string } : {});
+  return {
+    remainingMs: data.remainingMs as number, hops: data.hops as number, maxHops: data.maxHops as number,
+    ...n('tokens'), ...n('costUsd'), ...str('rootRunId'), ...str('parentRunId'),
+  };
+}
 
 /**
  * Run status and stop code → task state; nothing else of the reason is read, and it never leaves the stack. A run that
@@ -107,6 +148,9 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
   const maxTasks = limitValue(SERVER_LIMITS.maxTasks, options.maxTasks);
   const taskTtl = limitValue(SERVER_LIMITS.taskTtlMs, options.taskTtlMs);
   if (perCaller > maxTasks / 4) throw new Error('maxTasksPerCaller must be at most a quarter of maxTasks');
+  const declared = options.extensions ?? [BOUNDS_URI];
+  // Bounds data is read under any URI of the extension once the server activates one of them.
+  const boundsOn = declared.some((u) => BOUNDS_URIS.includes(u));
 
   return {
     name,
@@ -129,7 +173,10 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
           url,
           preferredTransport: 'JSONRPC',
           ...(options.provider ? { provider: options.provider } : {}),
-          capabilities: { streaming: true, pushNotifications: false },
+          capabilities: {
+            streaming: true, pushNotifications: false,
+            ...(declared.length ? { extensions: declared.map((uri) => ({ uri, description: BOUNDS_DESCRIPTION, required: false })) } : {}),
+          },
           defaultInputModes: ['text/plain'],
           defaultOutputModes: ['text/plain'],
           skills: [{ id: agent, name: agent, description: options.descriptions?.[agent] ?? `Agent ${agent}`, tags: ['agent'] }],
@@ -167,7 +214,8 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
       }
 
       /** Starts the run of a task; resolves when it has finished. */
-      function start(agent: string, text: string, contextId: string, ctx: InboundContext, trace: TraceContext | undefined): StoredTask {
+      function start(agent: string, msg: Inbound, ctx: InboundContext, trace: TraceContext | undefined): StoredTask {
+        const { text, contextId } = msg;
         const id = randomUUID();
         const owner = ownerOf(ctx, id);
         admit(!ctx.caller, owner);
@@ -176,14 +224,18 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         // The session log of a context belongs to one caller: the same contextId from another caller is another session.
         // The owner digest is keyed with the stack's sessions.secret: the session id may leave the process.
         const sessionId = `a2a-${(host.ownerDigest ?? ownerDigest())(owner)}-${contextId}`;
+        // What the caller sent in the extension and in the host's own carrier: the host only lets it tighten the limits.
+        const delegation = tighterDelegation(ctx.delegation, msg.bounds);
         const done = host.run(agent, text, {
           runId: id, sessionId, signal: controller.signal, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(trace ? { trace } : {}),
+          ...(delegation ? { delegation } : {}),
         }).then((r) => {
           value.state = value.state === 'canceled' ? 'canceled' : stateOfRun(r);
           if (value.state === 'completed') value.answer = r.output;
           // Usage and cost travel in the task's metadata, so a calling stack can account for this run.
           const metadata = runFigures(r);
           if (Object.keys(metadata).length) value.metadata = metadata;
+          if (msg.boundsUri) value.bounds = { uri: msg.boundsUri, report: boundsReport(r, metadata) };
           const said = SAID[value.state]?.(r) ?? 'The agent run failed.';
           value.status = { messageId: randomUUID(), role: 'agent', text: said, contextId, taskId: id };
         }, () => {
@@ -195,14 +247,29 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         return stored;
       }
 
-      function readMessage(params: Record<string, any> | undefined): { text: string; contextId: string } {
+      /**
+       * The message of a send, and the bounds it carries when the client activated the bounds extension (header or
+       * `message.extensions`). Malformed bounds refuse the request (invalid params): a run never starts on bounds it
+       * cannot read. Both URIs of the extension may be present: the tighter values apply.
+       */
+      function readMessage(req: Request, params: Record<string, any> | undefined): Inbound {
         const m = params?.message;
         if (!m || typeof m !== 'object') throw new RpcError(-32602, 'params.message is required');
         if (m.role !== 'ROLE_USER' && m.role !== 'user') throw new RpcError(-32602, 'message.role must be the user role');
         const text = partsText(m.parts);
         if (!text.trim()) throw new RpcError(-32602, 'message.parts has no text');
         const contextId = typeof m.contextId === 'string' && /^[\w.:-]{1,128}$/.test(m.contextId) ? m.contextId : randomUUID();
-        return { text, contextId };
+        if (!boundsOn) return { text, contextId };
+        const active = BOUNDS_URIS.filter((u) => requested(req, m).has(u));
+        if (!active.length) return { text, contextId };
+        let bounds: Delegation | undefined;
+        for (const uri of active) {
+          const data = m.metadata && typeof m.metadata === 'object' ? m.metadata[uri] : undefined;
+          if (data === undefined) continue;
+          if (delegationProblems(data).length) throw new RpcError(-32602, `message.metadata["${uri}"] is not valid bounds data`);
+          bounds = tighterDelegation(bounds, pickBounds(data));
+        }
+        return { text, contextId, boundsUri: active[0]!, ...(bounds ? { bounds } : {}) };
       }
 
       function owned(params: Record<string, any> | undefined, ctx: InboundContext): StoredTask {
@@ -212,9 +279,9 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         return t;
       }
 
-      function stream(rpcId: Rpc['id'], agent: string, params: Rpc['params'], ctx: InboundContext, v: WireVersion, trace: TraceContext | undefined): Response {
-        const { text, contextId } = readMessage(params);
-        const task = start(agent, text, contextId, ctx, trace);
+      function stream(req: Request, rpcId: Rpc['id'], agent: string, params: Rpc['params'], ctx: InboundContext, v: WireVersion, trace: TraceContext | undefined): Response {
+        const msg = readMessage(req, params);
+        const task = start(agent, msg, ctx, trace);
         const enc = new TextEncoder();
         const frame = (result: unknown) => enc.encode(`data: ${JSON.stringify({ jsonrpc: '2.0', id: rpcId, result })}\n\n`);
         const body = new ReadableStream<Uint8Array>({
@@ -227,7 +294,7 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
           },
           cancel() { task.controller.abort(); },
         });
-        return new Response(body, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' } });
+        return new Response(body, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', ...activated(msg) } });
       }
 
       async function rpc(req: Request, ctx: InboundContext, agent: string): Promise<Response> {
@@ -246,15 +313,15 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
           const v = method.version;
           switch (method.op) {
             case 'send': {
-              const { text, contextId } = readMessage(msg.params);
-              const task = start(agent, text, contextId, ctx, traceOf(req, ctx));
+              const sent = readMessage(req, msg.params);
+              const task = start(agent, sent, ctx, traceOf(req, ctx));
               const cfg = msg.params?.configuration ?? {};
               const immediate = v === A2A_VERSION ? cfg.returnImmediately === true : cfg.blocking === false;
               if (!immediate) await task.done;
-              return rpcResponse({ jsonrpc: '2.0', id, result: sendResult(task.value, v) });
+              return rpcResponse({ jsonrpc: '2.0', id, result: sendResult(task.value, v) }, 200, activated(sent));
             }
             case 'stream':
-              return stream(id, agent, msg.params, ctx, v, traceOf(req, ctx));
+              return stream(req, id, agent, msg.params, ctx, v, traceOf(req, ctx));
             case 'get':
               return rpcResponse({ jsonrpc: '2.0', id, result: getResult(owned(msg.params, ctx).value, v) });
             case 'cancel': {

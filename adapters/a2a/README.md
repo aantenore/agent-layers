@@ -38,9 +38,22 @@ the runtime with the caller's identity, so guards, authorization and telemetry a
   | `waiting` + `needs_input` (or any other code) | `INPUT_REQUIRED`, the output so far as status message |
   | `failed` | `FAILED` with a fixed status message |
 
-  The reason never leaves the stack: guard names, stages and details are not in the task.
+  The reason never leaves the stack: guard names, stages and details are not in the task. The one exception is the
+  code of a stop caused by the stack's own run bounds (`timeout`, `limit`, `hop_limit`), reported under the bounds
+  extension (below).
 - Usage and cost: `metadata["agent-layers"] = { usage: { inputTokens, outputTokens }, costUsd }` on the task, in the
   language's names; absent parts are omitted.
+- Run bounds: the cards declare the [bounds extension](../../spec/extensions/bounds-v1.md)
+  (`https://github.com/aantenore/agent-layers/blob/main/spec/extensions/bounds-v1.md`) in `capabilities.extensions`
+  with `required: false`. When a client activates it (the `A2A-Extensions` header or `message.extensions`, under that
+  URI or the agent-plexus alias `https://github.com/aantenore/agent-plexus/blob/main/spec/extensions/bounds-v1.md`),
+  the data in `message.metadata[<uri>]` (`remainingMs`, `hops`, `maxHops`, `tokens?`, `costUsd?`, `rootRunId`,
+  `parentRunId`) is validated and handed to the host, which can only tighten the stack's `limits.run`; malformed data
+  is refused with `-32602`. Together with the gateway's `Agent-Bounds` header, the tighter values apply. The response
+  repeats the activated URI in `A2A-Extensions`, and the task carries `metadata[<uri>] = { usage?, costUsd?, stop? }`
+  next to `metadata["agent-layers"]`; `stop` is the code of a run its own bounds stopped (a run over the hop limit is
+  `REJECTED` with `stop: "hop_limit"`). Data sent without activation is ignored. The bounds never become the caller's
+  actor chain: that comes from the credential.
 - The caller of the request (`InboundContext.caller`) runs the agent and owns the task (key: caller kind and id). The
   `traceparent` and `tracestate` of the request reach the run unchanged as `trace: { parent, state }` (taken from the
   host's context, else from the headers; values over 128 and 512 characters are dropped).
@@ -61,6 +74,7 @@ the runtime with the caller's identity, so guards, authorization and telemetry a
 | `maxTasksPerCaller` | integer | `100` | Tasks per caller (and of the anonymous pool); at most a quarter of `maxTasks` |
 | `maxTasks` | integer | `10000` | Tasks kept in total |
 | `taskTtlMs` | integer | `3600000` | How long a finished task stays readable |
+| `extensions` | string[] | the bounds extension URI | Extensions declared and activated: the bounds extension under its URI or the agent-plexus alias; `[]` turns it off |
 
 Limits accept `${env:NAME}`; `maxTasksPerCaller` and `maxTasks` also accept `"unbounded"`, which `agent-layers check` fails on
 the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).
@@ -97,6 +111,16 @@ agent by):
 | `failed` | `failed` | `error` |
 | any other state | `failed` | `error`, the native state in `ext["a2a.state"]` |
 
+Run bounds: each message carries the [bounds extension](../../spec/extensions/bounds-v1.md) (header
+`A2A-Extensions`, `message.extensions` and `message.metadata[<uri>]`) with what is left of the run's bounds, from
+`outboundBounds(ctx)`: the time left minus `limits.delegation.marginMs` (never more than `timeoutMs`), hops plus one,
+the run's max hops, a reservation of its token and cost budget, and the lineage. A call that would go over the hop
+limit, or start with less than `limits.delegation.minRemainingMs`, is refused without a network call: the run ends
+`stopped` with `hop_limit` or `timeout` (`by: "sdk.hops"`, `"sdk.deadline"`). The reservation is settled with the usage
+and cost the remote task reports (under the extension URI, else `metadata["agent-layers"]`); an unreported spend keeps
+its whole reservation. A remote task `REJECTED` with a bounds `stop` ends the run `stopped` with that code, so a chain
+can tell "too deep" from other refusals. The run's signal aborts at its deadline, so polling shares it.
+
 Transport failures are failed runs with a fixed `reason.detail` (`remote agent call failed`; code `timeout` with
 `remote agent timed out`; `stopped` + `aborted` when the caller aborted); error bodies are not read, so a token echoed
 by the remote side never reaches the run result. The output of a failed or stopped task is not passed on. When a run
@@ -119,6 +143,7 @@ result or `/ext/a2a.*`. Without rules the result is unchanged.
 | `timeoutMs` | integer | `300000` | Time limit of a run, polling included |
 | `pollMs` | integer | `500` | Interval of `GetTask` while the task is working |
 | `cancelTimeoutMs` | integer | `5000` | Time limit of the `CancelTask` sent when a run is aborted or times out |
+| `extensions` | string[] | the bounds extension URI | At most one: the URI the bounds are sent under (the agent-layers URI, or the agent-plexus alias for a receiver that knows only that one); `[]` sends none |
 
 Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production
 tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).

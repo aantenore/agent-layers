@@ -1,6 +1,6 @@
 # ToolPort
 
-Layer: `tool` (L5 Tools) · Version: 1.0.0 · Conformance: `checkTools`
+Layer: `tool` (L5 Tools) · Version: 1.1.0 · Conformance: `checkTools`
 
 ## Purpose
 
@@ -49,7 +49,7 @@ Governed results carry `ext["sdk.outcome"]`, one of `ok`, `error`, `denied`, `bl
 - Risk: a tool without `risk` is treated as `exec`, the most dangerous class. Declare `read` only for tools that cannot change anything.
 - Governed call, in order: local policy rules (first match decides: allow, ask, deny) → human approval when the effect is `ask` (without an approval port, `ask` denies; a call waits only up to the configured time and otherwise ends as pending) → authorization decision (an error denies) → guards on the arguments (`tool_args`; a redaction replaces the arguments and must stay a valid JSON object) → the tool call with bound credentials → guards on the result (`tool_result`, over `text` and over the JSON of `data`). Policy and authorization are described in [AuthorizationPort](AuthorizationPort.md) and [ApprovalPort](ApprovalPort.md); guards in [GuardPort](GuardPort.md).
 - Denials and guardrail blocks are results with `ok: false`, so the model can react. They are not exceptions.
-- Aborts propagate: a cancelled call rejects.
+- Aborts propagate: a cancelled call rejects. Inside a run (since 1.1.0) the context's signal aborts at the run's deadline and `ctx.bounds` carries what is left: the governed tools refuse a call once the deadline has passed (`ok: false`), and a tool that calls another agent sends `outboundBounds(ctx)` and settles its reservation with what the remote run reports.
 - Tokens obtained for a tool are never placed in `text`, `data`, logs or traces.
 - Listing is by caller: a source may return different tools for different callers.
 
@@ -73,6 +73,7 @@ Governed results carry `ext["sdk.outcome"]`, one of `ok`, `error`, `denied`, `bl
 
 ## Version history
 
+- 1.1.0 — run bounds ([0002](../../docs/decisions/0002-delegation-bounds.md)): `CallContext.bounds` and `lineage`; the governed tools refuse a call once the run's deadline has passed, and the context's signal aborts at the deadline; a tool that calls another agent sends `outboundBounds(ctx)`
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `ToolSpec.params` (was `inputSchema`) and `attrs`, `ext` replaces `meta`; `ToolResult {ok, text, data?}` replaces `ToolOutcome`; `CallContext.caller`
 - 0.1.0 — initial
 

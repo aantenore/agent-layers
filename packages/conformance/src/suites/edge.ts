@@ -1,4 +1,4 @@
-import { findRoute, lastUserText, type CallContext, type ChannelHandle, type ChannelHost, type ChannelPort, type DeployPort, type InboundContext, type InboundMount, type SecretPort, type ServiceSpec, type Trigger, type TriggerPort, type TriggerSink } from '@agent-layers/core';
+import { findRoute, lastUserText, PORT_VERSIONS, versionAtLeast, type CallContext, type Delegation, type ChannelHandle, type ChannelHost, type ChannelPort, type DeployPort, type InboundContext, type InboundMount, type SecretPort, type ServiceSpec, type Trigger, type TriggerPort, type TriggerSink } from '@agent-layers/core';
 import { Checks } from '../check.ts';
 import { conforms } from '../schemas.ts';
 
@@ -51,6 +51,8 @@ const fakeHost = (c: Checks): ChannelHost & { calls: string[]; contexts: Partial
       calls.push(typeof input === 'string' ? input : 'messages');
       contexts.push(ctx);
       c.produced('channel input', input);
+      // As the host does: a run over the hop limit the caller sent is refused before it starts.
+      if (ctx.delegation && ctx.delegation.hops > ctx.delegation.maxHops) return { runId: 'conformance-run', status: 'stopped', output: '', reason: { code: 'hop_limit', layer: 'harness', by: 'sdk.hops' } };
       const text = typeof input === 'string' ? input : lastUserText(input.messages);
       const status = statusIn(text);
       if (status === 'waiting') {
@@ -89,6 +91,32 @@ export interface ChannelFixtures {
   expectStates?: Partial<Record<'completed' | 'waiting' | 'stopped', string>>;
   /** The channel carries a client session (`sendMount` honours `session`); default false. */
   sessions?: boolean;
+  /**
+   * Sends `text` with run bounds in the channel's own carrier (an A2A extension, `_meta`) and returns the outcome as
+   * `sendMount` does. Enables the bounds checks (ChannelPort 1.1.0): the host receives the bounds as
+   * `CallContext.delegation`, and a run over the hop limit shows as `expectStates.stopped`.
+   */
+  sendBounds?: (mount: InboundMount, text: string, bounds: Delegation) => Promise<string | undefined>;
+  /** ChannelPort version the channel implements (`checkAdapter` passes its descriptor's; default: the core's). */
+  portVersion?: string;
+}
+
+const CONFORMANCE_BOUNDS: Delegation = { remainingMs: 30_000, hops: 1, maxHops: 4, tokens: 1000, rootRunId: 'conformance-root', parentRunId: 'conformance-parent' };
+
+/** Bounds checks of a mounted channel, through `sendBounds`: passed on to the host, never loosened; hop limit shown as a stop. */
+async function checkBounds(mount: InboundMount, host: ReturnType<typeof fakeHost>, f: ChannelFixtures, c: Checks): Promise<void> {
+  const before = host.contexts.length;
+  await c.attempt('send with bounds', () => f.sendBounds!(mount, conformanceInput('completed'), CONFORMANCE_BOUNDS));
+  if (!c.expect(host.contexts.length > before, 'bounds: the host never received the run')) return;
+  const d = host.contexts.at(-1)?.delegation;
+  if (c.expect(d !== undefined, 'bounds: the bounds the caller sent did not reach the host as delegation')) {
+    c.expect(d!.remainingMs <= CONFORMANCE_BOUNDS.remainingMs && d!.hops >= CONFORMANCE_BOUNDS.hops && d!.maxHops <= CONFORMANCE_BOUNDS.maxHops
+      && (d!.tokens ?? Infinity) <= CONFORMANCE_BOUNDS.tokens!, 'bounds: the channel loosened the bounds the caller sent');
+    c.expect(d!.rootRunId === CONFORMANCE_BOUNDS.rootRunId && d!.parentRunId === CONFORMANCE_BOUNDS.parentRunId, 'bounds: the lineage the caller sent was lost');
+  }
+  const over = await c.attempt('send over the hop limit', () => f.sendBounds!(mount, conformanceInput('completed'), { ...CONFORMANCE_BOUNDS, hops: 5 }));
+  const expected = f.expectStates?.stopped;
+  if (expected !== undefined) c.expect(over === expected, `bounds: a run stopped by the hop limit showed "${over}", expected "${expected}"`);
 }
 
 /** Caller, status mapping and session checks of a mounted channel, through `sendMount`. */
@@ -156,6 +184,9 @@ export async function checkChannel(port: ChannelPort, f: ChannelFixtures = {}, c
       } else c.skip('exercise mount: no fixture');
       if (f.sendMount) await checkSend(mount, host, f, c);
       else c.skip('send: no sendMount fixture (caller, status and session checks)');
+      if (!versionAtLeast(f.portVersion ?? PORT_VERSIONS.ChannelPort, '1.1.0')) c.skip(`bounds: ChannelPort ${f.portVersion} predates the bounds checks (1.1.0)`);
+      else if (f.sendBounds) await checkBounds(mount, host, f, c);
+      else c.skip('bounds: no sendBounds fixture');
       if (mount.close) await c.attempt('close mount', () => mount.close!());
     }
   }

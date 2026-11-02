@@ -1,19 +1,20 @@
 import { AdapterRegistry, importAdapters, packageLoader, type AnyAdapter } from './adapter.ts';
 import { agentSpec, configuredAdapters, type AdapterRef, type ConfiguredAdapter, type ResolvedConfig } from './config.ts';
-import { AdapterError, AgentLayersError, ApprovalPending, ConfigError, errorMessage, GuardrailBlocked, MissingLayerError, runEndOf } from './errors.ts';
+import { BOUNDS_STOP, deadlineSignal, runLimits, startRun, type RunLedger, type RunLimits } from './bounds.ts';
+import { AdapterError, AgentLayersError, ApprovalPending, BoundsExceeded, ConfigError, errorMessage, GuardrailBlocked, MissingLayerError, runEndOf } from './errors.ts';
 import { boundExt, SDK_NAMESPACE, extNamespace, withExt } from './ext.ts';
-import { limitValue } from './limits.ts';
+import { anySignal, limitValue } from './limits.ts';
 import {
   createMappings, effectiveRules, extReads, extWrites, loadMappingFunctions, rulesAgainstShape, type Mappings, type MappingRule,
 } from './mappings.ts';
 import { ownerDigest } from './inbound.ts';
-import { ATTR, EVENT, SPAN } from './names.ts';
+import { ATTR, EVENT, METRIC, SPAN } from './names.ts';
 import { PORTS, versionAtLeast } from './ports/catalog.ts';
 import type { CallContext } from './ports/base.ts';
 import type { ChannelHandle } from './ports/channel.ts';
 import type { GuardPort } from './ports/guard.ts';
 import type { ModelPort } from './ports/model.ts';
-import type { AgentSpec, RunEvent, RunInput, RunnableAgent, RunResult } from './ports/runtime.ts';
+import type { AgentSpec, RunEvent, RunInput, RunnableAgent, RunResult, StopReason } from './ports/runtime.ts';
 import type { TelemetryPort } from './ports/telemetry.ts';
 import type { ToolPort } from './ports/tool.ts';
 import { governedTools } from './pipeline/governed-tools.ts';
@@ -144,6 +145,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
       ...(ports.cache ? { cache: ports.cache } : {}), ...(ports.router ? { router: ports.router } : {}),
       ...(config.pipeline.cacheTtlMs ? { cacheTtlMs: config.pipeline.cacheTtlMs } : {}),
       cacheScope: config.pipeline.cacheScope ?? 'caller',
+      ...(config.pipeline.pricing ? { pricing: config.pipeline.pricing } : {}),
     });
     models.set(key, m);
     return m;
@@ -160,6 +162,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
   };
 
   const bound = new Map<string, Promise<RunnableAgent>>();
+  const limits = runLimits(config.limits);
   const context = (init: Partial<CallContext> & { agent: string }): CallContext => ({ runId: newRunId(), telemetry, ...init });
 
   const stack: Stack = {
@@ -176,7 +179,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
     agent(name) {
       let p = bound.get(name);
       if (!p) {
-        p = bindAgent(stack, name, context, extBytes, waiting);
+        p = bindAgent(stack, name, context, extBytes, waiting, limits);
         bound.set(name, p);
         p.catch(() => bound.delete(name));
       }
@@ -227,9 +230,9 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
 
 type Waiting = Map<string, ApprovalPending | undefined>;
 
-/** The result of a run ended by a pending approval or a guard block thrown out of the runtime. */
+/** The result of a run ended by a pending approval, a guard block or a run bound thrown out of the runtime. */
 function endedBy(err: unknown, runId: string): RunResult | undefined {
-  if (!(err instanceof ApprovalPending) && !(err instanceof GuardrailBlocked)) return undefined;
+  if (!(err instanceof ApprovalPending) && !(err instanceof GuardrailBlocked) && !(err instanceof BoundsExceeded)) return undefined;
   const { status, reason } = runEndOf(err);
   return { runId, status, output: '', reason, ...(err instanceof ApprovalPending ? { ext: err.approvalExt } : {}) };
 }
@@ -243,21 +246,77 @@ function withApproval(result: RunResult, pending: ApprovalPending | undefined): 
   return { ...result, status: 'waiting', reason: result.reason ?? pending.stopReason, ext: withExt(result.ext, pending.approvalExt)! };
 }
 
-async function bindAgent(stack: Stack, name: string, context: Stack['context'], extBytes: number, waiting: Waiting): Promise<RunnableAgent> {
+/** A run's context with its bounds, and the ledger behind them (see `startRun`). */
+interface Begun { ctx: CallContext; ledger: RunLedger; refused?: StopReason; own?: AbortSignal }
+
+/**
+ * Starts the bounds of a run: computes them from the stack's limits and what the caller sent (`delegation`, removed
+ * from the run's context), arms an abort at the deadline, merged with the caller's signal.
+ */
+function begin(context: Stack['context'], init: Partial<CallContext>, name: string, limits: RunLimits): Begun {
+  const { delegation: _sent, bounds: _parent, ...base } = context({ ...init, agent: name });
+  const start = startRun({ runId: base.runId, ...(base.caller ? { caller: base.caller } : {}), ...(init.delegation ? { delegation: init.delegation } : {}) }, limits);
+  const { ledger } = start;
+  const signal = anySignal(base.signal, deadlineSignal(ledger));
+  const lineage = ledger.lineage ?? base.lineage;
+  const ctx: CallContext = { ...base, bounds: ledger.view, ...(lineage ? { lineage } : {}), ...(signal ? { signal } : {}) };
+  return { ctx, ledger, ...(start.refused ? { refused: start.refused } : {}), ...(base.signal ? { own: base.signal } : {}) };
+}
+
+/**
+ * The result as the bounds left it: a run that did not complete because of a bound (a model call refused, the deadline
+ * reached while the caller was still waiting) ends `stopped` with the bound's reason. Usage and cost the runtime does
+ * not report come from the ledger.
+ */
+function settle(result: RunResult, b: Begun): RunResult {
+  let r = result;
+  const { ledger } = b;
+  if (r.status === 'failed' || r.status === 'stopped') {
+    const code = String(r.reason?.code ?? 'error');
+    if (!ledger.stop && !b.own?.aborted && ledger.remainingMs() <= 0 && ['timeout', 'aborted', 'error'].includes(code)) ledger.stop = BOUNDS_STOP.deadline;
+    if (ledger.stop) r = { ...r, status: 'stopped', reason: { ...ledger.stop } };
+  }
+  if (!r.usage && (ledger.usage.inputTokens || ledger.usage.outputTokens)) r = { ...r, usage: { ...ledger.usage } };
+  if (r.costUsd === undefined && ledger.costKnown && ledger.spentCost > 0) r = { ...r, costUsd: ledger.spentCost };
+  return r;
+}
+
+/** Span attributes of a run's bounds and caller chain. */
+function boundsAttrs(b: Begun): Record<string, string | number | string[]> {
+  const { ledger, ctx } = b;
+  return {
+    [ATTR.runHops]: ledger.hops, [ATTR.runMaxHops]: ledger.maxHops,
+    ...(Number.isFinite(ledger.startMs) ? { [ATTR.runDeadlineMs]: ledger.startMs } : {}),
+    ...(ledger.lineage ? { [ATTR.runRoot]: ledger.lineage.rootRunId, [ATTR.runParent]: ledger.lineage.parentRunId } : {}),
+    ...(ctx.caller?.actors?.length ? { [ATTR.callerActors]: ctx.caller.actors.map((a) => a.id) } : {}),
+  };
+}
+
+/** The result of a run its bounds refuse before it starts: no model call, no tool call. */
+const refusedRun = (runId: string, reason: StopReason): RunResult => ({ runId, status: 'stopped', output: '', reason: { ...reason } });
+
+async function bindAgent(stack: Stack, name: string, context: Stack['context'], extBytes: number, waiting: Waiting, limits: RunLimits): Promise<RunnableAgent> {
   const spec = await agentSpec(stack.config, name);
   const runtime = stack.ports.runtime;
   if (!runtime) throw new MissingLayerError('harness', 'runtime adapter');
   const inner = await runtime.bind(stack, spec);
   const state = stack.ports.state;
+  const stopped = (r: RunResult) => {
+    const code = r.reason?.code;
+    if (r.status === 'stopped' && (code === 'timeout' || code === 'limit' || code === 'hop_limit') && r.reason?.by?.startsWith('sdk.')) {
+      stack.telemetry.metric(METRIC.boundsStops, 1, { [ATTR.layer]: 'harness', [ATTR.name]: name, [ATTR.runReason]: code });
+    }
+  };
   return {
     name,
     async run(input: RunInput, init = {}) {
-      const ctx = context({ ...init, agent: name });
-      return stack.telemetry.span(SPAN.run, { [ATTR.layer]: 'harness', [ATTR.name]: name, [ATTR.runId]: ctx.runId }, async (span) => {
+      const b = begin(context, init, name, limits);
+      const { ctx } = b;
+      return stack.telemetry.span(SPAN.run, { [ATTR.layer]: 'harness', [ATTR.name]: name, [ATTR.runId]: ctx.runId, ...boundsAttrs(b) }, async (span) => {
         let result: RunResult;
         waiting.set(ctx.runId, undefined);
         try {
-          result = withApproval(await inner.run(input, ctx), waiting.get(ctx.runId));
+          result = b.refused ? refusedRun(ctx.runId, b.refused) : withApproval(await inner.run(input, ctx), waiting.get(ctx.runId));
         } catch (err) {
           const ended = endedBy(err, ctx.runId);
           if (!ended) throw err;
@@ -265,14 +324,38 @@ async function bindAgent(stack: Stack, name: string, context: Stack['context'], 
         } finally {
           waiting.delete(ctx.runId);
         }
+        result = settle(result, b);
+        stopped(result);
         result = boundExt(result, extBytes, (bytes) => stack.telemetry.event(EVENT.extDropped, { [ATTR.layer]: 'harness', [ATTR.extBytes]: bytes, [ATTR.extShape]: 'RunResult' }));
         span.setAttributes({ [ATTR.runStatus]: result.status, ...(result.reason ? { [ATTR.runReason]: String(result.reason.code) } : {}) });
         if (state && ctx.sessionId && result.events?.length) await state.append(ctx.sessionId, result.events);
         return result;
       }, ctx.trace ? { parent: ctx.trace } : undefined);
     },
-    ...(inner.stream ? { stream: (input: RunInput, init = {}) => streamEnded(inner.stream!(input, context({ ...init, agent: name }))) } : {}),
+    ...(inner.stream ? {
+      stream: (input: RunInput, init = {}) => {
+        const b = begin(context, init, name, limits);
+        if (b.refused) return refusedStream(b.refused);
+        return settleStream(streamEnded(inner.stream!(input, b.ctx)), b, stopped);
+      },
+    } : {}),
   };
+}
+
+/** The stream of a run its bounds refuse: one `run.end`. */
+async function* refusedStream(reason: StopReason): AsyncGenerator<RunEvent> {
+  yield { type: 'run.end', status: 'stopped', reason: { ...reason } };
+}
+
+/** A run's stream whose final `run.end` is settled like a run's result (see `settle`). */
+async function* settleStream(events: AsyncIterable<RunEvent>, b: Begun, stopped: (r: RunResult) => void): AsyncGenerator<RunEvent> {
+  for await (const e of events) {
+    if (e.type !== 'run.end') { yield e; continue; }
+    const end = e as Extract<RunEvent, { type: 'run.end' }>;
+    const r = settle({ runId: b.ctx.runId, status: end.status, output: '', ...(end.reason ? { reason: end.reason } : {}), ...(end.usage ? { usage: end.usage } : {}), ...(end.costUsd !== undefined ? { costUsd: end.costUsd } : {}) }, b);
+    stopped(r);
+    yield { ...end, status: r.status, ...(r.reason ? { reason: r.reason } : {}), ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
+  }
 }
 
 /** A runtime's stream whose pending approval or guard block, thrown instead of ended, becomes its `run.end` event. */

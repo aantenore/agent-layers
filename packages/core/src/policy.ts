@@ -1,5 +1,5 @@
 import type { CallContext } from './ports/base.ts';
-import { ANONYMOUS, publicCaller, type AccessQuestion, type Caller, type PublicCaller } from './ports/identity.ts';
+import { ANONYMOUS, publicCaller, type AccessQuestion, type Actor, type Caller, type PublicCaller } from './ports/identity.ts';
 import type { Risk, ToolSpec } from './ports/tool.ts';
 import { matchesAny } from './util.ts';
 import { CORE_VOCABULARIES, type Vocabularies } from './vocab.ts';
@@ -13,8 +13,14 @@ export interface PolicyRule {
   tools?: string[];
   /** Risk values. A rule on a core value also matches the added values `like` it. */
   risk?: Risk[];
-  /** Conditions on the caller. `authenticated: true` matches any verified caller, `false` only an anonymous one. */
-  when?: { roles?: string[]; scopes?: string[]; kind?: 'user' | 'agent'; authenticated?: boolean };
+  /**
+   * Conditions on the caller. `authenticated: true` matches any verified caller, `false` only an anonymous one.
+   * Delegation (`Caller.actors`): `actor` matches the id of the current actor (the agent presenting the credential) by
+   * glob, and only when there is one; `actors` matches any actor of the chain, prior ones included (RFC 8693 counts
+   * only the current actor for access control, so a rule asks for prior ones explicitly); `delegated: true` matches a
+   * caller with at least one actor, `false` one with none.
+   */
+  when?: { roles?: string[]; scopes?: string[]; kind?: 'user' | 'agent'; authenticated?: boolean; actor?: string[]; actors?: string[]; delegated?: boolean };
 }
 
 /** What a policy rule is matched against. No `caller` means anonymous. */
@@ -38,6 +44,10 @@ function ruleMatches(r: PolicyRule, s: PolicySubject, vocab: Vocabularies): bool
   if (w.kind && c?.kind !== w.kind) return false;
   if (w.roles && !w.roles.some((x) => c?.roles?.includes(x))) return false;
   if (w.scopes && !w.scopes.some((x) => c?.scopes?.includes(x))) return false;
+  const chain = c?.actors ?? [];
+  if (w.delegated !== undefined && w.delegated !== (chain.length > 0)) return false;
+  if (w.actor && !(chain.length && matchesAny(w.actor, chain[chain.length - 1]!.id))) return false;
+  if (w.actors && !chain.some((a) => matchesAny(w.actors!, a.id))) return false;
   return true;
 }
 
@@ -59,7 +69,7 @@ export function accessQuestion(tool: string, spec: ToolSpec, args: Record<string
 
 /**
  * The policy subject of an access question (for policy engines that work on questions only). Only callers of kind
- * `user` or `agent` with an id count as callers; anything else (anonymous, unknown kinds) has none, so rules on kind,
+ * `user` or `agent` with an id count as callers (with their well-formed actors); anything else (anonymous, unknown kinds) has none, so rules on kind,
  * roles or scopes do not match, as in `evaluatePolicy`. An unknown risk counts as `exec`.
  */
 export function policySubject(q: AccessQuestion, vocab: Vocabularies = CORE_VOCABULARIES): PolicySubject {
@@ -68,7 +78,10 @@ export function policySubject(q: AccessQuestion, vocab: Vocabularies = CORE_VOCA
   const risk = vocab.has('risk', q.target?.risk) ? q.target.risk : 'exec';
   const out: PolicySubject = { tool: String(q.target?.id ?? ''), risk };
   if ((c?.kind === 'user' || c?.kind === 'agent') && typeof c.id === 'string' && c.id) {
-    out.caller = { id: c.id, kind: c.kind, roles: strings(c.roles), scopes: strings(c.scopes) };
+    const actors = (Array.isArray(c.actors) ? c.actors : [])
+      .filter((a): a is Actor => !!a && typeof a.id === 'string' && !!a.id && (a.kind === 'user' || a.kind === 'agent'))
+      .map((a) => ({ id: a.id, kind: a.kind }));
+    out.caller = { id: c.id, kind: c.kind, roles: strings(c.roles), scopes: strings(c.scopes), ...(actors.length ? { actors } : {}) };
   }
   return out;
 }

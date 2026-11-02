@@ -12,9 +12,26 @@ export interface Caller {
   scopes: string[];
   /** Display name. */
   name?: string;
+  /**
+   * Agents that acted for this caller (since IdentityPort 1.1.0), verified from the credential by the identity adapter:
+   * first delegate first, the agent presenting the credential last. Absent or empty: no delegation known.
+   */
+  actors?: Actor[];
   /** The inbound credential. Never serialised, logged or traced. */
   credential?: string;
   ext?: Ext;
+}
+
+/** One agent (or person) in a caller's delegation chain. */
+export interface Actor {
+  /** Identifier of the acting agent at the issuer (an OAuth client id, a workload id). */
+  id: string;
+  /** `agent` in practice; `user` when a person acts for another. */
+  kind: 'user' | 'agent';
+  /** Display name. */
+  name?: string;
+  /** Who vouches for this entry, when it differs from the credential's issuer. */
+  issuer?: string;
 }
 
 /** A caller without its credential: what guards, events and access questions see. */

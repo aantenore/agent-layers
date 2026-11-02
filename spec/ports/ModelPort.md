@@ -1,6 +1,6 @@
 # ModelPort
 
-Layer: `llm` (L1 Models) · Version: 1.0.0 · Conformance: `checkModel`
+Layer: `llm` (L1 Models) · Version: 1.1.0 · Conformance: `checkModel`
 
 ## Purpose
 
@@ -70,6 +70,7 @@ Every part and message may carry `ext?`.
 - `ctx.signal`: if it is already aborted, or aborts during the call, the operation rejects. It is not turned into an empty reply.
 - Only `text` parts are interpreted by the stack; media and namespaced parts pass through untouched.
 - Usage is reported when the backend reports it; cost and token metrics are derived from it.
+- Inside a run (`ctx.bounds`, since 1.1.0) the stack's wrapped model refuses a call with `BoundsExceeded` once the run's deadline has passed or its token or cost budget is spent, and debits each reply from the model (not from the cache): its tokens, and its cost from `pipeline.pricing`. Adapters need no change; they honour `ctx.signal`, which aborts at the deadline.
 - The stack may wrap a model with input guards, a cache, a router and output guards (see [Composition](README.md#composition)). A guard block surfaces as a guardrail error raised by the wrapped model; the adapter never sees it. Streaming with output guards is buffered, because the whole text is needed before it can be released.
 
 ## Errors
@@ -96,6 +97,7 @@ Every part and message may carry `ext?`.
 
 ## Version history
 
+- 1.1.0 — run bounds ([0002](../../docs/decisions/0002-delegation-bounds.md)): `CallContext.bounds` and `lineage`; inside a run the stack's governed model refuses a call (`BoundsExceeded`, code `timeout` or `limit`) once the deadline has passed or the budget is spent, and debits each reply (tokens, and cost from `pipeline.pricing`); `Caller.actors`
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `ModelRequest`, `ModelReply`, `ModelDelta`; messages are lists of typed parts (text, media, call, result, reasoning); `toolMode`, `settings` and `ext` replace `tool_choice`, flat sampling fields and `extra`; one answer per call (no `choices`); finish values `end`, `limit`, `tools`, `refused`, `other`; usage as `inputTokens` / `outputTokens`
 - 0.1.0 — initial
 

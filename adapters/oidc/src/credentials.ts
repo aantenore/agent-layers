@@ -8,6 +8,8 @@ import { CREDENTIAL_LIMITS as LIMITS } from './limits.ts';
 export const TOKEN_EXCHANGE_GRANT = 'urn:ietf:params:oauth:grant-type:token-exchange';
 export const ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
 const JWT_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:jwt';
+/** Cache key of the stack's own token sent as `actor_token`; no audience or scopes. */
+const ACTOR_KEY = JSON.stringify(['actor-token']);
 
 export interface OidcCredentialsOptions {
   /** Issuer used to discover `token_endpoint`; or set `tokenEndpoint`. */
@@ -21,6 +23,11 @@ export interface OidcCredentialsOptions {
   authMethod?: 'client_secret_basic' | 'client_secret_post';
   /** How the audience is sent: `audience` (RFC 8693; Keycloak, Auth0), `resource` (RFC 8707) or not at all. */
   audienceParam?: 'audience' | 'resource' | 'none';
+  /**
+   * `self`: a token exchange also sends the stack's own access token (client_credentials of this client) as the
+   * `actor_token`, so the issuer can record the agent in the `act` claim. Only with `on-behalf-of`. Off by default.
+   */
+  actor?: 'self';
   /** Cached tokens are reused until this many seconds before they expire (default 30). */
   refreshSkewSec?: number;
   /** Lifetime assumed when the response has no `expires_in` and the token is not a JWT (default 60 s). */
@@ -76,6 +83,8 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
   if (!opts?.clientId || !opts.clientSecret) throw new OidcError('config', 'oidc credentials: "clientId" and "clientSecret" are required');
   if (opts.mode !== 'on-behalf-of' && opts.mode !== 'self') throw new OidcError('config', 'oidc credentials: "mode" must be "on-behalf-of" or "self"');
   if (!opts.tokenEndpoint && !opts.issuer) throw new OidcError('config', 'oidc credentials: set "issuer" or "tokenEndpoint"');
+  if (opts.actor !== undefined && opts.actor !== 'self') throw new OidcError('config', 'oidc credentials: "actor" must be "self"');
+  if (opts.actor && opts.mode !== 'on-behalf-of') throw new OidcError('config', 'oidc credentials: "actor" needs mode "on-behalf-of"');
   if (opts.tokenEndpoint) secureUrl(opts.tokenEndpoint, 'tokenEndpoint', opts.allowHttp);
   else secureUrl(opts.issuer!, 'issuer', opts.allowHttp);
   const fetchImpl: FetchLike = hooks.fetch ?? fetch;
@@ -91,7 +100,7 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
   const maxEntries = Math.max(1, limitValue(LIMITS.maxCacheEntries, opts.maxCacheEntries));
   const audienceParam = opts.audienceParam ?? 'audience';
   const cache = new Map<string, Cached>();
-  const inflight = new Map<string, Promise<string>>();
+  const inflight = new Map<string, Promise<Cached>>();
   let endpoint: Promise<string> | undefined = opts.tokenEndpoint ? Promise.resolve(opts.tokenEndpoint) : undefined;
 
   const tokenEndpoint = () => {
@@ -140,6 +149,38 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
     return { token, ...(expiresIn !== undefined ? { expiresIn } : {}) };
   };
 
+  /**
+   * One cached token request. Shared by every identical caller, so it does not use any caller's signal; each caller
+   * races its own. With `actor`, the stack's own token is fetched first (cached under its own key) and sent as the
+   * `actor_token`; the result never outlives it.
+   */
+  const issue = (key: string, params: Record<string, string>, subjectExpMs: number, actor = false): Promise<Cached> => {
+    const hit = cache.get(key);
+    if (hit && hit.expiresAt > now()) return Promise.resolve(hit);
+    if (hit) cache.delete(key);
+    let pending = inflight.get(key);
+    if (!pending) {
+      const p = (async () => {
+        const form = { ...params };
+        let boundMs = subjectExpMs;
+        if (actor) {
+          const own = await issue(ACTOR_KEY, { grant_type: 'client_credentials' }, Infinity);
+          form.actor_token = own.token;
+          form.actor_token_type = ACCESS_TOKEN_TYPE;
+          boundMs = Math.min(boundMs, own.expiresAt);
+        }
+        const { token, expiresIn } = await request(form);
+        const issuedExpMs = expiresIn !== undefined ? now() + expiresIn * 1000 : (unverifiedExpiry(token, maxTokenChars) ?? now() / 1000 + defaultTtlSec) * 1000;
+        const entry = { token, expiresAt: Math.min(issuedExpMs, boundMs) - skewMs };
+        if (entry.expiresAt > now()) remember(key, entry);
+        return entry;
+      })().finally(() => { if (inflight.get(key) === p) inflight.delete(key); });
+      inflight.set(key, p);
+      pending = p;
+    }
+    return pending;
+  };
+
   return {
     name,
     requiresCaller: opts.mode === 'on-behalf-of',
@@ -159,32 +200,15 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
           subjectExpMs = exp * 1000;
           if (subjectExpMs <= now()) throw new OidcError('credentials', 'oidc credentials: the caller token has expired');
         }
-        subjectKey = `obo:${sha(caller.credential)}`;
+        subjectKey = `${opts.actor ? 'obo+actor' : 'obo'}:${sha(caller.credential)}`;
       }
       const key = JSON.stringify([audience, scopes, subjectKey]);
-      const hit = cache.get(key);
-      if (hit && hit.expiresAt > now()) return hit.token;
-      if (hit) cache.delete(key);
-
-      let pending = inflight.get(key);
-      if (!pending) {
-        const params: Record<string, string> = opts.mode === 'self'
-          ? { grant_type: 'client_credentials' }
-          : { grant_type: TOKEN_EXCHANGE_GRANT, subject_token: caller!.credential!, subject_token_type: ACCESS_TOKEN_TYPE, requested_token_type: ACCESS_TOKEN_TYPE };
-        if (audienceParam !== 'none') params[audienceParam] = audience;
-        if (scopes.length) params.scope = scopes.join(' ');
-        // Shared by every identical caller, so it does not use any caller's signal; each caller races its own.
-        const p = (async () => {
-          const { token, expiresIn } = await request(params);
-          const issuedExpMs = expiresIn !== undefined ? now() + expiresIn * 1000 : (unverifiedExpiry(token, maxTokenChars) ?? now() / 1000 + defaultTtlSec) * 1000;
-          const expiresAt = Math.min(issuedExpMs, subjectExpMs) - skewMs;
-          if (expiresAt > now()) remember(key, { token, expiresAt });
-          return token;
-        })().finally(() => { if (inflight.get(key) === p) inflight.delete(key); });
-        inflight.set(key, p);
-        pending = p;
-      }
-      return abortable(pending, topts.signal);
+      const params: Record<string, string> = opts.mode === 'self'
+        ? { grant_type: 'client_credentials' }
+        : { grant_type: TOKEN_EXCHANGE_GRANT, subject_token: caller!.credential!, subject_token_type: ACCESS_TOKEN_TYPE, requested_token_type: ACCESS_TOKEN_TYPE };
+      if (audienceParam !== 'none') params[audienceParam] = audience;
+      if (scopes.length) params.scope = scopes.join(' ');
+      return (await abortable(issue(key, params, subjectExpMs, opts.actor === 'self'), topts.signal)).token;
     },
   };
 }

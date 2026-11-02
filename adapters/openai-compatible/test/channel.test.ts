@@ -162,3 +162,16 @@ test('reasoning: true returns the (guarded) reasoning on model routes', async ()
   const chunks = (await frames(await send({ model: 'fast', stream: true, messages: [{ role: 'user', content: 'ping' }] }))).slice(0, -1) as Record<string, any>[];
   assert.ok(chunks.some((c) => c.choices[0]?.delta.reasoning_content === 'think'));
 });
+
+test('the delegation the gateway parsed reaches the host on agent routes, streamed or not', async () => {
+  const delegation = { remainingMs: 30_000, hops: 1, maxHops: 3, tokens: 500, rootRunId: 'run-a', parentRunId: 'run-b' };
+  const send = (body: unknown, ctx: object) => inboundFetch(mount, new Request('http://gw.test/v1/chat/completions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), { caller, ...ctx });
+  nextRun = { runId: 'r', status: 'completed', output: 'done' };
+  const ran = () => seen.runCtx;
+  await send({ model: 'agent:assistant', messages: [{ role: 'user', content: 'hi' }] }, { delegation });
+  assert.deepEqual(ran()?.delegation, delegation);
+  await (await send({ model: 'agent:assistant', stream: true, messages: [{ role: 'user', content: 'hi' }] }, { delegation: { ...delegation, hops: 2 } })).text();
+  assert.deepEqual(ran()?.delegation, { ...delegation, hops: 2 });
+  await send({ model: 'agent:assistant', messages: [{ role: 'user', content: 'hi' }] }, {});
+  assert.ok(ran() && !('delegation' in ran()!), 'none sent, none passed');
+});

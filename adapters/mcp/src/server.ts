@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  inboundSessionId, limitValue, matchesAny, type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type Risk, type ToolPort,
+  delegationProblems, inboundSessionId, limitValue, matchesAny, tighterDelegation, type CallContext, type Delegation, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type Risk, type ToolPort,
   type ToolSpec,
 } from '@agent-layers/core';
 
@@ -43,6 +43,8 @@ export interface McpServerChannelOptions {
 export const APPROVAL_META = 'agent-layers/approval';
 /** Default `params._meta` key of the session of a stateless request. */
 export const SESSION_META = 'agent-layers/session';
+/** `params._meta` key of a `tools/call` carrying the run bounds of the calling agent (the fields of `Delegation`). */
+export const BOUNDS_META = 'agent-layers/bounds';
 
 /**
  * Protocol revisions served on the same endpoint, latest first. Modern revisions are stateless (no handshake, no session:
@@ -94,6 +96,20 @@ function decodeHeaderValue(value: string | null): string | null {
  */
 /** A core risk value as is; any other value is served as `exec`. */
 export const coreRisk = (risk: Risk): string => (risk === 'read' || risk === 'write' || risk === 'exec' ? risk : 'exec');
+
+/** The bounds a `tools/call` carries in `params._meta`; an invalid value is an invalid-params error (fail closed). */
+function metaBounds(meta: unknown): Delegation | undefined {
+  const sent = meta && typeof meta === 'object' ? (meta as Record<string, unknown>)[BOUNDS_META] : undefined;
+  if (sent === undefined) return undefined;
+  const problems = delegationProblems(sent);
+  if (problems.length) throw new RpcError(-32602, `invalid ${BOUNDS_META}: ${problems.join('; ')}`);
+  const d = sent as Delegation;
+  return {
+    remainingMs: d.remainingMs, hops: d.hops, maxHops: d.maxHops,
+    ...(d.tokens !== undefined ? { tokens: d.tokens } : {}), ...(d.costUsd !== undefined ? { costUsd: d.costUsd } : {}),
+    ...(d.rootRunId !== undefined ? { rootRunId: d.rootRunId } : {}), ...(d.parentRunId !== undefined ? { parentRunId: d.parentRunId } : {}),
+  };
+}
 
 const ownerOf = (ctx: InboundContext, sessionId: string) => (ctx.caller ? `id:${ctx.caller.kind}:${ctx.caller.id}` : `anon:${sessionId}`);
 
@@ -168,8 +184,9 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
       };
 
       /** A call in a stateful MCP session carries it as the session, so a repeated call finds its approval. */
-      const callContext = (ctx: InboundContext, signal: AbortSignal, sessionId?: string): CallContext => ({
+      const callContext = (ctx: InboundContext, signal: AbortSignal, sessionId?: string, delegation = ctx.delegation): CallContext => ({
         runId: randomUUID(), agent: name, signal, ...(sessionId ? { sessionId } : {}), ...(ctx.caller ? { caller: ctx.caller } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
+        ...(delegation ? { delegation } : {}),
       });
 
       async function dispatch(msg: RpcRequest, inflight: Session['inflight'], ctx: InboundContext, sessionId?: string): Promise<unknown> {
@@ -185,13 +202,15 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
             const args = msg.params?.arguments ?? {};
             if (typeof tool !== 'string' || !visible(tool)) throw new RpcError(-32602, `unknown tool: ${String(tool)}`);
             if (!args || typeof args !== 'object' || Array.isArray(args)) throw new RpcError(-32602, 'arguments must be an object');
+            // The gateway's bounds and the request's own: the tighter of the two.
+            const delegation = tighterDelegation(ctx.delegation, metaBounds(msg.params?._meta));
             const known = (await tools.listTools(callContext(ctx, ctx.signal))).some((s) => s.name === tool);
             if (!known) throw new RpcError(-32602, `unknown tool: ${tool}`);
             const controller = new AbortController();
             const key = msg.id ?? randomUUID();
             inflight.set(key, controller);
             try {
-              const out = await tools.callTool(tool, args as Record<string, unknown>, callContext(ctx, AbortSignal.any([ctx.signal, controller.signal]), sessionId));
+              const out = await tools.callTool(tool, args as Record<string, unknown>, callContext(ctx, AbortSignal.any([ctx.signal, controller.signal]), sessionId, delegation));
               const structured = out.data && typeof out.data === 'object' && !Array.isArray(out.data) ? { structuredContent: out.data } : {};
               // A call waiting for a person says which approval, so a client (a remote runtime) can end its run waiting.
               const approval = out.ext?.['sdk.approval'];

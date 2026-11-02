@@ -39,6 +39,12 @@ From the command line: `agent-layers gateway --profile <name> [--port <n>] [--ho
    instance, status, duration and whether the caller was authenticated, plus a `gateway.requests` metric. The span
    joins the caller's trace when the telemetry adapter accepts it.
 
+Run bounds: after authentication, `Agent-Bounds: remaining-ms=45000, hops=2, max-hops=4, tokens=1000, cost-usd=0.5`
+and `Agent-Lineage: root="run-a1", parent="run-b7"` (RFC 9651 dictionaries; `remaining-ms`, `hops`, `max-hops` required)
+become `InboundContext.delegation`, which the host can only use to tighten the stack's limits. A header that is
+malformed, invalid, repeated or longer than `maxTraceChars` is a 400 before the route runs; absent headers mean no
+delegation. Parameters (`;...`), inner lists and booleans are refused.
+
 `GET /healthz` answers 200 while the process runs. `GET /readyz` answers 200 when the profile passes the readiness
 gate and the gateway is not draining, 503 otherwise; the body counts readiness `problems` and language `warnings`.
 

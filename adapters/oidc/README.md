@@ -35,7 +35,13 @@ OPA, and this adapter's live test (`test/live.test.ts`) runs against it.
   Two things stay in code, whatever the rules: `resource_access` roles of the `roleClients` only (default: the
   `audience` values), named `<client>:<role>` unless `namespaceClientRoles` is false, and the `scp` claim, merged into
   the scopes. Rules may write `/ext/oidc.<name>` (for example a tenant claim); other namespaces are dropped.
-- `id`, `kind` and `credential` come from verification only: a rule that writes or drops them is refused when the
+- `actors` come from the `act` claim (RFC 8693). In the token the outermost `act` is the current actor and nested ones
+  are prior actors; the adapter reverses the nesting, so `Caller.actors` is chronological: first delegate first, the
+  agent presenting the token last. Each entry has `id` = `act.sub` (else `act.client_id`), `kind: "agent"` and `issuer`
+  = `act.iss` only when it differs from the token's `iss`. A present but malformed `act` (not an object, no string
+  id) or a chain longer than `maxActors` rejects the token. `sub` stays `Caller.id`. The `may_act` claim, when an
+  object, is kept as `ext["oidc.may_act"]`.
+- `id`, `kind`, `actors` and `credential` come from verification only: a rule that writes or drops them is refused when the
   adapter is created, and a mapping function that changes them rejects the token. A failing rule, or one that leaves
   `roles` or `scopes` as something other than a list, rejects the token; the error names the rule, never its text.
   Non-string list items and a non-string name are dropped.
@@ -59,6 +65,7 @@ OPA, and this adapter's live test (`test/live.test.ts`) runs against it.
 | `maxTokenChars` | integer | `16384` | Longest token accepted |
 | `maxResponseBytes` | integer | `1000000` | Largest discovery or JWKS document read |
 | `errorDescriptionChars` | integer | `200` | Characters of a provider error description kept in an error message |
+| `maxActors` | integer | `10` | Longest `act` chain accepted (1 to 100); a longer chain rejects the token |
 | `allowHttp` | boolean | `false` | Plain HTTP outside loopback hosts |
 | `agentClients` | string[] | none | Clients whose client-credentials tokens are the agent |
 | `agentSubjects` | {client: sub} | none | Service-account `sub` per agent client (Keycloak: the service-account user id) |
@@ -74,6 +81,12 @@ OPA, and this adapter's live test (`test/live.test.ts`) runs against it.
   without a caller credential gets no token: it never falls back to the agent's own identity.
 - `mode: "self"`: `client_credentials`, the agent's own identity.
 
+With `actor: "self"` (only with `on-behalf-of`) the exchange also sends `actor_token`, the stack's own access token
+(`client_credentials` of the same client, cached like any other token), and `actor_token_type`
+(`urn:ietf:params:oauth:token-type:access_token`), so the issuer can nest the agent in the `act` claim of the exchanged
+token. The exchanged token is cached separately from one without an actor and never outlives the actor token. The
+issuer must accept the client as an actor; with Keycloak and similar issuers check that `act` appears in the result.
+
 Tokens are cached per audience, scopes and caller credential until `refreshSkewSec` before they expire, never past
 the caller's own token (the earlier of `ext["oidc.exp"]` and the credential's own `exp`), and never shared between
 callers. Identical concurrent requests share one call; a caller that
@@ -86,6 +99,7 @@ cancels does not cancel the others.
 | `mode` | `on-behalf-of` / `self` | required | See above |
 | `authMethod` | `client_secret_basic` / `client_secret_post` | basic | Client authentication |
 | `audienceParam` | `audience` / `resource` / `none` | `audience` | How the audience is sent (RFC 8693 or RFC 8707) |
+| `actor` | `self` | off | Send the stack's own token as `actor_token` in a token exchange (`on-behalf-of` only) |
 | `refreshSkewSec` | integer | `30` | Renew this long before expiry |
 | `defaultTtlSec` | integer | `60` | Lifetime when the response has no `expires_in` and the token is not a JWT |
 | `maxCacheEntries` | integer | `1000` | Cache size |
@@ -120,12 +134,13 @@ unchanged. Rules on `kind: agent` need `agentClients` (and, for Keycloak, `agent
       "adapter": "oidc",
       "options": {
         "issuer": "${env:OIDC_ISSUER}", "audience": "${env:OIDC_CLIENT_ID}",
-        "agentClients": ["agent-runtime"], "agentSubjects": { "agent-runtime": "${env:AGENT_SERVICE_ACCOUNT_ID}" }
+        "agentClients": ["agent-runtime"], "agentSubjects": { "agent-runtime": "${env:AGENT_SERVICE_ACCOUNT_ID}" },
+        "maxActors": 5
       }
     },
     "credentials": {
       "adapter": "oidc",
-      "options": { "issuer": "${env:OIDC_ISSUER}", "clientId": "${env:OIDC_CLIENT_ID}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
+      "options": { "issuer": "${env:OIDC_ISSUER}", "clientId": "${env:OIDC_CLIENT_ID}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of", "actor": "self" }
     }
   }
 }

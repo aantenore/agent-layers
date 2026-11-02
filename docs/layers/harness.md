@@ -78,7 +78,27 @@ flowchart LR
 - The runtime owns the loop; the layers around it own everything else. It adds no policy of its own: authorization is
   [identity](identity.md), content checks are [guardrail](guardrail.md).
 - Budgets (tokens, tool calls, spend) are enforced here and end the run `stopped` with reason code `limit`; see [cost](../cross-cutting/cost.md).
+  The run bounds below are enforced by the core for every runtime; a runtime's own budgets are extra limits.
 - Workers, queues and scheduled triggers start runs through [interface](interface.md) triggers.
+
+## Run bounds
+
+Every run has a deadline, a token and a cost budget, and a hop count, also when it runs alone
+([0002](../decisions/0002-delegation-bounds.md)). The host computes them when the run starts, from `limits.run` and from
+what a calling agent sent, which can only tighten them, and passes them in `ctx.bounds`:
+
+| Bound | Set by | When it is reached |
+|---|---|---|
+| Deadline | `limits.run.timeoutMs` (300000 ms), or less when the caller sent less | The run's signal aborts; the model pipeline refuses further calls; the run ends `stopped`, `timeout` (`by: "sdk.deadline"`) |
+| Tokens, cost | `limits.run.maxTokens`, `limits.run.maxCostUsd` (unbounded by default), priced with `pipeline.pricing` | The next model call is refused: `stopped`, `limit` (`by: "sdk.budget"`) |
+| Hops | `limits.run.maxHops` (4); a run's hops are what the caller sent or its verified actor chain, whichever is larger | The run is refused before it starts: `stopped`, `hop_limit` (`by: "sdk.hops"`) |
+
+The core checks them in the governed model and tools, so swapping the runtime keeps them. Runtime budgets stay as
+extra limits, and the first limit reached stops the run: `basic-runtime` `maxTurns` (8), `reinloop` `budget.*`. When a
+runtime reports no usage or cost, the host fills them from the run's ledger. A runtime that calls another agent, like
+the `a2a` runtime, passes on what is left with `outboundBounds(ctx)`: time minus `limits.delegation.marginMs`, hops plus
+one, a reservation of the budget; it refuses locally, without a network call, when the next agent would be over the hop
+limit, and settles the reservation with what the remote run reports. Limits are in [limits.md](../limits.md#limits).
 
 ## How to swap
 

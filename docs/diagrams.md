@@ -76,6 +76,7 @@ The command renders every Mermaid block of a Markdown file and fails on a syntax
 | A runtime in another language | [gateway.md](gateway.md#a-runtime-in-another-language) | Model calls at `/v1`, tool calls at `/mcp` with the caller; a remote agent as runtime over A2A |
 | What runs where | [slice.md](slice.md#what-runs-where) | The vertical slice: driver, gateway, three runtimes, the layers per tier, telemetry to eval |
 | Failure injection and attribution | [slice.md](slice.md#failure-injection-and-attribution) | One faulted run across processes, scored from its trace |
+| Bounds across a chain of agents | [0002](decisions/0002-delegation-bounds.md#diagram) | Deadline, hops and budget passed from stack to stack, tightened at each hop; a call over the hop limit refused locally |
 
 ### Layers
 

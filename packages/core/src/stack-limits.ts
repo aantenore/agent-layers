@@ -35,5 +35,20 @@ export const LANGUAGE_LIMITS = defineLimits({
   extBytes: { path: 'limits.extBytes', default: 16_384, unit: 'bytes', min: 256, max: 1_048_576, safe: { max: 65_536 } },
 });
 
+/** Bounds of every run (`limits.run` block): what a run may take, delegated runs included. */
+export const RUN_LIMITS = defineLimits({
+  timeoutMs: { path: 'limits.run.timeoutMs', default: 300_000, unit: 'ms', min: 1, unbounded: 'fail', safe: { max: 3_600_000 } },
+  maxHops: { path: 'limits.run.maxHops', default: 4, unit: 'count', min: 0, unbounded: 'fail', safe: { max: 10 } },
+  maxTokens: { path: 'limits.run.maxTokens', default: 'unbounded', unit: 'tokens', min: 1, unbounded: 'warn' },
+  maxCostUsd: { path: 'limits.run.maxCostUsd', default: 'unbounded', unit: 'usd', min: 0, integer: false, unbounded: 'warn' },
+});
+
+/** How a run passes its bounds on to another agent (`limits.delegation` block). */
+export const DELEGATION_LIMITS = defineLimits({
+  marginMs: { path: 'limits.delegation.marginMs', default: 1000, unit: 'ms', min: 0, max: 60_000 },
+  minRemainingMs: { path: 'limits.delegation.minRemainingMs', default: 1000, unit: 'ms', min: 0, max: 60_000 },
+});
+
 /** Every limit set in the stack config itself (adapters declare theirs on the descriptor). */
-export const STACK_LIMITS: readonly LimitSpec[] = [...limitList(GATEWAY_LIMITS), ...limitList(PIPELINE_LIMITS), ...limitList(CHECK_LIMITS), ...limitList(LANGUAGE_LIMITS)];
+export const STACK_LIMITS: readonly LimitSpec[] = [...limitList(GATEWAY_LIMITS), ...limitList(PIPELINE_LIMITS), ...limitList(CHECK_LIMITS), ...limitList(LANGUAGE_LIMITS),
+  ...limitList(RUN_LIMITS), ...limitList(DELEGATION_LIMITS)];

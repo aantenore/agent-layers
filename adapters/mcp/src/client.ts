@@ -98,9 +98,12 @@ export class McpClient {
     }
   }
 
-  /** `headers` (HTTP only) replace the connection credentials for this call, for example a per-run Authorization. */
-  async callTool(name: string, args: unknown, signal?: AbortSignal, headers?: HeaderMap): Promise<McpCallResult> {
-    const res = await this.#transport.request('tools/call', { name, arguments: args ?? {} }, signal, headers);
+  /**
+   * `headers` (HTTP only) replace the connection credentials for this call, for example a per-run Authorization.
+   * `meta` is sent as `params._meta`.
+   */
+  async callTool(name: string, args: unknown, signal?: AbortSignal, headers?: HeaderMap, meta?: Record<string, unknown>): Promise<McpCallResult> {
+    const res = await this.#transport.request('tools/call', { name, arguments: args ?? {}, ...(meta && Object.keys(meta).length ? { _meta: meta } : {}) }, signal, headers);
     const content: any[] = Array.isArray(res?.content) ? res.content : [];
     const texts = content.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text as string);
     const items = content.filter((c) => !(c?.type === 'text' && typeof c.text === 'string'));

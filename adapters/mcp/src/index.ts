@@ -6,7 +6,7 @@ import { PASSAGE_RULES, METADATA_EXT } from './parse.ts';
 import { coreRisk, createMcpServerChannel, type McpServerChannelOptions } from './server.ts';
 import { createMcpTools, TOOL_EXT, TOOL_RULES, type McpToolsOptions } from './tools.ts';
 
-export { APPROVAL_META, SESSION_META } from './server.ts';
+export { APPROVAL_META, BOUNDS_META, SESSION_META } from './server.ts';
 export { createMcpKnowledge, createMcpServerChannel, createMcpTools, type McpKnowledgeOptions, type McpServerChannelOptions, type McpToolsOptions };
 export { McpClient, McpSession, MCP_PROTOCOL_VERSION, type McpCallResult, type McpToolInfo } from './client.ts';
 export { hashId, matchesFilter, METADATA_EXT, PASSAGE_RULES, parseMcpResult, toPassage } from './parse.ts';

@@ -1,4 +1,4 @@
-import { ANONYMOUS, anySignal, timeoutSignal, type AccessQuestion, type PublicCaller } from '@agent-layers/core';
+import { ANONYMOUS, anySignal, timeoutSignal, type AccessQuestion, type Actor, type PublicCaller } from '@agent-layers/core';
 
 /** Failure to reach or understand the policy decision point. The stack turns it into a deny. */
 export class PdpError extends Error {
@@ -90,11 +90,13 @@ const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is
  */
 export function publicQuestion(q: AccessQuestion, includeArgs: boolean): AccessQuestion {
   const c = (isObject(q?.caller) ? q.caller : {}) as Partial<PublicCaller> & Record<string, unknown>;
+  const actors = actorsOf(c.actors);
   const known = (c.kind === 'user' || c.kind === 'agent') && typeof c.id === 'string' && c.id !== '';
   const caller: AccessQuestion['caller'] = known
     ? {
       id: c.id!, kind: c.kind!, roles: strings(c.roles), scopes: strings(c.scopes),
       ...(typeof c.name === 'string' ? { name: c.name } : {}),
+      ...(actors.length ? { actors } : {}),
       ...(isObject(c.ext) ? { ext: structuredClone(c.ext) } : {}),
     }
     : { ...ANONYMOUS, roles: [], scopes: [] };
@@ -107,23 +109,41 @@ export function publicQuestion(q: AccessQuestion, includeArgs: boolean): AccessQ
   };
 }
 
+/** The well-formed entries of a delegation chain (`id` and kind `user` or `agent`; name and issuer when strings). */
+function actorsOf(v: unknown): Actor[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((a): a is Record<string, unknown> => isObject(a) && typeof a.id === 'string' && a.id !== '' && (a.kind === 'user' || a.kind === 'agent'))
+    .map((a) => ({
+      id: a.id as string, kind: a.kind as Actor['kind'],
+      ...(typeof a.name === 'string' ? { name: a.name } : {}),
+      ...(typeof a.issuer === 'string' ? { issuer: a.issuer } : {}),
+    }));
+}
+
 /** AuthZEN access evaluation request of a question already made public. */
 export interface AuthzenRequest {
-  subject: { type: string; id: string; properties: { roles: string[]; scopes: string[]; authenticated: boolean } };
+  subject: { type: string; id: string; properties: { roles: string[]; scopes: string[]; authenticated: boolean; actors?: Actor[] } };
   action: { name: string };
   resource: { type: string; id: string; properties: Record<string, unknown> };
   context?: { args?: Record<string, unknown> };
 }
 
 /**
- * The AuthZEN wire of a public question. `authenticated` is true only for a user or agent caller. The fixed target
+ * The AuthZEN wire of a public question. `authenticated` is true only for a user or agent caller; the delegation
+ * chain, when there is one, is `subject.properties.actors` (first delegate first, the current actor last). The fixed target
  * fields (`risk`, `layer`, `agent`) are written after `attrs`, so an attribute can never override them.
  */
 export function authzenRequest(q: AccessQuestion): AuthzenRequest {
   const c = q.caller;
   const t = q.target;
   return {
-    subject: { type: c.kind, id: c.id, properties: { roles: [...c.roles], scopes: [...c.scopes], authenticated: c.kind === 'user' || c.kind === 'agent' } },
+    subject: {
+      type: c.kind, id: c.id,
+      properties: {
+        roles: [...c.roles], scopes: [...c.scopes], authenticated: c.kind === 'user' || c.kind === 'agent',
+        ...('actors' in c && c.actors?.length ? { actors: c.actors.map((a) => ({ ...a })) } : {}),
+      },
+    },
     action: { name: q.action },
     resource: { type: t.kind, id: t.id, properties: { ...t.attrs, risk: t.risk, layer: t.layer, agent: t.agent } },
     ...(q.args !== undefined ? { context: { args: q.args } } : {}),

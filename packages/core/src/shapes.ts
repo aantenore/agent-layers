@@ -23,9 +23,10 @@ const vocab = (v: VocabularyName): Field => ({ vocab: v });
 const usage = obj({ inputTokens: N, outputTokens: N }, ['inputTokens', 'outputTokens']);
 const part: Field = 'any';
 const message = obj({ role: vocab('role'), parts: list(part) }, ['role', 'parts']);
-const caller = obj({ id: S, kind: vocab('callerKind'), roles: list(S), scopes: list(S), name: S }, ['id', 'kind', 'roles', 'scopes']);
+const actor: Field = { object: { id: S, kind: vocab('callerKind'), name: S, issuer: S }, required: ['id', 'kind'] };
+const caller = obj({ id: S, kind: vocab('callerKind'), roles: list(S), scopes: list(S), name: S, actors: list(actor) }, ['id', 'kind', 'roles', 'scopes']);
 const question = obj({
-  caller: { object: { id: S, kind: S, roles: list(S), scopes: list(S), name: S, ext: 'ext' }, required: ['id', 'kind'] },
+  caller: { object: { id: S, kind: S, roles: list(S), scopes: list(S), name: S, actors: list(actor), ext: 'ext' }, required: ['id', 'kind'] },
   action: vocab('action'),
   target: { object: { kind: S, id: S, layer: vocab('layer'), risk: vocab('risk'), agent: S, attrs: 'attrs' }, required: ['kind', 'id', 'layer', 'risk', 'agent'] },
   args: 'any',

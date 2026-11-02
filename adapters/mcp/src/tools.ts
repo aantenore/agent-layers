@@ -1,11 +1,12 @@
 import {
-  createMappings, limitValue, matchesAny, withExt, type BoundCredentials, type Ext, type LimitValue, type Mappings, type MappingRule, type Risk, type TelemetryPort,
+  createMappings, limitValue, matchesAny, outboundBounds, withExt, type BoundCredentials, type Ext, type LimitValue, type Mappings, type MappingRule, type Risk, type TelemetryPort,
   type ToolPort, type ToolResult, type ToolSpec,
 } from '@agent-layers/core';
 import { bearer, McpSession } from './client.ts';
 import { interpolate } from './env.ts';
 import { CONNECTION_LIMITS, TOOLS_LIMITS } from './limits.ts';
 import { redact, redactStructured, scrubError, secretForms, staticSecrets } from './redact.ts';
+import { BOUNDS_META } from './server.ts';
 import { McpRpcError, type McpServerOptions } from './transport.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
@@ -120,8 +121,10 @@ export function createMcpTools(options: McpToolsOptions, deps: McpDeps = {}): To
       }
       // A server may echo request headers back; the token and static header secrets must not reach the model.
       const forms = token ? secretForms([token, ...staticSecrets(cfg.headers)], minSecretChars) : staticForms;
+      // The bounds of the run go with every call; a tool server is mostly not an agent, so nothing is refused or reserved here.
+      const bounds = outboundBounds(ctx, { budget: false, refuse: false })?.bounds;
       try {
-        const res = await session.run((c) => c.callTool(entry.mcpName, args, ctx.signal, headers), ctx.credentials);
+        const res = await session.run((c) => c.callTool(entry.mcpName, args, ctx.signal, headers, bounds ? { [BOUNDS_META]: bounds } : undefined), ctx.credentials);
         let text = redact(res.text, forms);
         let data: unknown;
         let ext: Ext | undefined;

@@ -89,7 +89,8 @@ test('readiness: unbounded gateway and adapter limits fail a production profile;
   };
   const prod = await readiness(resolveProfile(config, 'prod'), registry);
   assert.equal(prod.ok, true);
-  assert.deepEqual(prod.limits.map((l) => `${l.severity} ${l.path}`), ['warn layers.tools.t.options.timeoutMs']);
+  // The run budgets are unbounded by default: a warning on production, never a failure.
+  assert.deepEqual(prod.limits.map((l) => `${l.severity} ${l.path}`), ['warn limits.run.maxTokens', 'warn limits.run.maxCostUsd', 'warn layers.tools.t.options.timeoutMs']);
   const open = await readiness(resolveProfile(config, 'open'), registry);
   assert.equal(open.ok, false);
   assert.ok(open.limits.some((l) => l.severity === 'fail' && l.path === 'gateway.maxBodyBytes'));

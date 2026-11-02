@@ -11,7 +11,7 @@ export {
   parseConfig, readRawConfig, resolveProfile, validateConfig,
 } from './config.ts';
 export type {
-  AdapterRef, AgentConfig, AppendList, ConfiguredAdapter, GatewayConfig, LayersConfig, LayersOverlay, LimitsConfig, LoadOptions, PipelineConfig, ProfileConfig, ResolvedConfig, SessionsConfig, StackConfig,
+  AdapterRef, AgentConfig, AppendList, ConfiguredAdapter, GatewayConfig, LayersConfig, LayersOverlay, LimitsConfig, LoadOptions, ModelPrice, PipelineConfig, ProfileConfig, ResolvedConfig, SessionsConfig, StackConfig,
 } from './config.ts';
 export { readiness, type Readiness, type ReadinessProblem } from './readiness.ts';
 export { diffProfiles, formatDiff, type DiffRow, type DiffStatus } from './diff.ts';
@@ -49,4 +49,9 @@ export {
   UNBOUNDED, anySignal, coerceLimits, defineLimits, formatSafeRange, limitFindings, limitList, limitProblem, limitProperties, limitSchema, limitValue, timeoutSignal, validateLimits,
   type LimitFinding, type LimitSeverity, type LimitSpec, type LimitUnit, type LimitValue, type Unbounded,
 } from './limits.ts';
-export { CHECK_LIMITS, GATEWAY_LIMITS, LANGUAGE_LIMITS, PIPELINE_LIMITS, STACK_LIMITS } from './stack-limits.ts';
+export { CHECK_LIMITS, DELEGATION_LIMITS, GATEWAY_LIMITS, LANGUAGE_LIMITS, PIPELINE_LIMITS, RUN_LIMITS, STACK_LIMITS } from './stack-limits.ts';
+export {
+  BOUNDS_STOP, MAX_TIMER_MS, RunLedger, boundsStop, deadlineSignal, delegationProblems, ledgerOf, outboundBounds, priceOf, runLimits, startRun,
+  tighterDelegation, verifiedHops,
+  type OutboundCall, type OutboundOptions, type Reservation, type RunLimits, type RunStart,
+} from './bounds.ts';

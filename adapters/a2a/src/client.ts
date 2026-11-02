@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
-  activeTrace, anySignal, ATTR, defineLimits, isAbort, limitValue, messageText, noMappings, timeoutSignal,
-  type CallContext, type LimitValue, type Mappings, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason,
+  activeTrace, anySignal, ATTR, BoundsExceeded, defineLimits, isAbort, limitValue, messageText, noMappings, outboundBounds, timeoutSignal,
+  type CallContext, type LimitValue, type Mappings, type OutboundCall, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason, type Usage,
 } from '@agent-layers/core';
-import { A2A_VERSION, INTERRUPTED, LEGACY_VERSION, messageWire, METHOD_OF, METHODS, readResult, TERMINAL, type TaskState, type WireVersion } from './wire.ts';
+import {
+  A2A_VERSION, BOUNDS_URI, INTERRUPTED, LEGACY_VERSION, messageWire, METHOD_OF, METHODS, readResult, TERMINAL, type TaskState, type WireVersion,
+} from './wire.ts';
 
 /** Options of the outbound descriptor: a remote A2A agent as the stack's runtime. */
 export interface A2ARuntimeOptions {
@@ -27,6 +29,12 @@ export interface A2ARuntimeOptions {
   pollMs?: number;
   /** Time limit of the CancelTask call sent when a run is aborted or times out (default 5000). */
   cancelTimeoutMs?: number;
+  /**
+   * A2A extensions requested from the remote agent. Default: the bounds extension (`BOUNDS_URI`), whose data carries
+   * what is left of the run's time, hops and budget; the agent-plexus URI sends the same data under that URI; `[]`
+   * sends none.
+   */
+  extensions?: string[];
 }
 
 /** Configurable limits of the outbound descriptor; see docs/limits.md. */
@@ -83,6 +91,7 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
   const timeoutMs = limitValue(RUNTIME_LIMITS.timeoutMs, options.timeoutMs);
   const pollMs = limitValue(RUNTIME_LIMITS.pollMs, options.pollMs);
   const cancelTimeoutMs = limitValue(RUNTIME_LIMITS.cancelTimeoutMs, options.cancelTimeoutMs);
+  const boundsUri = (options.extensions ?? [BOUNDS_URI])[0];
   const cancelMethod = Object.keys(METHODS).find((m) => METHODS[m]!.op === 'cancel' && METHODS[m]!.version === version)!;
   let endpoint: Promise<string> | undefined;
   // Origins the operator configured: only these may be private or loopback targets.
@@ -122,12 +131,13 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
   return {
     name,
     bind(stack: Stack, agent) {
-      async function headers(ctx: CallContext): Promise<Record<string, string>> {
+      async function headers(ctx: CallContext, extensions = false): Promise<Record<string, string>> {
         // The remote agent joins the run's trace: the active span's context, else the one the run started with.
         const trace = activeTrace(stack.telemetry, ctx.trace);
         const out: Record<string, string> = {
           'content-type': 'application/json', accept: 'application/json', 'a2a-version': version, ...options.headers,
           ...(trace ? { traceparent: trace.parent, ...(trace.state ? { tracestate: trace.state } : {}) } : {}),
+          ...(extensions && boundsUri ? { 'a2a-extensions': boundsUri } : {}),
         };
         if (options.auth) {
           const provider = stack.ports.credentials;
@@ -140,11 +150,11 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
         return out;
       }
 
-      async function call(method: string, params: unknown, ctx: CallContext, signal: AbortSignal): Promise<unknown> {
+      async function call(method: string, params: unknown, ctx: CallContext, signal: AbortSignal, extensions = false): Promise<unknown> {
         endpoint ??= resolveEndpoint(signal).catch((err: unknown) => { endpoint = undefined; throw err; });
         // The target is validated before any credential is minted for it; redirects are not followed.
         const target = await endpoint;
-        const res = await fetch(target, { method: 'POST', headers: await headers(ctx), body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params }), signal, redirect: 'error' });
+        const res = await fetch(target, { method: 'POST', headers: await headers(ctx, extensions), body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params }), signal, redirect: 'error' });
         // The body is not read on errors: it could echo the token.
         if (!res.ok) throw new Error(`A2A HTTP ${res.status}`);
         const body = await res.json() as { result?: unknown; error?: { code?: number } };
@@ -165,15 +175,28 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
         name: agent.name,
         async run(input, init = {}) {
           const ctx = stack.context({ ...init, agent: agent.name });
-          const signal = anySignal(timeoutSignal(timeoutMs), ctx.signal) ?? new AbortController().signal;
           const by = agent.name;
           const ended = (reason: Omit<StopReason, 'layer' | 'by'>, status: RunResult['status'] = 'failed'): RunResult =>
             ({ runId: ctx.runId, status, output: '', reason: { ...reason, layer: 'harness', by } });
+          // What is left of the run's bounds goes to the remote agent; a call that would break them is refused here,
+          // without a network call. The run's signal already aborts at its deadline; this adapter's own limit caps it.
+          let outbound: OutboundCall | undefined;
+          try {
+            outbound = boundsUri ? outboundBounds(ctx, { timeoutMs }) : undefined;
+          } catch (err) {
+            if (err instanceof BoundsExceeded) return { runId: ctx.runId, status: 'stopped', output: '', reason: { ...err.stopReason } };
+            throw err;
+          }
+          const signal = anySignal(timeoutSignal(timeoutMs), ctx.signal) ?? new AbortController().signal;
+          let reported: { usage?: Usage; costUsd?: number } | undefined;
           return stack.telemetry.span('a2a.send', { [ATTR.layer]: 'harness', [ATTR.name]: agent.name, [ATTR.runId]: ctx.runId, 'a2a.version': version }, async (span) => {
             let taskId: string | undefined;
-            const message = messageWire({ messageId: randomUUID(), role: 'user', text: inputText(input), ...(ctx.sessionId ? { contextId: ctx.sessionId } : {}) }, version);
+            const message = messageWire({
+              messageId: randomUUID(), role: 'user', text: inputText(input), ...(ctx.sessionId ? { contextId: ctx.sessionId } : {}),
+              ...(outbound && boundsUri ? { extensions: [boundsUri], metadata: { [boundsUri]: outbound.bounds } } : {}),
+            }, version);
             try {
-              let read = readResult(await call(METHOD_OF[version].send, { message }, ctx, signal));
+              let read = readResult(await call(METHOD_OF[version].send, { message }, ctx, signal, !!outbound));
               if (read.message !== undefined) return mappings.in(read.raw, { runId: ctx.runId, status: 'completed', output: read.message } satisfies RunResult);
               while (read.task && !TERMINAL.includes(read.task.state) && !INTERRUPTED.includes(read.task.state)) {
                 taskId = read.task.id;
@@ -184,16 +207,20 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
               taskId = undefined;
               if (!read.task) return ended({ code: 'error', detail: 'remote agent sent no task' });
               const task = read.task;
+              const m = task.metadata;
+              reported = { ...(m?.usage ? { usage: m.usage } : {}), ...(m?.costUsd !== undefined ? { costUsd: m.costUsd } : {}) };
               span.setAttributes({ 'a2a.task.state': task.native ?? task.state });
               const s = runStatus(task.state);
+              // A remote run its own bounds stopped says which one, so a chain can tell "too deep" from "out of budget".
+              const code = s.status === 'stopped' && m?.stop ? m.stop : s.code;
               const result: RunResult = {
                 runId: ctx.runId,
                 status: s.status,
                 // A failed or stopped task's text is the remote side's own wording: it stays out of the output.
                 output: s.status === 'completed' || s.status === 'waiting' ? task.text : '',
-                ...(s.code ? { reason: { code: s.code, layer: 'harness', by } } : {}),
-                ...(task.metadata?.usage ? { usage: task.metadata.usage } : {}),
-                ...(task.metadata?.costUsd !== undefined ? { costUsd: task.metadata.costUsd } : {}),
+                ...(code ? { reason: { code, layer: 'harness', by } } : {}),
+                ...(reported.usage ? { usage: reported.usage } : {}),
+                ...(reported.costUsd !== undefined ? { costUsd: reported.costUsd } : {}),
                 // A state this adapter does not know is a failure; the native value is kept for the operator.
                 ...(task.native !== undefined ? { ext: { 'a2a.state': task.native } } : {}),
               };
@@ -204,6 +231,9 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
               if (ctx.signal?.aborted) return ended({ code: 'aborted' }, 'stopped');
               // A fixed detail: error text can carry URLs or credentials.
               return isAbort(err) ? ended({ code: 'timeout', detail: 'remote agent timed out' }) : ended({ code: 'error', detail: RUN_FAILED });
+            } finally {
+              // Settled with what the remote run reported; an unreported spend keeps its whole reservation.
+              outbound?.reservation.settle(reported);
             }
           });
         },

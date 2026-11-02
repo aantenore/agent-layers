@@ -78,6 +78,65 @@ describe('token exchange (on-behalf-of)', () => {
     }
   });
 
+  test('actor "self" sends the stack\'s own token as actor_token; without it none is sent', async () => {
+    const s = await tokenServer((f, n) => ({ access_token: f.get('grant_type') === 'client_credentials' ? `own-${n}` : `tok-${n}`, token_type: 'Bearer', expires_in: 300 }));
+    try {
+      const a = alice();
+      const plain = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of' }));
+      await plain.token('tools-api', { caller: a });
+      assert.equal(s.forms.length, 1);
+      assert.equal(s.forms[0]!.has('actor_token'), false);
+      assert.equal(s.forms[0]!.has('actor_token_type'), false);
+
+      const c = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of', actor: 'self' }));
+      assert.equal(await c.token('tools-api', { caller: a }), 'tok-3');
+      assert.deepEqual(Object.fromEntries(s.forms[1]!), { grant_type: 'client_credentials' }, 'the own token comes from client_credentials');
+      assert.deepEqual(Object.fromEntries(s.forms[2]!), {
+        grant_type: TOKEN_EXCHANGE_GRANT, subject_token: a.credential, subject_token_type: ACCESS_TOKEN_TYPE, requested_token_type: ACCESS_TOKEN_TYPE,
+        audience: 'tools-api', actor_token: 'own-2', actor_token_type: ACCESS_TOKEN_TYPE,
+      });
+      assert.equal(await c.token('tools-api', { caller: a }), 'tok-3', 'cached');
+      await c.token('other-api', { caller: a });
+      assert.equal(s.forms.filter((f) => f.get('grant_type') === 'client_credentials').length, 1, 'the own token is cached and reused across audiences');
+      assert.equal(s.forms.length, 4);
+    } finally {
+      await s.close();
+    }
+  });
+
+  test('exchanged tokens with and without actor never share a cache entry; the actor option is validated', async () => {
+    const s = await tokenServer();
+    try {
+      const a = alice();
+      const withActor = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of', actor: 'self' }));
+      const without = createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of' }));
+      await withActor.token('tools-api', { caller: a });
+      const before = s.forms.length;
+      await without.token('tools-api', { caller: a });
+      assert.equal(s.forms.length, before + 1, 'another instance never reuses it; keys differ by actor');
+      assert.equal(s.forms.at(-1)!.has('actor_token'), false);
+    } finally {
+      await s.close();
+    }
+    assert.throws(() => createOidcCredentials(base('https://idp.example.com/token', { actor: 'self' })), /needs mode "on-behalf-of"/);
+    assert.throws(() => createOidcCredentials(base('https://idp.example.com/token', { mode: 'on-behalf-of', actor: 'other' as 'self' })), /"actor" must be "self"/);
+  });
+
+  test('a failing own-token request fails the exchange without leaking tokens', async () => {
+    const s = await tokenServer((f) => (f.get('grant_type') === 'client_credentials' ? [400, { error: 'invalid_client' }] : { access_token: 'tok', token_type: 'Bearer', expires_in: 300 }));
+    try {
+      const a = alice();
+      await assert.rejects(createOidcCredentials(base(s.endpoint, { mode: 'on-behalf-of', actor: 'self' })).token('tools-api', { caller: a }), (err: Error) => {
+        assert.match(err.message, /client credentials/);
+        assert.ok(!err.message.includes(a.credential!) && !err.message.includes('s3cret'), err.message);
+        return true;
+      });
+      assert.equal(s.forms.some((f) => f.get('grant_type') === TOKEN_EXCHANGE_GRANT), false, 'no exchange without the actor token');
+    } finally {
+      await s.close();
+    }
+  });
+
   test('without a caller token there is no token, never the agent\'s own', async () => {
     const s = await tokenServer();
     try {

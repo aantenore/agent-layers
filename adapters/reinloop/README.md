@@ -68,7 +68,7 @@ model request.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `budget` | object | `{ maxTurns: 50 }` | `maxTurns`, `maxToolCalls`, `maxInputTokens`, `maxOutputTokens`, `maxTotalTokens`, `maxCostUsd`, `maxDurationMs`; the ones not listed have no limit |
+| `budget` | object | `{ maxTurns: 50 }` (extra limits on top of the stack's `limits.run`; the first reached stops the run) | `maxTurns`, `maxToolCalls`, `maxInputTokens`, `maxOutputTokens`, `maxTotalTokens`, `maxCostUsd`, `maxDurationMs`; the ones not listed have no limit |
 | `compaction` | object | none | `strategy` (`window` or `summarize`), `thresholdTokens` (required), `keepFirst`, `keepLast`, `maxTokens`, `prompt` |
 | `pricing` | object | built-in table | Per model id: `inputPerMTok`, `outputPerMTok`, `cacheReadPerMTok` (USD per million tokens) |
 | `tools` | object | reinloop defaults | `concurrency` (8), `timeoutMs` (none), `maxResultChars` (32000) |

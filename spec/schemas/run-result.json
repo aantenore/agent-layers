@@ -27,6 +27,12 @@
   "then": { "required": ["reason"] },
   "examples": [
     {
+      "runId": "run_02",
+      "status": "stopped",
+      "output": "",
+      "reason": { "code": "hop_limit", "layer": "harness", "by": "sdk.hops" }
+    },
+    {
       "runId": "run_01",
       "status": "stopped",
       "output": "",

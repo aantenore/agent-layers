@@ -4,7 +4,7 @@ Every port has its own semantic version, `MAJOR.MINOR.PATCH`. The versions are l
 
 ## Language version
 
-The data that crosses ports is one language, described in [language.md](language.md) and versioned as a whole. It is at 1.0: every port moved to `1.0.0` together. From there each port keeps its own semver, as below.
+The data that crosses ports is one language, described in [language.md](language.md) and versioned as a whole. It is at 1.1: every port moved to `1.0.0` together at 1.0, and 1.1 added optional fields only ([ADR 0002](../docs/decisions/0002-delegation-bounds.md)), so the ports whose shapes gained them took a minor version. From there each port keeps its own semver, as below.
 
 ## What changes the version
 

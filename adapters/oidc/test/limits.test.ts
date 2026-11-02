@@ -102,10 +102,10 @@ test('credential limits: maxCacheEntries and defaultTtlSec take effect', async (
 
 test('limits from ${env:...} are coerced; out-of-range values are rejected', async () => {
   const registry = new AdapterRegistry().register(identityAdapter).register(credentialAdapter);
-  await registry.create('IdentityPort', 'oidc', { ...identityOptions, timeoutMs: '2500', jwksMinRefreshMs: '5000', maxResponseBytes: '2000000' }, ctx);
+  await registry.create('IdentityPort', 'oidc', { ...identityOptions, timeoutMs: '2500', jwksMinRefreshMs: '5000', maxResponseBytes: '2000000', maxActors: '3' }, ctx);
   await registry.create('CredentialPort', 'oidc', { ...credentialOptions, timeoutMs: '2500', maxCacheEntries: '10', refreshSkewSec: '5' }, ctx);
   for (const bad of [{ jwksMinRefreshMs: 0 }, { jwksMaxAgeMs: 0 }, { jwksMinRefreshMs: 'unbounded' }, { jwksMaxAgeMs: 'unbounded' }, { clockSkewSec: -1 }, { clockSkewSec: 601 },
-    { maxKeyTries: 0 }, { maxKeyTries: 'unbounded' }, { timeoutMs: 0 }, { maxTokenChars: 0 }, { maxResponseBytes: -1 }, { errorDescriptionChars: -1 }, { errorDescriptionChars: 'unbounded' }]) {
+    { maxKeyTries: 0 }, { maxKeyTries: 'unbounded' }, { maxActors: 0 }, { maxActors: 101 }, { maxActors: 'unbounded' }, { timeoutMs: 0 }, { maxTokenChars: 0 }, { maxResponseBytes: -1 }, { errorDescriptionChars: -1 }, { errorDescriptionChars: 'unbounded' }]) {
     await assert.rejects(registry.create('IdentityPort', 'oidc', { ...identityOptions, ...bad }, ctx), new RegExp(Object.keys(bad)[0]!), JSON.stringify(bad));
   }
   for (const bad of [{ maxCacheEntries: 0 }, { defaultTtlSec: 0 }, { defaultTtlSec: 'unbounded' }, { refreshSkewSec: -1 }, { refreshSkewSec: 'unbounded' }, { timeoutMs: 0 }, { maxResponseBytes: 0 }]) {

@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { inboundFetch } from '@agent-layers/conformance';
-import type { CallContext, ChannelHost, ToolPort } from '@agent-layers/core';
-import { createMcpServerChannel } from '../src/index.ts';
+import type { CallContext, ChannelHost, InboundContext, ToolPort } from '@agent-layers/core';
+import { BOUNDS_META, createMcpServerChannel } from '../src/index.ts';
 
 const calls: CallContext[] = [];
 const tools: ToolPort = {
@@ -47,5 +47,37 @@ test('tools/list serves params as inputSchema and risk as hints; tools/call maps
   // Another caller cannot use the session.
   const other = await rpc(mount, { jsonrpc: '2.0', id: 5, method: 'tools/list' }, { id: 'u-2', kind: 'user', roles: [], scopes: [], credential: 'x' }, session);
   assert.equal(other.res.status, 404);
+  await mount.close?.();
+});
+
+test('tools/call reads params._meta bounds, combines them with the gateway delegation, and refuses invalid ones', async () => {
+  const mount = await createMcpServerChannel().mount!(host);
+  const call = (meta: unknown, ctx: Partial<InboundContext> = {}) => inboundFetch(mount, new Request('http://gw.test/mcp', {
+    method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/call', 'mcp-name': 'look' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'look', arguments: { q: 'x' }, _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', ...(meta === undefined ? {} : { [BOUNDS_META]: meta }) } } }),
+  }), ctx).then((r) => r.json() as Promise<any>);
+  const sent = { remainingMs: 30_000, hops: 1, maxHops: 3, tokens: 500, costUsd: 0.2, rootRunId: 'run-a', parentRunId: 'run-b', unknown: 'dropped' };
+  const { unknown: _, ...clean } = sent;
+
+  assert.equal(BOUNDS_META, 'agent-layers/bounds');
+  assert.equal((await call(sent)).result.isError, false);
+  assert.deepEqual(calls.at(-1)!.delegation, clean);
+
+  const gateway = { remainingMs: 10_000, hops: 2, maxHops: 5 };
+  await call(sent, { delegation: gateway });
+  assert.deepEqual(calls.at(-1)!.delegation, { remainingMs: 10_000, hops: 2, maxHops: 3, tokens: 500, costUsd: 0.2, rootRunId: 'run-a', parentRunId: 'run-b' });
+
+  await call(undefined, { delegation: gateway });
+  assert.deepEqual(calls.at(-1)!.delegation, gateway, 'the gateway delegation alone is passed on');
+  await call(undefined);
+  assert.equal(calls.at(-1)!.delegation, undefined);
+
+  const before = calls.length;
+  for (const bad of [{ remainingMs: -1, hops: 0, maxHops: 1 }, { remainingMs: 1, hops: 0 }, 'soon', [1], { remainingMs: 1.5, hops: 0, maxHops: 1 }]) {
+    const out = await call(bad);
+    assert.equal(out.error?.code, -32602, JSON.stringify(bad));
+    assert.match(out.error.message, /agent-layers\/bounds/);
+  }
+  assert.equal(calls.length, before, 'an invalid carrier runs nothing');
   await mount.close?.();
 });

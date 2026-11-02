@@ -68,6 +68,53 @@ Every package moves to 0.3.0 together: adapters of this release use core exports
   runtime keeps the earlier checks; `checkAdapter` reads the descriptor, `conformance` the `portVersion` fixture); `checkChannel` with a `sendMount` fixture checks that the caller
   reaches the host, that `waiting` and `stopped` runs show as the fixture expects, and with `sessions` that a session
   reaches the host as one `sessionId` (`@agent-layers/conformance`).
+- Delegation chain and run bounds ([0002](docs/decisions/0002-delegation-bounds.md)). `Caller.actors` is the verified
+  chain of agents that acted for a caller (first delegate first, the current actor last). Every run gets
+  `CallContext.bounds` (deadline, token and cost budget, hop count) from `limits.run` and from what a calling agent sent
+  (`CallContext.delegation`), which can only tighten them; the host refuses a run over the hop limit (new core stop
+  code `hop_limit`) or with too little time, arms an abort at the deadline, and fills `usage` and `costUsd` from the
+  run's ledger when the runtime reports none. The governed model refuses a call once the deadline has passed or the
+  budget is spent (`BoundsExceeded`, `timeout` or `limit`) and debits each reply, priced with the new
+  `pipeline.pricing`; the governed tools refuse a call after the deadline. `outboundBounds(ctx)` gives an adapter what
+  to send to the next agent (time left minus a margin, hops plus one, a reservation of the budget, the lineage) and
+  refuses locally over the hop limit. New limits `limits.run.timeoutMs` (300000), `limits.run.maxHops` (4),
+  `limits.run.maxTokens`, `limits.run.maxCostUsd` (unbounded, a production warning), `limits.delegation.marginMs`,
+  `limits.delegation.minRemainingMs` (1000) and the setting `limits.delegation.inbound` (`tighten` or `ignore`); telemetry
+  `agent.run.hops`, `agent.run.max_hops`, `agent.run.deadline_ms`, `agent.run.root`, `agent.run.parent`,
+  `agent.caller.actors` and the metric `agent.bounds.stops` ([docs/limits.md](docs/limits.md#limits),
+  [harness](docs/layers/harness.md#run-bounds), `@agent-layers/core`).
+- The A2A bounds extension ([spec/extensions/bounds-v1.md](spec/extensions/bounds-v1.md), URI
+  `https://github.com/aantenore/agent-layers/blob/main/spec/extensions/bounds-v1.md`, the agent-plexus URI accepted as
+  an alias). `a2a` channel: declared in the cards (`capabilities.extensions`, option `extensions`), activated by the
+  `A2A-Extensions` header or `message.extensions`, data validated (`-32602` when malformed) and passed to the host;
+  the task reports `usage`, `costUsd` and a bounds `stop` under the URI, next to `metadata["agent-layers"]`, which
+  stays. `a2a` runtime: sends what is left of the run's bounds on every message (option `extensions`), refuses locally
+  over the hop limit, settles its reservation with the remote report, and maps a remote bounds stop to its code.
+- Gateway: `Agent-Bounds` and `Agent-Lineage` request headers (RFC 9651 dictionaries, bounded by
+  `gateway.maxTraceChars`, 400 when malformed) become `InboundContext.delegation`; `openai-compatible` and `mcp` pass it
+  to the run. MCP: `params._meta["agent-layers/bounds"]` is read on `tools/call` and sent on every outbound tool call
+  (time and hops only) ([docs/gateway.md](docs/gateway.md)).
+- `oidc`: the RFC 8693 `act` claim becomes `Caller.actors` (nesting reversed, at most `maxActors`, default 10; a
+  malformed chain rejects the token), `may_act` is kept in `ext["oidc.may_act"]`; credentials option `actor: "self"`
+  sends the stack's own token as `actor_token` on token exchange.
+- Policy rules (stack `policy` and `rules-authorization`): `when.actor` (the current actor's id, globs), `when.actors`
+  (any actor of the chain) and `when.delegated`. `opa` passes `input.caller.actors`; `authzen` sends
+  `subject.properties.actors`.
+- Conformance: `checkRuntime` checks, for RuntimePort 1.2.0, that the run's bounds reach every model and tool call and
+  that a refused model call ends the run `stopped` with `limit`; `checkChannel` with a `sendBounds` fixture checks, for
+  ChannelPort 1.1.0, that a caller's bounds reach the host never looser and that a run over the hop limit shows as
+  stopped (`@agent-layers/conformance`).
+### Changed
+
+- SDK language 1.0 → 1.1 and port minors: ModelPort, RouterPort, ToolPort, KnowledgePort, IdentityPort,
+  AuthorizationPort and ChannelPort 1.1.0, RuntimePort 1.2.0 ([0002](docs/decisions/0002-delegation-bounds.md)).
+  Additive for the SDK, but breaking for strict validators of the published schemas: `common.json` `PublicCaller`
+  (and so `caller.json`, `access-question.json`, `guard-check.json`) gains `actors`, `common.json` gains `Actor`,
+  `Bounds`, `Lineage` and `Delegation`, the stop code `hop_limit` appears in `run-result.json`, and
+  `stack-config.json` gains `limits.run`, `limits.delegation`, `pipeline.pricing` and the policy conditions `actor`,
+  `actors`, `delegated`. A validator pinned to the old schemas with `additionalProperties: false` rejects them.
+- Every run now has a deadline (`limits.run.timeoutMs`, 5 minutes by default) and a hop limit (4); a caller of kind
+  `agent` counts as one hop. `basic-runtime` `maxTurns` and `reinloop` `budget` stay as extra limits.
 
 ### Fixed
 

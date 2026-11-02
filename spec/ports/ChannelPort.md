@@ -1,6 +1,6 @@
 # ChannelPort
 
-Layer: `interface` (L8 Interfaces, channels & triggers) · Version: 1.0.0 · Conformance: `checkChannel`
+Layer: `interface` (L8 Interfaces, channels & triggers) · Version: 1.1.0 · Conformance: `checkChannel`
 
 ## Purpose
 
@@ -50,6 +50,7 @@ one address, with authentication, limits and access logs in one place.
 | `signal` | Signal | Aborted when the client goes away or the host's time limit expires. |
 | `origin` | String | Public `scheme://host:port` of the host, for absolute URLs. |
 | `trace?` | `{parent: String, state?: String}` | Trace context the request carried, copied unchanged. Pass it on as `CallContext.trace`. |
+| `delegation?` | [Delegation](../schemas/common.json) | Since 1.1.0. Run bounds a calling agent sent in the host's own carrier (the gateway's `Agent-Bounds` and `Agent-Lineage` headers), parsed and validated. Pass it on as `CallContext.delegation`. |
 
 `ChannelHandle`:
 
@@ -68,6 +69,7 @@ The channel moves the shapes of the runtime: input in, [RunResult](../schemas/ru
 - Caller on mounted routes: the host verifies the credential before the route runs and passes the caller in `ctx.caller`; the route passes it on as `caller` in every `run`, `stream`, model and tool call. A route never verifies a second time and never replaces the caller with another one.
 - Caller on `serve`: when the host has `verify`, the channel verifies the credential it received and passes the resulting caller in `ctx.caller` on `run`. A credential that fails verification is rejected before any agent runs. A channel never invents a caller, and the raw `credential` never leaves the context.
 - Trace: a channel copies the trace context of the request into `ctx.trace` and back into responses unchanged; it never parses it. The format belongs to the telemetry adapter.
+- Run bounds (since 1.1.0): a channel passes `ctx.delegation` on to `run` / `stream` as `CallContext.delegation`. A channel whose protocol carries bounds itself (the A2A [bounds extension](../extensions/bounds-v1.md), MCP `params._meta["agent-layers/bounds"]`) validates them, refuses malformed ones with the protocol's invalid-request error, and passes the tighter of the two (`tighterDelegation`). It never loosens them, and never turns them into `Caller.actors`: those come from the credential. The host computes the run's bounds, and refuses a run over the hop limit with a `stopped` result (`hop_limit`), which the channel shows like any other stopped run.
 - The status and `reason` of a run reach the client: a `stopped`, `failed` or `waiting` result is shown as such. How `reason.code` maps to the standard's own states (for example `guard_block` to a rejected task) is the adapter's; the guard name and stage stay inside.
 - Streaming is optional. A channel that streams uses `host.stream` when present and falls back to `host.run`.
 - A channel must only call agents listed by `host.agents()`.
@@ -93,10 +95,12 @@ The channel moves the shapes of the runtime: input in, [RunResult](../schemas/ru
 - `mount`, when present, resolves to at least one route with a path starting with `/`, a `handle` function and upper-case methods.
 - When an exercise fixture is given (for `serve` or for `mount`): after driving the channel, the host received the expected input. Otherwise this part is skipped.
 - When a `sendMount` fixture is given (the fake host ends a run, or a call of its tool, `completed`, `waiting` for an approval or `stopped` by a guard, as the text asks): the verified caller reaches the host; the client can tell a `waiting` run from a completed one, and sees the states the fixture expects; with `sessions`, a session given twice reaches the host as the same `sessionId` and two sessions as two. Otherwise this part is skipped.
+- For a channel declaring 1.1.0 or later, when a `sendBounds` fixture is given (the text sent with bounds in the channel's own carrier): the bounds reach the host as `CallContext.delegation`, never looser than sent, lineage included; bounds over the hop limit (the fake host refuses them as the stack does) show as `expectStates.stopped`. Otherwise this part is skipped.
 - `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.1.0 — run bounds ([0002](../../docs/decisions/0002-delegation-bounds.md)): `InboundContext.delegation` (the gateway's `Agent-Bounds` and `Agent-Lineage` headers), passed on as `CallContext.delegation`; a channel whose protocol carries bounds (A2A bounds extension, MCP `_meta`) validates them and passes the tighter of the two; conformance checks bounds with a `sendBounds` fixture
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `InboundContext.caller` (was `identity`); `trace` copied unchanged; `ChannelHost.verify` returns a `Caller`; the host takes and returns language shapes
 - 0.1.0 — initial
 - 0.2.0 — `serve` is optional; `mount` adds routes to a host server; the host offers `model` and `tools`

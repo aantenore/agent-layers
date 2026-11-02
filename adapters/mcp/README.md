@@ -61,6 +61,10 @@ on the production tier. Ranges and checks: [docs/limits.md](../../docs/limits.md
 
 `${env:NAME}` and `${env:NAME:-default}` in the options are resolved when the instance is created.
 
+Inside a run, every `tools/call` carries the run's bounds in `params._meta["agent-layers/bounds"]` (time left minus the
+margin, hops plus one, max hops, lineage). A tool server is mostly not an agent, so the call is never refused locally
+and no budget is reserved; a server that is an agent refuses on its side.
+
 ```json
 {
   "layers": {
@@ -148,6 +152,10 @@ to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge
   so a repeated call finds its approval; a stateless request names its session in
   `params._meta["agent-layers/session"]` (key set by `sessionMetaKey`), scoped to the caller; an anonymous stateless
   request gets no session.
+- Run bounds: a `tools/call` may carry the calling agent's bounds in `params._meta["agent-layers/bounds"]` (the fields of
+  `Delegation`: `remainingMs`, `hops`, `maxHops`, optional `tokens`, `costUsd`, `rootRunId`, `parentRunId`). They are
+  combined with the gateway's `Agent-Bounds` by taking the tighter value of each field, and can only tighten the stack's
+  limits. Invalid bounds are refused with `-32602` and the tool does not run.
 - Sessions expire after `sessionTtlMs` idle and after `maxSessionAgeMs` in any case. They are capped per caller and in
   total: a caller over its cap loses its own least recently used session (calls running in it are aborted); a full
   server makes room by evicting the least recently used session of the authenticated caller that holds the most.

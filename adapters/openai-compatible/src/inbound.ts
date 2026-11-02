@@ -145,6 +145,7 @@ export function createOpenAICompatibleChannel(
       };
       const context = (ctx: InboundContext): CallContext => ({
         runId: randomUUID(), agent: name, signal: ctx.signal, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
+        ...(ctx.delegation ? { delegation: ctx.delegation } : {}),
       });
 
       const listModels: InboundRoute = {
@@ -204,6 +205,7 @@ export function createOpenAICompatibleChannel(
         const input = { messages: p.req.messages };
         const run = {
           runId: call.runId, signal: ctx.signal, ...(sessionId ? { sessionId } : {}), ...(ctx.caller ? { caller: ctx.caller } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
+          ...(ctx.delegation ? { delegation: ctx.delegation } : {}),
         };
         const headers: Record<string, string> = { 'x-agent-run-id': call.runId };
         const chunk = (delta: unknown, finish_reason: string | null) => ({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta, finish_reason, logprobs: null }] });

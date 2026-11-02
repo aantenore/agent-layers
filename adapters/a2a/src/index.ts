@@ -4,9 +4,14 @@ import { createA2AServerChannel, SERVER_LIMITS, type A2AServerOptions } from './
 
 export { isPrivateHost } from './client.ts';
 export { createA2ARuntime, createA2AServerChannel, RUNTIME_LIMITS, SERVER_LIMITS, type A2ARuntimeOptions, type A2AServerOptions };
-export { A2A_VERSION, LEGACY_VERSION, partsText, readResult, stateOf, type TaskState, type WireVersion } from './wire.ts';
+export {
+  A2A_VERSION, BOUNDS_ALIAS_URI, BOUNDS_URI, BOUNDS_URIS, LEGACY_VERSION, partsText, readResult, stateOf, type BoundsReport, type TaskState, type WireVersion,
+} from './wire.ts';
+import { BOUNDS_URIS } from './wire.ts';
 
 const strings = { type: 'array', items: { type: 'string', minLength: 1 } };
+/** Extensions this adapter implements: the bounds extension, under its URI or the agent-plexus alias. */
+const extensions = { type: 'array', items: { enum: [...BOUNDS_URIS] }, uniqueItems: true };
 
 /** Inbound: the stack's agents served over A2A, mounted by the gateway. */
 export const channelAdapter = defineAdapter<'ChannelPort', A2AServerOptions>({
@@ -32,6 +37,7 @@ export const channelAdapter = defineAdapter<'ChannelPort', A2AServerOptions>({
         required: ['organization', 'url'],
         additionalProperties: false,
       },
+      extensions,
       ...limitProperties(SERVER_LIMITS, {
         maxTasksPerCaller: 'Tasks kept per authenticated caller, and of all anonymous callers together',
         maxTasks: 'Tasks kept in total',
@@ -69,6 +75,7 @@ export const runtimeAdapter = defineAdapter<'RuntimePort', A2ARuntimeOptions>({
         additionalProperties: false,
       },
       headers: { type: 'object', additionalProperties: { type: 'string' } },
+      extensions: { ...extensions, maxItems: 1 },
       ...limitProperties(RUNTIME_LIMITS, {
         timeoutMs: 'Time limit of a whole run, polling included',
         pollMs: 'Interval between GetTask calls while a task is still working',

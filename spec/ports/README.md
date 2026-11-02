@@ -8,21 +8,21 @@ A port is the contract between the stack and one kind of backend. Every port has
 | --- | --- | --- | --- | --- |
 | Foundation | `infra` (L0) | [DeployPort](DeployPort.md) | 1.0.0 | Turn service specs into running endpoints |
 | Foundation | `infra` (L0) | [SecretPort](SecretPort.md) | 1.0.0 | Resolve secret references |
-| Model plane | `llm` (L1) | [ModelPort](ModelPort.md) | 1.0.0 | Model calls with tool calls, optionally streamed |
+| Model plane | `llm` (L1) | [ModelPort](ModelPort.md) | 1.1.0 | Model calls with tool calls, optionally streamed |
 | Model plane | `cache` (L2) | [CachePort](CachePort.md) | 1.0.0 | Key/value cache for model replies; usable by any layer |
-| Model plane | `cache` (L2) | [RouterPort](RouterPort.md) | 1.0.0 | Pick the model for a request |
-| Agent plane | `harness` (L3) | [RuntimePort](RuntimePort.md) | 1.1.0 | Bind an agent spec to a runnable agent |
+| Model plane | `cache` (L2) | [RouterPort](RouterPort.md) | 1.1.0 | Pick the model for a request |
+| Agent plane | `harness` (L3) | [RuntimePort](RuntimePort.md) | 1.2.0 | Bind an agent spec to a runnable agent |
 | Agent plane | `harness` (L3) | [StatePort](StatePort.md) | 1.0.0 | Session event log |
-| Agent plane | `knowledge` (L4) | [KnowledgePort](KnowledgePort.md) | 1.0.0 | Search a knowledge source, answer with passages |
+| Agent plane | `knowledge` (L4) | [KnowledgePort](KnowledgePort.md) | 1.1.0 | Search a knowledge source, answer with passages |
 | Agent plane | `knowledge` (L4) | [MemoryPort](MemoryPort.md) | 1.0.0 | Long-term memory: remember, recall, forget |
 | Agent plane | `knowledge` (L4) | [IngestionPort](IngestionPort.md) | 1.0.0 | Load, refresh and delete documents in a knowledge backend |
-| Agent plane | `tool` (L5) | [ToolPort](ToolPort.md) | 1.0.0 | List and call tools |
-| Control plane | `identity` (L6) | [IdentityPort](IdentityPort.md) | 1.0.0 | Verify inbound credentials into a caller |
+| Agent plane | `tool` (L5) | [ToolPort](ToolPort.md) | 1.1.0 | List and call tools |
+| Control plane | `identity` (L6) | [IdentityPort](IdentityPort.md) | 1.1.0 | Verify inbound credentials into a caller |
 | Control plane | `identity` (L6) | [CredentialPort](CredentialPort.md) | 1.0.0 | Outbound tokens, on behalf of a user or as the agent |
-| Control plane | `identity` (L6) | [AuthorizationPort](AuthorizationPort.md) | 1.0.0 | Decide whether an action is allowed |
+| Control plane | `identity` (L6) | [AuthorizationPort](AuthorizationPort.md) | 1.1.0 | Decide whether an action is allowed |
 | Control plane | `identity` (L6) | [ApprovalPort](ApprovalPort.md) | 1.1.0 | Human approval for actions the policy marks ask |
 | Control plane | `guardrail` (L7) | [GuardPort](GuardPort.md) | 1.0.0 | Allow, block or redact text at four stages |
-| Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 1.0.0 | Expose agents to people, apps and other agents |
+| Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 1.1.0 | Expose agents to people, apps and other agents |
 | Experience plane | `interface` (L8) | [TriggerPort](TriggerPort.md) | 1.1.0 | Start runs from events and schedules |
 | Insight plane | `telemetry` (L9) | [TelemetryPort](TelemetryPort.md) | 1.0.0 | Spans, events and metrics tagged with `agent.layer` |
 | Insight plane | `eval` (L10) | [EvaluatorPort](EvaluatorPort.md) | 1.0.0 | Score a run of a dataset case |
@@ -66,7 +66,7 @@ Every port instance may expose these members, whatever the port:
 | `native?() → Any` | Escape hatch for operations: the underlying client or technology-specific API, for features the port does not cover. |
 | `close?() → ()` | Release connections and flush buffers. Called once when the stack stops. |
 
-`CallContext` is passed to the ports that act inside a run (ModelPort, RouterPort, ToolPort):
+`CallContext` is passed to the ports that act inside a run (ModelPort, RouterPort, ToolPort, KnowledgePort through its query):
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -78,6 +78,14 @@ Every port instance may expose these members, whatever the port:
 | `telemetry?` | TelemetryPort | Where spans and events go. |
 | `credentials?` | BoundCredentials | `token(audience: String, scopes?: [String]) → String`: outbound tokens already bound to the caller of this run. |
 | `trace?` | `{parent: String, state?: String}` | Trace context of the request that started the run, when it carried one. Opaque to the core: the telemetry adapter that wrote the value owns its format, and channels copy it in and out unchanged. See [TelemetryPort](TelemetryPort.md). |
+| `bounds?` | [Bounds](../schemas/common.json) | Since 1.1. Deadline (`deadlineAt`), remaining budget (`tokens`, `costUsd`, `reserved`) and hop count (`hops`, `maxHops`) of the run, filled by the host when the run starts. A read view of the run's ledger: every copy of the context sees the same values, and the core debits them. Absent outside a run. |
+| `lineage?` | `{rootRunId: String, parentRunId: String}` | Since 1.1. Present when another agent's run started this one. |
+| `delegation?` | [Delegation](../schemas/common.json) | Since 1.1. Bounds a calling agent sent, as a channel received them (`remainingMs`, `hops`, `maxHops`, `tokens?`, `costUsd?`, `rootRunId?`, `parentRunId?`). Read by the host when the run starts, where it can only tighten the stack's limits; never in a run's context. |
+
+The run bounds are described in [0002](../../docs/decisions/0002-delegation-bounds.md) and [limits](../../docs/limits.md#limits): a
+run is refused before it starts over the hop limit (`hop_limit`) or with too little time (`timeout`), the governed
+model refuses a call once the deadline has passed or the budget is spent (`timeout`, `limit`), and an adapter that
+calls another agent sends what is left through `outboundBounds(ctx)`.
 
 ## Composition
 

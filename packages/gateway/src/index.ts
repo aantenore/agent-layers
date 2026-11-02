@@ -6,9 +6,11 @@ import {
   type Caller, type ChannelPort, type GatewayConfig, type TraceContext, type InboundContext, type InboundRoute, type Stack, type TelemetryPort,
   type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
+import { BoundsHeaderError, delegationOf } from './bounds.ts';
 import { BodyTooLarge, errorResponse, readBody, toRequest, writeResponse } from './http.ts';
 
 export { BodyTooLarge, errorResponse } from './http.ts';
+export { BoundsHeaderError, delegationOf, parseAgentBounds, parseAgentLineage } from './bounds.ts';
 
 /** A channel or trigger instance of the stack that the gateway mounts. Instances listed in `stack.ports.triggers` are triggers. */
 export type InboundAdapterInstance = ChannelPort | TriggerPort;
@@ -274,6 +276,14 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
       caller = auth.caller;
     }
     attrs['gateway.authenticated'] = !!caller;
+    // Bounds the caller sent: a malformed header is refused before the route runs (fail closed).
+    let delegation: InboundContext['delegation'];
+    try {
+      delegation = delegationOf(req.headers, maxTraceChars);
+    } catch (err) {
+      if (err instanceof BoundsHeaderError) return errorResponse(400, err.message, 'invalid_request_error');
+      throw err;
+    }
     let body: Buffer | undefined;
     try {
       body = await readBody(req, maxBodyBytes);
@@ -281,7 +291,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
       if (err instanceof BodyTooLarge) return errorResponse(413, `request body larger than ${maxBodyBytes} bytes`, 'invalid_request_error', { connection: 'close' });
       throw err;
     }
-    const ctx: InboundContext = { requestId, signal, origin, ...(caller ? { caller } : {}), ...(trace ? { trace } : {}) };
+    const ctx: InboundContext = { requestId, signal, origin, ...(caller ? { caller } : {}), ...(trace ? { trace } : {}), ...(delegation ? { delegation } : {}) };
     // A route that does not answer within the time limit (or before the client leaves) loses the exchange.
     const lost = untilAborted(signal);
     return Promise.race([lost, route.handle(toRequest(req, origin, body, signal), ctx)]);

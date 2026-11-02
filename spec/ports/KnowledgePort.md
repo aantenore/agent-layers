@@ -1,6 +1,6 @@
 # KnowledgePort
 
-Layer: `knowledge` (L4 Knowledge & memory) · Version: 1.0.0 · Conformance: `checkKnowledge`
+Layer: `knowledge` (L4 Knowledge & memory) · Version: 1.1.0 · Conformance: `checkKnowledge`
 
 ## Purpose
 
@@ -75,6 +75,7 @@ Boundary: read-only context retrieval belongs here. Anything with side effects i
 
 ## Version history
 
+- 1.1.0 — `KnowledgeQuery.caller` and the call context may carry `actors`, `bounds` and `lineage` ([0002](../../docs/decisions/0002-delegation-bounds.md)); no behaviour change for sources
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `KnowledgeQuery.text` and `caller`; `filter` on `attrs`; `Passage` has required `source`, `title`, `url`, `attrs` (replaces `metadata`); multi-source results are fused by reciprocal rank
 - 0.1.0 — initial
 

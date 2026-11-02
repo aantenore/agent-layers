@@ -1,6 +1,6 @@
 # IdentityPort
 
-Layer: `identity` (L6 Identity & access) · Version: 1.0.0 · Conformance: `checkIdentity`
+Layer: `identity` (L6 Identity & access) · Version: 1.1.0 · Conformance: `checkIdentity`
 
 ## Purpose
 
@@ -24,6 +24,7 @@ Boundary: this port answers "who is it". "What may they do" is [AuthorizationPor
 | `roles` | [String], required | Roles granted. An empty list, never absent. |
 | `scopes` | [String], required | Scopes granted. An empty list, never absent. |
 | `name?` | String | Display name. |
+| `actors?` | [[Actor](../schemas/common.json)] | Since 1.1.0. Agents that acted for this caller (`{id, kind, name?, issuer?}`), verified from the credential: first delegate first, the agent presenting the credential last. Absent or empty: no delegation known. |
 | `credential?` | String | The raw inbound credential, kept so the run can exchange it. Never serialised, logged or traced. Not part of the schema. |
 | `ext?` | Ext | Provider-specific data. |
 
@@ -33,6 +34,7 @@ Raw token claims are not part of `Caller`. An adapter keeps them only when confi
 
 - Verification is complete: expiry, signature or lookup, audience and issuer checks belong to the adapter. A credential that cannot be proven valid is rejected, never accepted by default (fail closed).
 - The caller flows to every port call in the run through `CallContext.caller`.
+- `actors` comes from the credential only (an RFC 8693 `act` claim for the OIDC adapter), never from what a caller asserts in a request. The principal stays `id`; the agent talking to the stack is the last actor. The host counts the chain as hops of the run (see [0002](../../docs/decisions/0002-delegation-bounds.md)). A malformed chain rejects the credential.
 - The `credential` is never written to events, logs, traces, guard checks or telemetry attributes. Anything that serialises a caller for those uses the public caller, which is the caller without `credential`.
 - Verification has no side effects on the caller beyond optional caching by the adapter.
 - A stack without an identity port runs without callers; channels then have nothing to verify and treat requests as anonymous. Anonymous is explicit (see [AuthorizationPort](AuthorizationPort.md)); it is never the agent.
@@ -51,11 +53,12 @@ Raw token claims are not part of `Caller`. An adapter keeps them only when confi
 `checkIdentity` verifies:
 
 - `verify` rejects for each invalid credential fixture (by default an empty string and an unrecognised string).
-- With a valid credential fixture: `verify` resolves to a caller that, without `credential`, validates against `caller.json`, and whose `id` equals the expected one when given. Without a valid fixture this part is skipped.
+- With a valid credential fixture: `verify` resolves to a caller that, without `credential`, validates against `caller.json` (its `actors` included, since 1.1.0), and whose `id` equals the expected one when given. Without a valid fixture this part is skipped.
 - `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.1.0 — `Caller.actors` ([0002](../../docs/decisions/0002-delegation-bounds.md)): the verified delegation chain, first delegate first, the current actor last
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `verify` returns a `Caller` (`id`, `kind`, `roles`, `scopes`, `name?`, `credential?`); `roles` and `scopes` are always lists; claims only through `ext["oidc.claims"]`
 - 0.1.0 — initial
 

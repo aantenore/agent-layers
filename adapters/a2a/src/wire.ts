@@ -11,12 +11,31 @@ export type WireVersion = typeof A2A_VERSION | typeof LEGACY_VERSION;
 export type TaskState = 'submitted' | 'working' | 'completed' | 'failed' | 'canceled' | 'rejected' | 'input-required' | 'auth-required';
 export type Role = 'user' | 'agent';
 
-export interface MessageValue { messageId: string; role: Role; text: string; contextId?: string; taskId?: string }
+export interface MessageValue {
+  messageId: string; role: Role; text: string; contextId?: string; taskId?: string;
+  /** Extension URIs present in the message, and their data keyed by URI. */
+  extensions?: string[]; metadata?: Record<string, unknown>;
+}
+
+/** URI of the bounds extension (spec/extensions/bounds-v1.md): what is left of a run's limits, passed to the next agent. */
+export const BOUNDS_URI = 'https://github.com/aantenore/agent-layers/blob/main/spec/extensions/bounds-v1.md';
+/** The same extension under the URI agent-plexus published first; accepted as an alias, same data. */
+export const BOUNDS_ALIAS_URI = 'https://github.com/aantenore/agent-plexus/blob/main/spec/extensions/bounds-v1.md';
+/** Every URI of the bounds extension. */
+export const BOUNDS_URIS: readonly string[] = [BOUNDS_URI, BOUNDS_ALIAS_URI];
+/** Stop codes of the run bounds that the bounds extension reports on a task, so a calling agent can tell them apart. */
+export const BOUNDS_STOPS: readonly string[] = ['timeout', 'limit', 'hop_limit'];
 /** Key of the task `metadata` entry that carries the run figures, in the SDK language's names. */
 export const METADATA_KEY = 'agent-layers';
 /** Run figures a task carries in `metadata["agent-layers"]`: token usage and cost in US dollars. */
 export interface TaskRunMetadata { usage?: { inputTokens: number; outputTokens: number }; costUsd?: number }
-export interface TaskValue { id: string; contextId: string; state: TaskState; timestamp: string; answer?: string; status?: MessageValue; metadata?: TaskRunMetadata }
+/** What a task reports under the bounds extension's URI: the run figures and, for a run its bounds stopped, the code. */
+export interface BoundsReport extends TaskRunMetadata { stop?: string }
+export interface TaskValue {
+  id: string; contextId: string; state: TaskState; timestamp: string; answer?: string; status?: MessageValue; metadata?: TaskRunMetadata;
+  /** The bounds extension report, under the URI the client activated. */
+  bounds?: { uri: string; report: BoundsReport };
+}
 
 /** JSON-RPC method names per version → the operation. */
 export const METHODS: Record<string, { op: 'send' | 'stream' | 'get' | 'cancel'; version: WireVersion }> = {
@@ -71,6 +90,8 @@ export function messageWire(m: MessageValue, v: WireVersion): Record<string, unk
     parts: [textPart(m.text, v)],
     ...(m.contextId ? { contextId: m.contextId } : {}),
     ...(m.taskId ? { taskId: m.taskId } : {}),
+    ...(m.extensions?.length ? { extensions: [...m.extensions] } : {}),
+    ...(m.metadata && Object.keys(m.metadata).length ? { metadata: m.metadata } : {}),
   };
 }
 
@@ -89,19 +110,36 @@ export function taskWire(t: TaskValue, v: WireVersion): Record<string, unknown> 
     contextId: t.contextId,
     status: statusWire(t, v),
     ...(t.answer !== undefined ? { artifacts: [artifactWire(t, v)] } : {}),
-    ...(t.metadata && Object.keys(t.metadata).length ? { metadata: { [METADATA_KEY]: t.metadata } } : {}),
+    ...(taskMetadata(t) ? { metadata: taskMetadata(t) } : {}),
   };
+}
+
+/** A task's metadata: the run figures under `agent-layers` (always), and the bounds report under its URI (when activated). */
+function taskMetadata(t: TaskValue): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {};
+  if (t.metadata && Object.keys(t.metadata).length) out[METADATA_KEY] = t.metadata;
+  if (t.bounds && Object.keys(t.bounds.report).length) out[t.bounds.uri] = t.bounds.report;
+  return Object.keys(out).length ? out : undefined;
 }
 
 const count = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 
 /**
- * Usage and cost from `metadata["agent-layers"]` of a task (`metadata` is the task's whole bag), when the remote agent
- * reports them; malformed values are ignored.
+ * Usage, cost and a bounds stop from a task's `metadata` (the task's whole bag): the bounds extension's report (either
+ * URI) first, else `metadata["agent-layers"]`, when the remote agent reports them; malformed values are ignored.
  */
-export function runMetadata(raw: unknown): TaskRunMetadata {
-  const bag = raw && typeof raw === 'object' ? (raw as Record<string, unknown>)[METADATA_KEY] : undefined;
-  const m = bag && typeof bag === 'object' ? bag as Record<string, unknown> : {};
+export function runMetadata(raw: unknown): BoundsReport {
+  const bag = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const report = BOUNDS_URIS.map((u) => bag[u]).find((v) => v && typeof v === 'object');
+  const figures = report ? readFigures(report) : {};
+  const old = readFigures(bag[METADATA_KEY]);
+  const stop = report && typeof (report as Record<string, unknown>).stop === 'string' && BOUNDS_STOPS.includes((report as Record<string, string>).stop!)
+    ? (report as Record<string, string>).stop : undefined;
+  return { ...old, ...figures, ...(stop ? { stop } : {}) };
+}
+
+function readFigures(raw: unknown): TaskRunMetadata {
+  const m = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   const u = m.usage && typeof m.usage === 'object' ? m.usage as Record<string, unknown> : undefined;
   const usage = u && count(u.inputTokens) && count(u.outputTokens) ? { inputTokens: u.inputTokens, outputTokens: u.outputTokens } : undefined;
   return { ...(usage ? { usage } : {}), ...(count(m.costUsd) ? { costUsd: m.costUsd } : {}) };
@@ -129,7 +167,7 @@ const MAX_NATIVE_STATE = 64;
  * Reads a send or get result of either version into a task, or a direct message reply. `raw` is the wire document
  * (for mappings). A state this adapter does not know reads as `failed`, with the native value in `native`.
  */
-export function readResult(result: unknown): { task?: TaskValue & { text: string; native?: string }; message?: string; raw?: unknown } {
+export function readResult(result: unknown): { task?: Omit<TaskValue, 'metadata'> & { text: string; native?: string; metadata?: BoundsReport }; message?: string; raw?: unknown } {
   const r = result as Record<string, any> | undefined;
   if (!r || typeof r !== 'object') return {};
   const msg = r.message ?? (r.kind === 'message' ? r : undefined);

@@ -41,10 +41,10 @@ The core emits only names that start with `agent.`. Standard names (`gen_ai.*`, 
 | --- | --- |
 | Span | `agent.run`, `agent.model.call`, `agent.cache.lookup`, `agent.router.select`, `agent.tool.call`, `agent.access.check`, `agent.guard.check`, `agent.knowledge.search` |
 | Event | `agent.knowledge.error` |
-| Metric | `agent.model.tokens` (with `agent.tokens.kind`: `input` or `output`), `agent.tool.calls`, `agent.access.decisions`, `agent.guard.actions` |
+| Metric | `agent.model.tokens` (with `agent.tokens.kind`: `input` or `output`), `agent.tool.calls`, `agent.access.decisions`, `agent.guard.actions`, `agent.bounds.stops` (runs the run bounds stopped, with `agent.run.reason`: `timeout`, `limit` or `hop_limit`) |
 | Attribute, all | `agent.layer` (mandatory) |
 | Attribute, adapter | `agent.adapter` on core spans |
-| Attribute, run | `agent.run.id`, `agent.name`, `agent.run.status`, `agent.run.reason` (the stop code) |
+| Attribute, run | `agent.run.id`, `agent.name`, `agent.run.status`, `agent.run.reason` (the stop code); run bounds: `agent.run.hops`, `agent.run.max_hops`, `agent.run.deadline_ms` (time left when the run started), `agent.run.root`, `agent.run.parent` (lineage), `agent.caller.actors` (actor ids, in order) |
 | Attribute, model | `agent.model.requested`, `agent.model.used`, `agent.tokens.input`, `agent.tokens.output`, `agent.model.finish` |
 | Attribute, tool | `agent.tool.name`, `agent.tool.source`, `agent.tool.outcome` |
 | Attribute, guard | `agent.guard.name`, `agent.guard.stage`, `agent.guard.action` |

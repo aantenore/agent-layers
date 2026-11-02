@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/aantenore/agent-layers/spec/schemas/common.json",
   "title": "Common",
-  "description": "Definitions shared by the schemas of the SDK language 1.0: the extension bag, attributes, vocabularies, messages and callers.",
+  "description": "Definitions shared by the schemas of the SDK language 1.1: the extension bag, attributes, vocabularies, messages and callers.",
   "$defs": {
     "Ext": {
       "type": "object",
@@ -285,7 +285,7 @@
     "StopCode": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_.-]{0,63}$",
-      "description": "Why a run did not complete. Core values: guard_block, denied, aborted, timeout, limit, needs_input, needs_auth, rejected, error; config may add values like one of them."
+      "description": "Why a run did not complete. Core values: guard_block, denied, aborted, timeout, limit, hop_limit, needs_input, needs_auth, rejected, error; config may add values like one of them. The run bounds stop with timeout (by sdk.deadline), limit (by sdk.budget) and hop_limit (by sdk.hops)."
     },
     "StopReason": {
       "type": "object",
@@ -295,7 +295,7 @@
         "layer": { "$ref": "#/$defs/Layer" },
         "by": {
           "type": "string",
-          "description": "Instance that stopped the run: a guard name, an approval adapter, a remote agent."
+          "description": "Instance that stopped the run: a guard name, an approval adapter, a remote agent, or a core check (sdk.deadline, sdk.budget, sdk.hops)."
         },
         "stage": { "$ref": "#/$defs/GuardStage" },
         "detail": { "type": "string", "description": "Internal text, never parsed." }
@@ -317,10 +317,71 @@
         "roles": { "type": "array", "items": { "type": "string" } },
         "scopes": { "type": "array", "items": { "type": "string" } },
         "name": { "type": "string", "description": "Display name." },
+        "actors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Actor" },
+          "description": "Agents that acted for this caller, verified from the credential: first delegate first, the agent presenting the credential last. Absent or empty: no delegation known. Since 1.1."
+        },
         "ext": { "$ref": "common.json#/$defs/Ext" }
       },
       "additionalProperties": false,
       "description": "A caller without its credential: what guards, events and access questions see. The credential is never serialised."
+    },
+    "Actor": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "Identifier of the acting agent at the issuer (an OAuth client id, a workload id)." },
+        "kind": { "$ref": "#/$defs/CallerKind", "description": "agent in practice; user when a person acts for another." },
+        "name": { "type": "string", "description": "Display name." },
+        "issuer": { "type": "string", "description": "Who vouches for this entry, when it differs from the credential's issuer." }
+      },
+      "additionalProperties": false,
+      "description": "One agent (or person) in a caller's delegation chain. Since 1.1."
+    },
+    "Bounds": {
+      "type": "object",
+      "required": ["hops", "maxHops"],
+      "properties": {
+        "deadlineAt": { "$ref": "#/$defs/Time", "description": "Local clock time by which the run must end. Absent only when the run has no deadline (limits.run.timeoutMs unbounded and none sent)." },
+        "hops": { "type": "integer", "minimum": 0, "description": "Agent-to-agent calls before this run: 0 for a run a person or an event started." },
+        "maxHops": { "type": "integer", "minimum": 0, "description": "Largest hops the chain accepts." },
+        "tokens": { "type": "number", "minimum": 0, "description": "Tokens (input plus output) the run may still spend, delegated runs included. Absent: no token budget." },
+        "costUsd": { "type": "number", "minimum": 0, "description": "Spend in US dollars the run may still incur, delegated runs included. Absent: no cost budget." },
+        "reserved": {
+          "type": "object",
+          "properties": { "tokens": { "type": "number", "minimum": 0 }, "costUsd": { "type": "number", "minimum": 0 } },
+          "additionalProperties": false,
+          "description": "What calls to other agents in flight have reserved and not yet settled."
+        }
+      },
+      "additionalProperties": false,
+      "description": "CallContext.bounds: deadline, remaining budget and hop count of a run, a read view of the run's ledger kept by the host. Since 1.1."
+    },
+    "Lineage": {
+      "type": "object",
+      "required": ["rootRunId", "parentRunId"],
+      "properties": {
+        "rootRunId": { "type": "string", "description": "Id of the run that started the chain." },
+        "parentRunId": { "type": "string", "description": "Id of the run of the agent that called this one." }
+      },
+      "additionalProperties": false,
+      "description": "CallContext.lineage: where a run sits in a chain of agents. Since 1.1."
+    },
+    "Delegation": {
+      "type": "object",
+      "required": ["remainingMs", "hops", "maxHops"],
+      "properties": {
+        "remainingMs": { "type": "integer", "minimum": 0, "description": "Time left, in milliseconds. Never a clock time." },
+        "hops": { "type": "integer", "minimum": 0, "description": "Agent-to-agent calls in the chain including this one." },
+        "maxHops": { "type": "integer", "minimum": 0, "description": "Largest hops the chain accepts." },
+        "tokens": { "type": "number", "minimum": 0 },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "rootRunId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "parentRunId": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "additionalProperties": false,
+      "description": "What one agent passes on to the next: what is left of its run's bounds (outboundBounds), and what a channel hands the host as CallContext.delegation. It can only tighten the receiving stack's limits. Since 1.1."
     },
     "AnonymousCaller": {
       "type": "object",

@@ -80,6 +80,21 @@ for every caller. On a production profile with knowledge sources and a cache, `a
 | `limits.check.deployTimeoutMs` | `300000` ms | 1–∞ | — | — | Time limit of the deploy probes, which start and stop services. |
 | `limits.check.listToolsTimeoutMs` | `5000` ms | 1–∞ | — | — | Time limit of listing tools while looking for an audience for the credentials probe. |
 | `limits.extBytes` | `16384` bytes | 256–1048576 | 256–65536 | warn outside safe range | Largest `ext` bag the core keeps on a shape it passes on; a larger one is dropped and an `agent.ext.dropped` event is emitted, so adapters cannot smuggle bulk data through the extension bags. |
+| `limits.run.timeoutMs` | `300000` ms | 1–∞ or unbounded | 1–3600000 | fail if unbounded; warn outside safe range | Deadline of every run when the caller sends none, delegated runs included; the same default as the `a2a` and gateway time limits. The run's signal aborts at the deadline and the model pipeline refuses calls after it (`timeout`). |
+| `limits.run.maxHops` | `4` | 0–∞ or unbounded | 0–10 | fail if unbounded; warn outside safe range | Agent-to-agent calls a chain may make before a run is refused (`hop_limit`); stops loops such as A → B → A. `0` refuses every delegated run. |
+| `limits.run.maxTokens` | `unbounded` | 1–∞ or unbounded | — | warn if unbounded | Tokens (input plus output) one run may spend, delegated runs included; the model pipeline refuses the next call once they are spent (`limit`). |
+| `limits.run.maxCostUsd` | `unbounded` | 0–∞ or unbounded | — | warn if unbounded | Spend in US dollars one run may incur, delegated runs included, priced with `pipeline.pricing` and with what remote agents report (`limit`). |
+| `limits.delegation.marginMs` | `1000` ms | 0–60000 | — | — | Time kept back on each call to another agent, so the answer can travel back before this run's deadline. |
+| `limits.delegation.minRemainingMs` | `1000` ms | 0–60000 | — | — | A run, or a call to another agent, does not start with less time than this (capped by `limits.run.timeoutMs`). |
+
+Every run has these bounds, also a run started in process (a trigger, an embedding application). A calling agent's
+bounds (the A2A [bounds extension](../spec/extensions/bounds-v1.md), the gateway's `Agent-Bounds` header, MCP
+`_meta`) can only tighten them. `limits.delegation.inbound` is a setting next to these, not a number: `"tighten"`
+(default) applies a caller's bounds when they are tighter; `"ignore"` drops them, and the hop count then comes from the
+verified actor chain only. The cost of a model call comes from `pipeline.pricing` (prices by model id, in US dollars
+per million tokens: `{ "gpt-4o": { "inputPerMTok": 2.5, "outputPerMTok": 10 } }`); `agent-layers check` warns when
+`limits.run.maxCostUsd` is set without prices. Runtime budgets (`basic-runtime` `maxTurns`, `reinloop` `budget`) stay as
+extra limits: whichever is reached first stops the run. See [0002](decisions/0002-delegation-bounds.md).
 
 ## Adapters
 
@@ -270,6 +285,7 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | `options.maxTokenChars` | `16384` chars | 1–∞ or unbounded | 1–65536 | fail if unbounded; warn outside safe range | Rejects oversized tokens before any parsing or key lookup. |
 | `options.maxResponseBytes` | `1000000` bytes | 1–∞ or unbounded | 1–10000000 | fail if unbounded; warn outside safe range | Stops a hostile or broken provider from sending an endless document. |
 | `options.errorDescriptionChars` | `200` chars | 0–10000 | 0–1000 | warn outside safe range | Keeps provider error text short in messages and logs. |
+| `options.maxActors` | `10` | 1–100 | 1–20 | warn outside safe range | Longest delegation chain (nested RFC 8693 `act` claims) read into `Caller.actors`; a longer one rejects the token. |
 
 ### `opa` · AuthorizationPort
 

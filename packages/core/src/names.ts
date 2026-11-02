@@ -24,6 +24,7 @@ export const METRIC = Object.freeze({
   toolCalls: 'agent.tool.calls',
   accessDecisions: 'agent.access.decisions',
   guardActions: 'agent.guard.actions',
+  boundsStops: 'agent.bounds.stops',
 });
 
 export const ATTR = Object.freeze({
@@ -33,6 +34,12 @@ export const ATTR = Object.freeze({
   runId: 'agent.run.id',
   runStatus: 'agent.run.status',
   runReason: 'agent.run.reason',
+  runHops: 'agent.run.hops',
+  runMaxHops: 'agent.run.max_hops',
+  runRoot: 'agent.run.root',
+  runParent: 'agent.run.parent',
+  runDeadlineMs: 'agent.run.deadline_ms',
+  callerActors: 'agent.caller.actors',
   modelRequested: 'agent.model.requested',
   modelUsed: 'agent.model.used',
   modelFinish: 'agent.model.finish',

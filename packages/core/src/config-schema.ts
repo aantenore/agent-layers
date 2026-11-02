@@ -3,7 +3,7 @@ import { LAYERS } from './layers.ts';
 import { limitSchema } from './limits.ts';
 import type { JsonSchema } from './schema.ts';
 import { SLOTS } from './slots.ts';
-import { CHECK_LIMITS, GATEWAY_LIMITS, LANGUAGE_LIMITS, PIPELINE_LIMITS } from './stack-limits.ts';
+import { CHECK_LIMITS, DELEGATION_LIMITS, GATEWAY_LIMITS, LANGUAGE_LIMITS, PIPELINE_LIMITS, RUN_LIMITS } from './stack-limits.ts';
 import { VOCAB_NAME, VOCABULARIES } from './vocab.ts';
 
 /** Schema of a stack-config limit: a number, `"unbounded"` where allowed, or a `${env:NAME}` reference. */
@@ -63,6 +63,9 @@ const policyRule: JsonSchema = {
         scopes: { type: 'array', items: { type: 'string' } },
         kind: { enum: ['user', 'agent'] },
         authenticated: { type: 'boolean', description: 'true: any verified caller; false: only an anonymous caller.' },
+        actor: { type: 'array', items: { type: 'string' }, description: 'Globs on the id of the current actor (the agent presenting the credential); matches only a delegated caller.' },
+        actors: { type: 'array', items: { type: 'string' }, description: 'Globs on the id of any actor of the delegation chain, prior ones included.' },
+        delegated: { type: 'boolean', description: 'true: a caller with at least one actor; false: one with none.' },
       },
       additionalProperties: false,
     },
@@ -96,6 +99,15 @@ const pipeline: JsonSchema = {
     cacheTtlMs: lim(PIPELINE_LIMITS.cacheTtlMs, 'Lifetime of cached model answers'),
     cacheScope: { enum: ['caller', 'shared'], description: 'Who shares a cached model answer. caller (default): one entry per caller id; shared: every caller, unsafe with caller-scoped knowledge.' },
     approvalTimeoutMs: lim(PIPELINE_LIMITS.approvalTimeoutMs, 'How long a tool call waits for a human approval; 0 does not wait'),
+    pricing: {
+      type: 'object',
+      description: 'Prices by model id in US dollars per million tokens: the cost debited from limits.run.maxCostUsd and reported as RunResult.costUsd when the runtime reports none.',
+      additionalProperties: {
+        type: 'object',
+        properties: { inputPerMTok: { type: 'number', minimum: 0 }, outputPerMTok: { type: 'number', minimum: 0 } },
+        additionalProperties: false,
+      },
+    },
   },
   additionalProperties: false,
 };
@@ -164,6 +176,27 @@ const limits: JsonSchema = {
       additionalProperties: false,
     },
     extBytes: lim(LANGUAGE_LIMITS.extBytes, 'Largest ext bag kept on a shape the core passes on; larger ones are dropped with an event'),
+    run: {
+      type: 'object',
+      description: 'Bounds of every run, delegated runs included; a calling agent can only tighten them.',
+      properties: {
+        timeoutMs: lim(RUN_LIMITS.timeoutMs, 'Deadline of a run when the caller sends none'),
+        maxHops: lim(RUN_LIMITS.maxHops, 'Agent-to-agent calls a chain may make; 0 refuses every delegated run'),
+        maxTokens: lim(RUN_LIMITS.maxTokens, 'Tokens one run may spend, delegated runs included'),
+        maxCostUsd: lim(RUN_LIMITS.maxCostUsd, 'Spend one run may incur, delegated runs included (priced with pipeline.pricing)'),
+      },
+      additionalProperties: false,
+    },
+    delegation: {
+      type: 'object',
+      description: 'How bounds cross to and from other agents.',
+      properties: {
+        marginMs: lim(DELEGATION_LIMITS.marginMs, 'Time kept back on each outbound call for the answer to travel back'),
+        minRemainingMs: lim(DELEGATION_LIMITS.minRemainingMs, 'A run, or an outbound call, does not start with less time than this'),
+        inbound: { enum: ['tighten', 'ignore'], description: 'tighten (default): a caller\'s bounds apply when tighter; ignore: they are dropped and hops come from the verified actor chain only.' },
+      },
+      additionalProperties: false,
+    },
   },
   additionalProperties: false,
 };

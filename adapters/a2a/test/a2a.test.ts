@@ -9,7 +9,7 @@ import { serveStack, type GatewayHandle } from '@agent-layers/gateway';
 import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
 import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
 import { credentialAdapter, identityAdapter } from '@agent-layers/adapter-static-identity';
-import { channelAdapter, runtimeAdapter } from '../src/index.ts';
+import { BOUNDS_URI, channelAdapter, runtimeAdapter } from '../src/index.ts';
 
 let stack: Stack;
 let gw: GatewayHandle;
@@ -186,9 +186,19 @@ test('conformance: the runtime and the mounted channel', async () => {
         }));
         assert.equal(((await res.json()) as { result: { task: { status: { state: string } } } }).result.task.status.state, 'TASK_STATE_COMPLETED');
       },
+      expectStates: { stopped: 'TASK_STATE_REJECTED' },
+      // The bounds travel in the bounds extension, activated by the A2A-Extensions header.
+      async sendBounds(mount: Parameters<typeof inboundFetch>[0], text: string, bounds: Record<string, unknown>) {
+        const res = await inboundFetch(mount, new Request('http://gateway.test/a2a/conformance', {
+          method: 'POST', headers: { 'content-type': 'application/json', 'a2a-extensions': BOUNDS_URI },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message: { messageId: 'm', role: 'ROLE_USER', parts: [{ text }], metadata: { [BOUNDS_URI]: bounds } } } }),
+        }));
+        return ((await res.json()) as { result?: { task: { status: { state: string } } } }).result?.task.status.state;
+      },
     },
   });
   assert.deepEqual(channel.failures, []);
+  assert.ok(!channel.skipped.some((s) => s.startsWith('bounds')), 'the bounds checks ran');
 });
 
 test('anonymous tasks (gateway.anonymous: true) are owned by their id and never readable by an authenticated caller', async () => {

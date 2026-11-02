@@ -59,7 +59,10 @@ export const adapter = defineAdapter<'AuthorizationPort', RulesAuthorizationOpti
             risk: { type: 'array', items: { type: 'string', pattern: VOCAB_NAME.source } },
             when: {
               type: 'object',
-              properties: { roles: strings, scopes: strings, kind: { enum: ['user', 'agent'] }, authenticated: { type: 'boolean' } },
+              properties: {
+                roles: strings, scopes: strings, kind: { enum: ['user', 'agent'] }, authenticated: { type: 'boolean' },
+                actor: strings, actors: strings, delegated: { type: 'boolean' },
+              },
               additionalProperties: false,
             },
           },

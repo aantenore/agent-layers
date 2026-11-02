@@ -1,6 +1,6 @@
 # RuntimePort
 
-Layer: `harness` (L3 Agent runtime) · Version: 1.1.0 · Conformance: `checkRuntime`
+Layer: `harness` (L3 Agent runtime) · Version: 1.2.0 · Conformance: `checkRuntime`
 
 ## Purpose
 
@@ -58,9 +58,9 @@ Statuses: `completed` (the agent answered), `failed` (an error ended the run), `
 
 | Field | Meaning |
 | --- | --- |
-| `code` | `guard_block`, `denied`, `aborted`, `timeout`, `limit`, `needs_input`, `needs_auth`, `rejected` or `error`. Config may add codes that behave like one of these. |
+| `code` | `guard_block`, `denied`, `aborted`, `timeout`, `limit`, `hop_limit`, `needs_input`, `needs_auth`, `rejected` or `error`. Config may add codes that behave like one of these. |
 | `layer?` | Layer that stopped the run. |
-| `by?` | Instance that stopped it: a guard name, an approval adapter, a remote agent. |
+| `by?` | Instance that stopped it: a guard name, an approval adapter, a remote agent, or a core check: `sdk.deadline`, `sdk.budget`, `sdk.hops`. |
 | `stage?` | Guard stage, for `guard_block`. |
 | `detail?` | Internal text for people. Never parsed, never shown to the caller. |
 
@@ -87,6 +87,8 @@ Adapter events are named `<namespace>.<name>` (for example `reinloop.compaction`
 - The runtime sees only the tools the agent's globs match, and calls them by prefixed name.
 - A guardrail block ends the run with status `stopped` and a reason `{code: "guard_block", layer: "guardrail", by: <guard>, stage}`, rather than crashing the caller.
 - A run honours `ctx.signal`: when it fires, the run ends as soon as it can with status `stopped` and reason `aborted` (or the stop reason the signal carries, such as `timeout`).
+- Run bounds (since 1.2.0, [0002](../../docs/decisions/0002-delegation-bounds.md)): the host gives every run `ctx.bounds` (deadline, token and cost budget, hop count) from `limits.run` and what a calling agent sent (`delegation`, which only tightens them), and arms `ctx.signal` at the deadline. A run over the hop limit, or with less time left than `limits.delegation.minRemainingMs`, is refused before the runtime is called: `stopped` with `{code: "hop_limit", layer: "harness", by: "sdk.hops"}` or `{code: "timeout", ..., by: "sdk.deadline"}`. The stack's model refuses a call once the deadline has passed or the budget is spent by throwing `BoundsExceeded` (`stopReason` `timeout` or `limit`, `by: "sdk.budget"`); a runtime ends the run `stopped` with it, as `runEndOf(err)` does, or lets it through to the host. The host then reports the bound's reason, and fills `usage` and `costUsd` from the run's ledger when the runtime reports none. A runtime passes the context on (copies keep the same `bounds`) and needs no budget of its own; budgets it has (`basic-runtime` `maxTurns`, `reinloop` `budget`) are extra limits: the first one reached stops the run.
+- A runtime that calls another agent (the `a2a` runtime) sends `outboundBounds(ctx)`: the time left minus `limits.delegation.marginMs`, hops plus one, a reservation of the budget, the lineage. It refuses locally, without a network call, when the call would go over the hop limit or start with too little time, and settles the reservation with the usage and cost the remote run reports.
 - Session continuity (history across runs) is provided through [StatePort](StatePort.md) when the runtime supports it; the contract does not require it.
 - Each run produces telemetry spans tagged with `agent.layer` (see [TelemetryPort](TelemetryPort.md)).
 
@@ -106,10 +108,12 @@ Adapter events are named `<namespace>.<name>` (for example `reinloop.compaction`
 - `bind` is a function.
 - With a stack and an agent fixture: `bind` resolves, the agent's `name` equals the spec's, and `run` returns a result that validates against `run-result.json`; a result whose status is not `completed` has a `reason`. Without fixtures the run checks are skipped.
 - With the fixtures, for a runtime whose descriptor declares 1.1.0 or later (`checkAdapter` reads it; `conformance` takes `portVersion` in the fixtures, default the core's): a run whose signal is already aborted resolves `stopped` with reason `aborted` (or `timeout`); a streamed run ends with a `run.end` of the run's status, and its `text` events add up to the output of a completed run (when the runtime streams); every model and tool call of a run carries the run's caller; with a `toolInput` fixture, a tool call that throws `ApprovalPending` ends the run `waiting` with `needs_input`, or lets the error through.
+- With the fixtures, for a runtime declaring 1.2.0 or later: every model and tool call of a run started with `bounds` carries the run's bounds; a model call the core refuses (`BoundsExceeded`, code `limit`) ends the run `stopped` with `limit`, or the runtime lets the error through to the host.
 - `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.2.0 — run bounds ([0002](../../docs/decisions/0002-delegation-bounds.md)): every run gets `ctx.bounds` from the host (deadline, budget, hops) and may be refused before it starts (`hop_limit`, `timeout`); the core enforces them in the governed model and tools whatever the runtime; runtimes pass the context on and end the run `stopped` on `BoundsExceeded`; conformance checks both
 - 1.1.0 — the stack's tools throw `ApprovalPending` for a call waiting for an approval and the stack ends the run `waiting`; `RunResult.ext["sdk.approval"] = {id, by?, tool?}`; conformance checks abort, stream, caller and approval
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `AgentSpec.settings` and `ext` replace `params`; status `waiting`; structured `RunResult.reason`; core event types with fixed payloads
 - 0.2.0 — optional `costUsd` on RunResult

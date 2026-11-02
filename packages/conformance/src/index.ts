@@ -102,7 +102,7 @@ export async function checkAdapter(d: AnyAdapter, opts: CheckAdapterOptions = {}
   }
   if (!instance) return { port: d.port, adapter: d.name, ok: false, failures, skipped: [] };
   // Suites whose checks depend on the port version (RuntimePort) read the one the descriptor declares.
-  const fixtures = d.port === 'RuntimePort' ? { portVersion: d.portVersion, ...(opts.fixtures ?? {}) } : opts.fixtures;
+  const fixtures = d.port === 'RuntimePort' || d.port === 'ChannelPort' ? { portVersion: d.portVersion, ...(opts.fixtures ?? {}) } : opts.fixtures;
   const report = await conformance(d.port, instance as never, fixtures, opts.limits, declarationOf(d));
   await instance.close?.().catch(() => {});
   const all = [...failures, ...report.failures];

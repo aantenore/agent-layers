@@ -1,3 +1,4 @@
+import { ledgerOf } from '../bounds.ts';
 import { ApprovalPending, errorMessage, isAbort } from '../errors.ts';
 import { boundExt, withExt } from '../ext.ts';
 import { ATTR, EVENT, METRIC, SPAN } from '../names.ts';
@@ -61,7 +62,7 @@ interface Denial { reason: string; approval?: string }
 
 /**
  * Aggregates several ToolPorts into one, naming tools `<source><separator><tool>`, and governs every call:
- * local policy → approval (for `ask`) → authorization → tool_args guards → call with bound credentials → tool_result
+ * run deadline → local policy → approval (for `ask`) → authorization → tool_args guards → call with bound credentials → tool_result
  * guards (over the text and the structured data). Denials and blocks are error results, not exceptions. Every result
  * carries `ext["sdk.outcome"]`; a call waiting for an approval also `ext["sdk.approval"]` (the approval id), or throws
  * `ApprovalPending` with `pendingAs: 'error'`.
@@ -164,6 +165,9 @@ export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: G
 
   async function call(name: string, entry: Entry, args: Record<string, unknown>, ctx: CallContext): Promise<ToolResult & { outcome: ToolOutcomeKind }> {
     const t = tel(ctx);
+    // The run's deadline bounds every tool call: none starts once it has passed. The tool gets `ctx.bounds` and a
+    // signal that aborts at the deadline, to pass on to whatever it calls.
+    if ((ledgerOf(ctx)?.remainingMs() ?? Infinity) <= 0) return result('error', { ok: false, text: 'Stopped: the run has no time left' });
     const denied = await authorize(name, entry, args, ctx);
     if (denied?.approval) return result('pending', { ok: false, text: `Waiting for approval ${denied.approval}` }, { 'sdk.approval': denied.approval });
     if (denied) return result('denied', { ok: false, text: `Denied: ${denied.reason}` });

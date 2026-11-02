@@ -83,6 +83,20 @@ export class ApprovalPending extends AgentLayersError {
   }
 }
 
+/**
+ * A run reached one of its bounds: its deadline (`timeout`), its token or cost budget (`limit`), or the hop limit of
+ * its chain (`hop_limit`). Thrown by the core's model pipeline before a model call it refuses, and by `outboundBounds`
+ * before a call to another agent; runtimes end the run `stopped` with `stopReason`.
+ */
+export class BoundsExceeded extends AgentLayersError {
+  override name = 'BoundsExceeded';
+  readonly stopReason: StopReason;
+  constructor(reason: StopReason) {
+    super(`run bounds reached: ${reason.code}`);
+    this.stopReason = reason;
+  }
+}
+
 /** A mapping rule failed or produced an invalid shape. In the identity and authorization slots it rejects or denies. */
 export class MappingError extends AgentLayersError {
   override name = 'MappingError';
@@ -128,7 +142,7 @@ export function isAbort(err: unknown): boolean {
  * the error name only, never its message (which can echo inspected content or a backend's credentials).
  */
 export function stopReasonOf(err: unknown): StopReason {
-  if (err instanceof GuardrailBlocked || err instanceof ApprovalPending) return err.stopReason;
+  if (err instanceof GuardrailBlocked || err instanceof ApprovalPending || err instanceof BoundsExceeded) return err.stopReason;
   if (err instanceof Error && err.name === 'TimeoutError') return { code: 'timeout' };
   if (isAbort(err)) return { code: 'aborted' };
   if (err instanceof MissingLayerError) return { code: 'error', layer: err.layer, detail: err.name };

@@ -30,7 +30,7 @@ export const VOCABULARIES = Object.freeze({
   guardLabel: { core: ['pii', 'secret', 'injection', 'toxicity', 'policy', 'other'], extensible: 'like', usedBy: 'GuardVerdict.labels' },
   runStatus: { core: ['completed', 'failed', 'stopped', 'waiting'], extensible: 'no', usedBy: 'RunResult.status' },
   stopCode: {
-    core: ['guard_block', 'denied', 'aborted', 'timeout', 'limit', 'needs_input', 'needs_auth', 'rejected', 'error'],
+    core: ['guard_block', 'denied', 'aborted', 'timeout', 'limit', 'hop_limit', 'needs_input', 'needs_auth', 'rejected', 'error'],
     extensible: 'like', usedBy: 'RunResult.reason.code',
   },
   event: { core: ['run.start', 'model.reply', 'tool.call', 'tool.result', 'text', 'run.end'], extensible: 'namespaced', usedBy: 'RunEvent.type' },

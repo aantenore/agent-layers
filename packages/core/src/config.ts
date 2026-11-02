@@ -38,13 +38,29 @@ export interface PipelineConfig {
   /** Who shares a cached model reply: `caller` (default) or `shared`. */
   cacheScope?: 'caller' | 'shared';
   approvalTimeoutMs?: number;
+  /**
+   * Prices by model id, in US dollars per million tokens: the cost the core debits from a run's cost budget
+   * (`limits.run.maxCostUsd`) and reports as `RunResult.costUsd` when the runtime reports none. Matched on the model
+   * the reply names, else the requested one.
+   */
+  pricing?: Record<string, ModelPrice>;
 }
+
+/** Price of a model in US dollars per million tokens. */
+export interface ModelPrice { inputPerMTok?: number; outputPerMTok?: number }
 
 /** Limits that belong to no single layer (see docs/limits.md). */
 export interface LimitsConfig {
   check?: { timeoutMs?: number; deployTimeoutMs?: number; listToolsTimeoutMs?: number };
   /** Largest `ext` bag kept on a shape the core passes on (default 16384 bytes). */
   extBytes?: number;
+  /** Bounds of every run; see docs/limits.md. */
+  run?: { timeoutMs?: LimitValue; maxHops?: LimitValue; maxTokens?: LimitValue; maxCostUsd?: LimitValue };
+  /**
+   * How bounds cross to and from other agents. `inbound`: `tighten` (default) applies a caller's bounds when they are
+   * tighter than the stack's own; `ignore` drops them, and the hop count then comes from the verified actor chain only.
+   */
+  delegation?: { marginMs?: number; minRemainingMs?: number; inbound?: 'tighten' | 'ignore' };
 }
 
 /** Network host of the stack (gateway mode). */

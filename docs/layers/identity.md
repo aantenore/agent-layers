@@ -96,10 +96,30 @@ sequenceDiagram
   end
 ```
 
+## Delegation chain
+
+When an agent calls this stack on someone's behalf, `Caller.id` stays the principal (the person, `sub`) and
+`Caller.actors` lists the agents that acted for them, first delegate first, the agent presenting the credential last.
+The chain comes from the credential only: the `oidc` adapter reads the RFC 8693 `act` claim (the outermost `act` is the
+current actor, so it reverses the nesting; at most `maxActors` entries, a malformed chain rejects the token) and keeps
+`may_act` in `ext["oidc.may_act"]`. With `actor: "self"` on the `oidc` credentials, a token exchange also sends the
+stack's own token as `actor_token`, so the issuer can nest `act` for the next hop. Bounds a caller sends in a request
+never become actors.
+
+Policies see the chain on `AccessQuestion.caller.actors`. As in RFC 8693, only the current actor counts unless a rule
+asks for more: `when.actor` matches the current actor's id (globs), `when.actors` any actor of the chain, and
+`when.delegated` a caller with or without a chain. `opa` gets `input.caller.actors`; `authzen` sends
+`subject.properties.actors`. The host also counts the chain as hops of the run, so a caller cannot reset the hop count
+of its chain (see [harness](harness.md#run-bounds) and [0002](../decisions/0002-delegation-bounds.md)).
+
+```json
+{ "effect": "allow", "tools": ["erp__*"], "when": { "actor": ["billing-agent"] } }
+```
+
 ## Boundaries
 
 - Who may do what is identity; whether the content is acceptable is [guardrail](guardrail.md).
-- Authorization is local rules first (`allow` / `ask` / `deny` by tool, risk and `when: {roles, scopes, kind}`), then
+- Authorization is local rules first (`allow` / `ask` / `deny` by tool, risk and `when: {roles, scopes, kind, actor, actors, delegated}`), then
   the external decision point. A local `deny` is final, and a failing decision point denies (fail closed).
 - Credentials and tokens never appear in events, logs or traces. Telemetry masks attribute keys that look like secrets.
 - Every access decision is emitted to [telemetry](telemetry.md) as an audit event (`agent.access.check` span,

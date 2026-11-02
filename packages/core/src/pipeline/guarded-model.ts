@@ -1,4 +1,6 @@
-import { GuardrailBlocked } from '../errors.ts';
+import { boundsStop, ledgerOf, priceOf } from '../bounds.ts';
+import type { ModelPrice } from '../config.ts';
+import { BoundsExceeded, GuardrailBlocked } from '../errors.ts';
 import { boundExt } from '../ext.ts';
 import { assembleDeltas, newUserMessageIndexes, replyToDeltas } from '../messages.ts';
 import { ATTR, EVENT, METRIC, SPAN } from '../names.ts';
@@ -38,11 +40,15 @@ export interface GuardedModelOptions {
   telemetry?: TelemetryPort;
   /** Largest `ext` bag kept on a reply (`limits.extBytes`); larger ones are dropped with an event. */
   extBytes?: number;
+  /** Prices by model id (`pipeline.pricing`): the cost of each reply, debited from the run's cost budget. */
+  pricing?: Readonly<Record<string, ModelPrice>>;
 }
 
 /**
  * Wraps a ModelPort with the layers around a model call, in this order:
- * input guards (new user content) → cache lookup → router → model → cache store → output guards.
+ * run bounds → input guards (new user content) → cache lookup → router → model → cache store → output guards.
+ * Inside a run (`ctx.bounds`), a call is refused with `BoundsExceeded` once the run's deadline has passed or its token
+ * or cost budget is spent, and each reply from the model (not from the cache) is debited from the run's ledger.
  * The cache stores the raw model reply, so output guards also run on cache hits. Its key includes the caller unless
  * `cacheScope` is `shared`: knowledge is injected after the cache lookup and may differ per caller.
  * Output guards see every text a caller can be shown: text parts and reasoning parts.
@@ -55,7 +61,14 @@ export function guardedModel(model: ModelPort, opts: GuardedModelOptions = {}): 
   const bound = (reply: ModelReply, t: TelemetryPort): ModelReply => opts.extBytes === undefined ? reply
     : boundExt(reply, opts.extBytes, (bytes) => t.event(EVENT.extDropped, { [ATTR.layer]: 'llm', [ATTR.extBytes]: bytes, [ATTR.extShape]: 'ModelReply' }));
 
+  /** Debits a model reply from the run's ledger: its tokens and, when the model has a price, its cost. */
+  const debit = (reply: ModelReply, requested: string, ctx: CallContext): void => {
+    ledgerOf(ctx)?.debit(reply.usage, priceOf(opts.pricing, reply.model, requested, reply.usage));
+  };
+
   async function prepare(req: ModelRequest, ctx: CallContext): Promise<{ req: ModelRequest; key?: string; cached?: ModelReply }> {
+    const stop = boundsStop(ctx);
+    if (stop) throw new BoundsExceeded(stop);
     const t = tel(ctx);
     const guarded = await guardInput(req, guards, ctx, t);
     if (!opts.cache) return { req: guarded };
@@ -97,6 +110,7 @@ export function guardedModel(model: ModelPort, opts: GuardedModelOptions = {}): 
           recordUsage(span, r, tel(ctx));
           return r;
         });
+        debit(reply, routed.model, ctx);
         await store(p.key, reply);
       }
       return guardOutput(reply, guards, ctx, tel(ctx));
@@ -117,6 +131,7 @@ export function guardedModel(model: ModelPort, opts: GuardedModelOptions = {}): 
         if (!buffer) yield d;
       }
       const full = bound(assembleDeltas(deltas, routed.model), t);
+      debit(full, routed.model, ctx);
       await store(p.key, full);
       if (buffer) yield* replyToDeltas(await guardOutput(full, guards, ctx, t));
     },

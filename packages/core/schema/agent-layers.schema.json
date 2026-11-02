@@ -786,6 +786,24 @@
             "authenticated": {
               "type": "boolean",
               "description": "true: any verified caller; false: only an anonymous caller."
+            },
+            "actor": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Globs on the id of the current actor (the agent presenting the credential); matches only a delegated caller."
+            },
+            "actors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Globs on the id of any actor of the delegation chain, prior ones included."
+            },
+            "delegated": {
+              "type": "boolean",
+              "description": "true: a caller with at least one actor; false: one with none."
             }
           },
           "additionalProperties": false
@@ -935,6 +953,24 @@
           ],
           "default": 0,
           "description": "How long a tool call waits for a human approval; 0 does not wait (ms); default 0."
+        },
+        "pricing": {
+          "type": "object",
+          "description": "Prices by model id in US dollars per million tokens: the cost debited from limits.run.maxCostUsd and reported as RunResult.costUsd when the runtime reports none.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "inputPerMTok": {
+                "type": "number",
+                "minimum": 0
+              },
+              "outputPerMTok": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -1243,6 +1279,125 @@
           ],
           "default": 16384,
           "description": "Largest ext bag kept on a shape the core passes on; larger ones are dropped with an event (bytes); default 16384."
+        },
+        "run": {
+          "type": "object",
+          "description": "Bounds of every run, delegated runs included; a calling agent can only tighten them.",
+          "properties": {
+            "timeoutMs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "const": "unbounded"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 300000,
+              "description": "Deadline of a run when the caller sends none (ms); default 300000; \"unbounded\" disables it."
+            },
+            "maxHops": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "const": "unbounded"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 4,
+              "description": "Agent-to-agent calls a chain may make; 0 refuses every delegated run; default 4; \"unbounded\" disables it."
+            },
+            "maxTokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "const": "unbounded"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": "unbounded",
+              "description": "Tokens one run may spend, delegated runs included (tokens); default unbounded; \"unbounded\" disables it."
+            },
+            "maxCostUsd": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "const": "unbounded"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": "unbounded",
+              "description": "Spend one run may incur, delegated runs included (priced with pipeline.pricing) (usd); default unbounded; \"unbounded\" disables it."
+            }
+          },
+          "additionalProperties": false
+        },
+        "delegation": {
+          "type": "object",
+          "description": "How bounds cross to and from other agents.",
+          "properties": {
+            "marginMs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 60000
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 1000,
+              "description": "Time kept back on each outbound call for the answer to travel back (ms); default 1000."
+            },
+            "minRemainingMs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 60000
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+                }
+              ],
+              "default": 1000,
+              "description": "A run, or an outbound call, does not start with less time than this (ms); default 1000."
+            },
+            "inbound": {
+              "enum": [
+                "tighten",
+                "ignore"
+              ],
+              "description": "tighten (default): a caller's bounds apply when tighter; ignore: they are dropped and hops come from the verified actor chain only."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -1771,7 +1926,7 @@
         },
         "stopCode": {
           "type": "object",
-          "description": "RunResult.reason.code. Core values: guard_block, denied, aborted, timeout, limit, needs_input, needs_auth, rejected, error. Extensible: like.",
+          "description": "RunResult.reason.code. Core values: guard_block, denied, aborted, timeout, limit, hop_limit, needs_input, needs_auth, rejected, error. Extensible: like.",
           "properties": {
             "add": {
               "type": "object",
@@ -1792,6 +1947,7 @@
                       "aborted",
                       "timeout",
                       "limit",
+                      "hop_limit",
                       "needs_input",
                       "needs_auth",
                       "rejected",

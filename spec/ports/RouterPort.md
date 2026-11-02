@@ -1,6 +1,6 @@
 # RouterPort
 
-Layer: `cache` (L2 Model access (routing, fallback, quotas, cache)) · Version: 1.0.0 · Conformance: `checkRouter`
+Layer: `cache` (L2 Model access (routing, fallback, quotas, cache)) · Version: 1.1.0 · Conformance: `checkRouter`
 
 ## Purpose
 
@@ -45,6 +45,7 @@ Input is the (already input-guarded) [ModelRequest](../schemas/model-request.jso
 
 ## Version history
 
+- 1.1.0 — `CallContext.bounds`, `lineage` and `Caller.actors` reach `select` ([0002](../../docs/decisions/0002-delegation-bounds.md)); no behaviour change for routers
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `select` takes a `ModelRequest`
 - 0.1.0 — initial
 

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sampleQuestion } from '@agent-layers/conformance';
-import { ANONYMOUS, Vocabularies, type PolicyRule } from '@agent-layers/core';
-import { createRulesAuthorization } from '../src/index.ts';
+import { AdapterRegistry, ANONYMOUS, noopTelemetry, Vocabularies, type AccessQuestion, type PolicyRule } from '@agent-layers/core';
+import { adapter, createRulesAuthorization } from '../src/index.ts';
 
 const rules: PolicyRule[] = [
   { effect: 'deny', tools: ['shell__*'] },
@@ -52,4 +52,42 @@ test('risks added in config match rules on their like value, read at call time; 
   assert.deepEqual(await port.evaluate(q), { allowed: true, reason: 'allowed by rule' });
   const broken = createRulesAuthorization({ rules: [{ effect: 'deny', risk: ['exec'] }], default: 'allow' }, 'rules', () => { throw new Error('not composed'); });
   assert.equal((await broken.evaluate(q)).allowed, false, 'vocabularies unavailable: core values only');
+});
+
+const withActors = (actors: unknown, tool = 'docs__read'): AccessQuestion =>
+  ({ ...sampleQuestion({ tool }), caller: { ...sampleQuestion({ tool }).caller, ...(actors === undefined ? {} : { actors }) } }) as AccessQuestion;
+const chain = [{ id: 'planner', kind: 'agent' }, { id: 'notes-agent', kind: 'agent' }];
+
+test('when.actor matches the current actor only, the last of the chain', async () => {
+  const port = createRulesAuthorization({ rules: [{ effect: 'allow', when: { actor: ['notes-*'] } }] });
+  assert.equal((await port.evaluate(withActors(chain))).allowed, true);
+  assert.equal((await port.evaluate(withActors([...chain].reverse()))).allowed, false, 'a prior actor does not count');
+  assert.equal((await port.evaluate(withActors(undefined))).allowed, false, 'no actors, no match');
+  assert.equal((await port.evaluate(withActors([]))).allowed, false);
+});
+
+test('when.actors matches any actor of the chain, prior ones included, only when asked', async () => {
+  const deny = createRulesAuthorization({ rules: [{ effect: 'deny', when: { actors: ['planner'] } }], default: 'allow' });
+  assert.equal((await deny.evaluate(withActors(chain))).allowed, false);
+  assert.equal((await deny.evaluate(withActors([{ id: 'notes-agent', kind: 'agent' }]))).allowed, true);
+  assert.equal((await deny.evaluate(withActors(undefined))).allowed, true);
+  const current = createRulesAuthorization({ rules: [{ effect: 'deny', when: { actor: ['planner'] } }], default: 'allow' });
+  assert.equal((await current.evaluate(withActors(chain))).allowed, true, 'actor ignores the prior planner');
+});
+
+test('when.delegated tells a delegated call from a direct one; malformed actors are ignored', async () => {
+  const port = createRulesAuthorization({ rules: [{ effect: 'allow', when: { delegated: true } }, { effect: 'deny', when: { delegated: false } }] });
+  assert.equal((await port.evaluate(withActors(chain))).allowed, true);
+  assert.equal((await port.evaluate(withActors(undefined))).allowed, false);
+  assert.equal((await port.evaluate(withActors([{ id: '', kind: 'agent' }, { id: 'x', kind: 'robot' }, 7]))).allowed, false, 'only well-formed actors count');
+});
+
+test('the options schema accepts actor, actors and delegated and refuses wrong types', async () => {
+  const registry = new AdapterRegistry().register(adapter);
+  const ctx = { name: 'rules-authorization', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
+  const options = (when: unknown) => ({ rules: [{ effect: 'allow', when }] });
+  await registry.create('AuthorizationPort', 'rules-authorization', options({ actor: ['a'], actors: ['b-*'], delegated: true }), ctx);
+  for (const bad of [{ actor: 'a' }, { actors: [1] }, { delegated: 'yes' }, { delegate: true }]) {
+    await assert.rejects(registry.create('AuthorizationPort', 'rules-authorization', options(bad), ctx), /rules|when|actor|delegat|additional|invalid/i, JSON.stringify(bad));
+  }
 });

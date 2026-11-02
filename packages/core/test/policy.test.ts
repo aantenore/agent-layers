@@ -51,3 +51,17 @@ test('when.authenticated matches verified callers or anonymous ones only', () =>
   assert.equal(evaluatePolicy(rules, { tool: 't', risk: 'read', caller: { id: 'svc', kind: 'agent', roles: [], scopes: [] } }), 'allow');
   assert.equal(evaluatePolicy([{ effect: 'allow', when: { authenticated: true, roles: ['admin'] } }], { tool: 't', risk: 'read', caller: { id: 'u', kind: 'user', roles: [], scopes: [] } }), undefined);
 });
+
+test('actor rules: the current actor by default, prior actors only when a rule asks for them', () => {
+  const chain = { id: 'u-1', kind: 'user' as const, roles: [], scopes: [], actors: [{ id: 'planner', kind: 'agent' as const }, { id: 'billing-bot', kind: 'agent' as const }] };
+  const plain = { id: 'u-2', kind: 'user' as const, roles: [], scopes: [] };
+  const subject = (caller: typeof chain | typeof plain) => ({ tool: 'erp__pay', risk: 'write' as const, caller });
+  assert.equal(evaluatePolicy([{ effect: 'allow', when: { actor: ['billing-*'] } }], subject(chain)), 'allow');
+  assert.equal(evaluatePolicy([{ effect: 'allow', when: { actor: ['planner'] } }], subject(chain)), undefined, 'a prior actor is not the current one');
+  assert.equal(evaluatePolicy([{ effect: 'deny', when: { actors: ['planner'] } }], subject(chain)), 'deny');
+  assert.equal(evaluatePolicy([{ effect: 'allow', when: { actor: ['*'] } }], subject(plain)), undefined);
+  assert.equal(evaluatePolicy([{ effect: 'deny', when: { delegated: true } }], subject(plain)), undefined);
+  assert.equal(evaluatePolicy([{ effect: 'deny', when: { delegated: false } }], subject(plain)), 'deny');
+  const q = { caller: { ...chain, actors: [...chain.actors, { id: 7 }] }, action: 'call', target: { kind: 'tool', id: 'erp__pay', layer: 'tool' as const, risk: 'write', agent: 'a' } };
+  assert.deepEqual(policySubject(q as never).caller?.actors, chain.actors, 'malformed actors are dropped');
+});

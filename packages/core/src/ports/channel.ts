@@ -1,5 +1,5 @@
 import type { OwnerDigest } from '../inbound.ts';
-import type { CallContext, PortBase } from './base.ts';
+import type { CallContext, Delegation, PortBase } from './base.ts';
 import type { Caller } from './identity.ts';
 import type { ModelPort } from './model.ts';
 import type { RunEvent, RunInput, RunResult } from './runtime.ts';
@@ -39,6 +39,12 @@ export interface InboundContext {
   origin: string;
   /** Trace context the request carried, copied unchanged. Pass it on as `CallContext.trace`. */
   trace?: TraceContext;
+  /**
+   * Bounds a calling agent sent in the host's own carrier (the gateway's `Agent-Bounds` and `Agent-Lineage` headers),
+   * parsed and validated (since 1.1.0). Pass it on as `CallContext.delegation`; a channel whose protocol carries bounds
+   * itself passes the tighter of the two.
+   */
+  delegation?: Delegation;
 }
 
 /** A route of a mounted channel or trigger, on the web-standard Request and Response types. */

@@ -56,6 +56,12 @@ flowchart LR
   `Caller`. The interface never invents an identity.
 - **Standards stay at the edge.** A channel translates its standard (OpenAI Chat Completions, MCP, A2A) to the SDK
   language and back; a run status maps to the standard's own state (`waiting` to A2A `input-required`, for example).
+- **Run bounds.** A channel passes the bounds a calling agent sent to the host, which can only tighten the stack's
+  limits ([0002](../decisions/0002-delegation-bounds.md)): the A2A [bounds extension](../../spec/extensions/bounds-v1.md)
+  (declared in the agent card, accepted under the agent-plexus URI too), `params._meta["agent-layers/bounds"]` over MCP,
+  and the gateway's `Agent-Bounds` and `Agent-Lineage` headers for every channel. Malformed bounds refuse the request. A
+  run over the hop limit ends `stopped` (`hop_limit`), shown as A2A `rejected` with the code in the task's extension
+  data, so the calling agent can tell "too deep" from other refusals.
 - **Ingress.** Traffic enters through the ingress of [infra](infra.md).
 - **Transparency.** The channel tells users they are talking to an agent; see
   [governance](../cross-cutting/governance-compliance.md).

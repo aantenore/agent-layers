@@ -14,6 +14,7 @@ export const IDENTITY_LIMITS = defineLimits({
   jwksMaxAgeMs: { path: 'options.jwksMaxAgeMs', default: 600_000, unit: 'ms', min: 1, safe: { min: 10_000, max: 86_400_000 } },
   timeoutMs: { path: 'options.timeoutMs', default: 5000, unit: 'ms', min: 1, unbounded: 'fail', safe: { max: 120_000 } },
   maxKeyTries: { path: 'options.maxKeyTries', default: 5, unit: 'count', min: 1, safe: { max: 20 } },
+  maxActors: { path: 'options.maxActors', default: 10, unit: 'count', min: 1, max: 100, safe: { max: 20 } },
   ...shared,
 });
 

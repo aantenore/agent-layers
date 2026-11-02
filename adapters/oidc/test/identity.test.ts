@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { createMappings, type MappingFn, type MappingRule } from '@agent-layers/core';
-import { agentKind, CALLER_RULES, createOidcIdentity, IDENTITY_LIMITS, type OidcIdentityOptions } from '../src/index.ts';
+import { actorsOf, agentKind, CALLER_RULES, createOidcIdentity, IDENTITY_LIMITS, type OidcIdentityOptions } from '../src/index.ts';
 import { b64, ecKey, edKey, hmacJwt, idp, json, nowSec, rsaKey, server, signJwt } from './helpers.ts';
 
 const rs = rsaKey('rs-1');
@@ -176,6 +176,47 @@ describe('verify', () => {
   });
 });
 
+describe('act claim (RFC 8693)', () => {
+  const act = (sub: string, inner?: unknown, more: Record<string, unknown> = {}) => ({ sub, ...more, ...(inner !== undefined ? { act: inner } : {}) });
+
+  test('nesting is reversed into chronological order: first delegate first, the current actor last', async () => {
+    const token = signJwt(rs, claims({ act: act('agent-b', act('agent-a')) }));
+    const caller = await port().verify(token);
+    assert.deepEqual(caller.actors, [{ id: 'agent-a', kind: 'agent' }, { id: 'agent-b', kind: 'agent' }]);
+    assert.equal(caller.id, 'u-alice', 'the principal stays the subject');
+    assert.equal((await port().verify(signJwt(rs, claims()))).actors, undefined, 'no act, no actors');
+  });
+
+  test('id falls back to client_id; issuer only when it differs from the token issuer', async () => {
+    const chain = act('agent-b', { client_id: 'agent-a', iss: 'https://other.example.com' }, { iss: p.issuer });
+    const caller = await port().verify(signJwt(rs, claims({ act: chain })));
+    assert.deepEqual(caller.actors, [{ id: 'agent-a', kind: 'agent', issuer: 'https://other.example.com' }, { id: 'agent-b', kind: 'agent' }]);
+  });
+
+  test('a malformed act rejects the token without echoing it', async () => {
+    for (const bad of ['agent', 7, null, [], {}, { sub: '' }, { sub: 7 }, act('agent-b', 'x'), act('agent-b', {}), act('agent-b', null)]) {
+      const token = signJwt(rs, claims({ act: bad }));
+      await refused(port().verify(token), token, /"act" claim/);
+    }
+  });
+
+  test('maxActors bounds the chain', async () => {
+    const chain = (n: number): Record<string, unknown> => act(`a${n}`, n > 1 ? chain(n - 1) : undefined);
+    const token = signJwt(rs, claims({ act: chain(3) }));
+    assert.equal((await port({ maxActors: 3 }).verify(token)).actors?.length, 3);
+    await refused(port({ maxActors: 2 }).verify(token), token, /"act" chain is too long/);
+    await refused(port().verify(signJwt(rs, claims({ act: chain(11) }))), 'x', /chain is too long/);
+    assert.throws(() => actorsOf({ act: chain(2) }, 1), /too long/);
+  });
+
+  test('may_act is kept under ext["oidc.may_act"] when it is an object', async () => {
+    const mayAct = { sub: 'agent-b' };
+    const caller = await port().verify(signJwt(rs, claims({ may_act: mayAct, act: act('agent-b') })));
+    assert.deepEqual(caller.ext?.['oidc.may_act'], mayAct);
+    assert.equal((await port().verify(signJwt(rs, claims({ may_act: 'x' })))).ext?.['oidc.may_act'], undefined);
+  });
+});
+
 describe('claims to caller mappings', () => {
   const mapped = (rules: readonly MappingRule[], o: Partial<OidcIdentityOptions> = {}, fns?: Map<string, MappingFn>) =>
     port(o, { mappings: createMappings('identity', { in: rules }, fns ? { fns } : {}) });
@@ -195,9 +236,14 @@ describe('claims to caller mappings', () => {
     assert.deepEqual(CALLER_RULES.map((r) => r.to), ['/roles', '/scopes', '/name']);
   });
 
-  test('id, kind and credential cannot be mapped: static rules fail at creation, functions at verification', async () => {
+  test('id, kind, actors and credential cannot be mapped: static rules fail at creation, functions at verification', async () => {
     for (const to of ['/kind', '/id', '/credential']) assert.throws(() => mapped([{ from: '/azp', to }]), /may not write/, to);
     assert.throws(() => mapped([{ drop: '/kind' }]), /may not write/);
+    assert.throws(() => mapped([{ from: '/sub', to: '/actors' }]), /may not write/);
+    const forge: MappingFn = (_c, target) => ({ ...(target as object), actors: [{ id: 'root', kind: 'agent' }] });
+    const forged = await mapped([{ fn: './x.ts#f' }], {}, new Map([['./x.ts#f', forge]])).verify(signJwt(rs, claims()));
+    assert.equal(forged.actors, undefined, 'a mapping cannot add actors');
+    assert.deepEqual((await mapped([{ fn: './x.ts#f' }], {}, new Map([['./x.ts#f', forge]])).verify(signJwt(rs, claims({ act: { sub: 'agent-a' } })))).actors, [{ id: 'agent-a', kind: 'agent' }], 'only the verified act');
     const promote: MappingFn = (_c, target) => ({ ...(target as object), kind: 'agent' });
     const token = signJwt(rs, claims());
     await refused(mapped([{ fn: './x.ts#promote' }], {}, new Map([['./x.ts#promote', promote]])).verify(token), token, /caller mapping failed/);

@@ -1,6 +1,6 @@
 # AuthorizationPort
 
-Layer: `identity` (L6 Identity & access) · Version: 1.0.0 · Conformance: `checkAuthorization`
+Layer: `identity` (L6 Identity & access) · Version: 1.1.0 · Conformance: `checkAuthorization`
 
 ## Purpose
 
@@ -40,6 +40,7 @@ Boundary: this port answers "may they". "Who are they" is [IdentityPort](Identit
 - Order in the stack: local policy rules come first; only when they do not deny does this port get asked. When neither policy rules nor this port is configured, tool calls are allowed. A deployment that needs deny by default configures a catch-all deny rule or an authorization adapter.
 - A deny carries a human-readable `reason` when available; it stays inside the stack and the model sees a generic denial.
 - The question is built from the run: roles and scopes come from the verified caller. Callers cannot add their own claims to it.
+- Delegation (since 1.1.0): `caller.actors` is the verified chain of agents that acted for the caller, first delegate first, the current actor last. As in RFC 8693, only the current actor counts for access control by default; the local rules match it with `when.actor`, prior actors only with `when.actors`, and `when.delegated` matches any chain or none. An adapter that rebuilds the question for an engine keeps well-formed actors and drops the rest.
 - An unauthenticated call is never presented as the agent's own identity. The caller is the explicit anonymous caller, and engines must not match `user` or `agent` rules for it.
 - Decisions are side-effect free and repeatable for the same question, except where the policy depends on time or external state.
 - Approval is separate: an `ask` effect from the local policy is resolved by [ApprovalPort](ApprovalPort.md) before this port is asked.
@@ -64,6 +65,7 @@ Boundary: this port answers "may they". "Who are they" is [IdentityPort](Identit
 
 ## Version history
 
+- 1.1.0 — `AccessQuestion.caller.actors` ([0002](../../docs/decisions/0002-delegation-bounds.md)); policy rules match the current actor (`when.actor`), any actor (`when.actors`) or delegation at all (`when.delegated`)
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `AccessQuestion {caller, action, target, args?}` replaces `AccessRequest`; `AccessDecision.allowed` (was `decision`) and `reason`; anonymous is an explicit caller
 - 0.2.0 — unauthenticated calls use an explicit `anonymous` subject; `subject.properties.authenticated` added
 - 0.1.0 — initial

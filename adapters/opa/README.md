@@ -17,6 +17,9 @@ schema of its own, so the input is the question in language names (`input.caller
   and `scopes` as string lists). Anything else, including calls without a caller, is sent as
   `{ "kind": "anonymous", "id": "anonymous", "roles": [], "scopes": [] }`. Policies should allow only
   `input.caller.kind != "anonymous"`.
+- Delegation: `input.caller.actors` is the caller's verified chain of agents (RFC 8693), first delegate first and the
+  agent presenting the credential last (`input.caller.actors[count(input.caller.actors) - 1]`); absent when no
+  delegation is known. Entries keep `id`, `kind` and, when set, `name` and `issuer`. The credential is never sent.
 - Tool arguments (`input.args`) stay inside the stack unless `includeArgs` is set.
 - Mappings: `out` rules on the `AccessQuestion` (`mappings.authorization.out`) rewrite the input before it is sent;
   they read the question as it may leave the stack (no credential, no arguments without `includeArgs`).

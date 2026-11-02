@@ -32,6 +32,23 @@ test('posts { input: AccessQuestion } in language names to the Data API, without
   }
 });
 
+test('the delegation chain reaches OPA as input.caller.actors; the credential never does', async () => {
+  const s = await opa();
+  try {
+    const actors = [{ id: 'planner', kind: 'agent', issuer: 'https://idp.example.com' }, { id: 'notes', kind: 'agent', name: 'Notes' }];
+    const caller = { id: 'alice', kind: 'user', roles: ['analyst'], scopes: [], actors: [...actors, { id: '', kind: 'agent' }, { id: 'x', kind: 'robot' }, 'bad'], credential: 'raw-token' };
+    await createOpa({ url: s.url }).evaluate(question(caller, 'write'));
+    const sent = s.seen.at(-1)!.body.input.caller;
+    assert.deepEqual(sent.actors, actors, 'well-formed actors, in order');
+    assert.equal(sent.credential, undefined);
+    assert.ok(!JSON.stringify(s.seen.at(-1)!.body).includes('raw-token'));
+    await createOpa({ url: s.url }).evaluate(question(user('alice', ['analyst']), 'write'));
+    assert.equal('actors' in s.seen.at(-1)!.body.input.caller, false, 'no chain, no field');
+  } finally {
+    await s.close();
+  }
+});
+
 test('anonymous and malformed callers reach OPA as anonymous; a credential never leaves the stack', async () => {
   const s = await opa();
   try {

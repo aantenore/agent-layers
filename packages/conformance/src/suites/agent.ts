@@ -1,5 +1,5 @@
 import {
-  ApprovalPending, PORT_VERSIONS, versionAtLeast,
+  ApprovalPending, BoundsExceeded, PORT_VERSIONS, runLimits, startRun, versionAtLeast,
   type AgentSpec, type AttrFilter, type CallContext, type Caller, type Document, type IngestionPort, type KnowledgePort, type MemoryPort, type RunEvent, type RunnableAgent,
   type RunResult, type RuntimePort, type Stack, type StatePort, type ToolPort,
 } from '@agent-layers/core';
@@ -14,7 +14,7 @@ export interface RuntimeFixtures {
   toolInput?: string;
   /**
    * RuntimePort version the runtime implements (`checkAdapter` passes its descriptor's; default: the core's). The
-   * behaviour checks (abort, stream ≡ run, caller, approval) apply from 1.1.0.
+   * behaviour checks (abort, stream ≡ run, caller, approval) apply from 1.1.0, the bounds checks from 1.2.0.
    */
   portVersion?: string;
 }
@@ -25,14 +25,23 @@ const CONFORMANCE_CALLER: Caller = { id: 'conformance-user', kind: 'user', roles
  * The fixture stack seen through recorders: every model and tool call context is kept, and with `pending` every tool
  * call throws `ApprovalPending`, as the stack's governed tools do for a call waiting for a person.
  */
-function probeStack(stack: Stack, contexts: CallContext[], pending: boolean): Stack {
+const BUDGET_STOP = { code: 'limit', layer: 'harness', by: 'sdk.budget' } as const;
+
+function probeStack(stack: Stack, contexts: CallContext[], pending: boolean, exceeded = false): Stack {
   const probe = Object.create(stack) as Stack;
+  const refuse = () => { throw new BoundsExceeded(BUDGET_STOP); };
   return Object.assign(probe, {
     modelFor(agent: AgentSpec) {
       const model = stack.modelFor(agent);
       return Object.assign(Object.create(model), {
-        chat: (req: Parameters<typeof model.chat>[0], ctx: CallContext) => { contexts.push(ctx); return model.chat(req, ctx); },
-        ...(model.stream ? { stream: (req: Parameters<typeof model.chat>[0], ctx: CallContext) => { contexts.push(ctx); return model.stream!(req, ctx); } } : {}),
+        chat: (req: Parameters<typeof model.chat>[0], ctx: CallContext) => { contexts.push(ctx); if (exceeded) refuse(); return model.chat(req, ctx); },
+        ...(model.stream ? {
+          stream: (req: Parameters<typeof model.chat>[0], ctx: CallContext) => {
+            contexts.push(ctx);
+            if (exceeded) refuse();
+            return model.stream!(req, ctx);
+          },
+        } : {}),
       });
     },
     toolsFor(agent: AgentSpec): ToolPort {
@@ -108,6 +117,35 @@ async function checkRunBehaviour(port: RuntimePort, f: RuntimeFixtures, agent: R
   }
 }
 
+/**
+ * Run bounds (1.2.0): the run's bounds reach every model and tool call of the run (the same view, so the core's debits
+ * apply to it), and a model call the core refuses (`BoundsExceeded`) ends the run `stopped` with that bound's code, or
+ * the runtime lets the error through to the host.
+ */
+async function checkRunBounds(port: RuntimePort, f: RuntimeFixtures, c: Checks): Promise<void> {
+  const input = f.input ?? 'hello';
+  const name = f.agent!.name;
+  const contexts: CallContext[] = [];
+  const probed = await c.attempt('bind (bounds)', () => port.bind(probeStack(f.stack!, contexts, false), f.agent!));
+  if (probed) {
+    const { ledger } = startRun({ runId: 'conformance-run' }, runLimits({}));
+    await c.attempt('run with bounds', () => probed.run(input, testContext({ agent: name, bounds: ledger.view })));
+    if (!contexts.length) c.skip('bounds: the run made no model or tool call through the stack');
+    else c.expect(contexts.every((x) => x.bounds?.deadlineAt === ledger.view.deadlineAt && x.bounds?.maxHops === ledger.view.maxHops), 'bounds: a model or tool call of the run did not carry the run bounds');
+  }
+  const refused: CallContext[] = [];
+  const spent = await c.attempt('bind (budget spent)', () => port.bind(probeStack(f.stack!, refused, false, true), f.agent!));
+  if (!spent) return;
+  let stopped: RunResult | undefined;
+  let thrown: unknown;
+  await c.attempt('run (budget spent)', async () => {
+    try { stopped = await spent.run(input, testContext({ agent: name })); } catch (err) { thrown = err; }
+  });
+  if (!refused.length) { c.skip('bounds: the run made no model call through the stack'); return; }
+  if (thrown !== undefined) c.expect(thrown instanceof BoundsExceeded, `bounds: the run threw ${thrown instanceof Error ? thrown.name : String(thrown)}`);
+  else if (stopped) c.expect(stopped.status === 'stopped' && stopped.reason?.code === 'limit', `bounds: a refused model call ended the run ${stopped.status} (${stopped.reason?.code ?? 'no reason'}), expected stopped with limit`);
+}
+
 export async function checkRuntime(port: RuntimePort, f: RuntimeFixtures = {}, c = new Checks()): Promise<Checks> {
   c.expect(typeof port.bind === 'function', 'bind must be a function');
   if (!f.stack || !f.agent) { c.skip('run: needs a stack and an agent fixture'); return c; }
@@ -121,6 +159,8 @@ export async function checkRuntime(port: RuntimePort, f: RuntimeFixtures = {}, c
     c.produced('run', result);
     if (versionAtLeast(f.portVersion ?? PORT_VERSIONS.RuntimePort, '1.1.0')) await checkRunBehaviour(port, f, agent, result, c);
     else c.skip(`behaviour: RuntimePort ${f.portVersion} predates the abort, stream, caller and approval checks (1.1.0)`);
+    if (versionAtLeast(f.portVersion ?? PORT_VERSIONS.RuntimePort, '1.2.0')) await checkRunBounds(port, f, c);
+    else c.skip(`bounds: RuntimePort ${f.portVersion} predates the run bounds checks (1.2.0)`);
   }
   return c;
 }

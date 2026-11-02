@@ -1,4 +1,4 @@
-import { createMappings, limitValue, MappingError, type Caller, type IdentityPort, type LimitValue, type MappingRule, type Mappings } from '@agent-layers/core';
+import { createMappings, limitValue, MappingError, type Actor, type Caller, type IdentityPort, type LimitValue, type MappingRule, type Mappings } from '@agent-layers/core';
 import { abortable, discover, OidcError, requestJson, secureUrl, type FetchLike, type HttpLimits } from './http.ts';
 import { candidateKeys, checkAlgorithm, decodeJwt, importKey, verifySignature, type Jwk } from './jwt.ts';
 import { IDENTITY_LIMITS as LIMITS } from './limits.ts';
@@ -34,6 +34,8 @@ export interface OidcIdentityOptions {
   maxResponseBytes?: LimitValue;
   /** Characters of a provider `error_description` kept in an error message (default 200). */
   errorDescriptionChars?: number;
+  /** Longest `act` chain (RFC 8693) accepted in a token, in actors (default 10). A longer chain rejects the token. */
+  maxActors?: number;
   /** Accept plain-HTTP issuer and JWKS URLs on non-loopback hosts (default false). */
   allowHttp?: boolean;
   /**
@@ -69,6 +71,8 @@ export const DEFAULT_ALGORITHMS = ['RS256', 'ES256'];
 export const CLAIMS_KEY = 'oidc.claims';
 /** The verified `exp` claim (seconds), always: the credential adapter bounds exchanged tokens by it. */
 export const EXP_KEY = 'oidc.exp';
+/** The verified `may_act` claim (RFC 8693) when it is an object: who may act for the subject. Informational. */
+export const MAY_ACT_KEY = 'oidc.may_act';
 
 /**
  * Default claims → caller rules (Keycloak layout and RFC 9068), replaceable through the stack's `mappings.identity.in`.
@@ -128,6 +132,24 @@ export function clientRolesOf(claims: Record<string, unknown>, clients: readonly
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * The delegation chain of the `act` claim (RFC 8693), first delegate first: the outermost `act` is the current actor
+ * and nested ones are prior actors, so the nesting is reversed. `id` is `act.sub` (else `act.client_id`); `issuer` only
+ * when `act.iss` differs from the token's. A malformed `act` or a chain longer than `max` is an invalid token.
+ */
+export function actorsOf(claims: Record<string, unknown>, max: number): Actor[] {
+  const out: Actor[] = [];
+  for (let act = claims.act; act !== undefined; act = act.act) {
+    if (!isObject(act)) throw invalid('token "act" claim is malformed');
+    if (out.length >= max) throw invalid('token "act" chain is too long');
+    const id = str(act.sub) ?? str(act.client_id);
+    if (!id) throw invalid('token "act" claim names no actor');
+    const issuer = str(act.iss);
+    out.push({ id, kind: 'agent', ...(issuer && issuer !== claims.iss ? { issuer } : {}) });
+  }
+  return out.reverse();
+}
 // No cause is attached: a rule's error text can carry claim values or, from an `fn`, anything it saw.
 const mappingFailed = (why: string) => new OidcError('config', `oidc: caller mapping failed (${why})`);
 
@@ -141,9 +163,9 @@ function mappedList(v: unknown, field: string): string[] {
 /**
  * The caller from the mapped shape: `id` and `kind` must be the verified ones; roles and scopes are kept as string
  * lists and completed with the client roles and `scp`; `name` only when a string; `ext` only in the `oidc` namespace.
- * Anything else a mapping added is dropped.
+ * `actors` come from the verified `act` claim, never from a mapping. Anything else a mapping added is dropped.
  */
-function finishCaller(mapped: unknown, base: { id: string; kind: 'user' | 'agent' }, claims: Record<string, unknown>, more: { clientRoles: string[]; keepClaims: boolean; credential: string }): Caller {
+function finishCaller(mapped: unknown, base: { id: string; kind: 'user' | 'agent' }, claims: Record<string, unknown>, more: { clientRoles: string[]; actors: Actor[]; keepClaims: boolean; credential: string }): Caller {
   if (!isObject(mapped)) throw mappingFailed('not an object');
   if (mapped.id !== base.id || mapped.kind !== base.kind) throw mappingFailed('id and kind come from verification');
   const roles = [...new Set([...mappedList(mapped.roles, 'roles'), ...more.clientRoles])];
@@ -152,11 +174,14 @@ function finishCaller(mapped: unknown, base: { id: string; kind: 'user' | 'agent
   if (mapped.ext !== undefined && !isObject(mapped.ext)) throw mappingFailed('ext is not an object');
   const ext: Record<string, unknown> = Object.fromEntries(Object.entries(mapped.ext ?? {}).filter(([k]) => k.startsWith('oidc.')));
   if (isNum(claims.exp)) ext[EXP_KEY] = claims.exp;
+  if (isObject(claims.may_act)) ext[MAY_ACT_KEY] = structuredClone(claims.may_act);
+  else delete ext[MAY_ACT_KEY];
   if (more.keepClaims) ext[CLAIMS_KEY] = structuredClone(claims);
   else delete ext[CLAIMS_KEY];
   return {
     id: base.id, kind: base.kind, roles, scopes: [...scopes],
     ...(typeof mapped.name === 'string' && mapped.name ? { name: mapped.name } : {}),
+    ...(more.actors.length ? { actors: more.actors } : {}),
     credential: more.credential,
     ...(Object.keys(ext).length ? { ext } : {}),
   };
@@ -185,6 +210,7 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
   const maxAge = limitValue(LIMITS.jwksMaxAgeMs, opts.jwksMaxAgeMs);
   const maxKeyTries = limitValue(LIMITS.maxKeyTries, opts.maxKeyTries);
   const maxTokenChars = limitValue(LIMITS.maxTokenChars, opts.maxTokenChars);
+  const maxActors = limitValue(LIMITS.maxActors, opts.maxActors);
   const http: HttpLimits = {
     timeoutMs: limitValue(LIMITS.timeoutMs, opts.timeoutMs),
     maxResponseBytes: limitValue(LIMITS.maxResponseBytes, opts.maxResponseBytes),
@@ -200,7 +226,7 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
   const mappings = hooks.mappings ?? createMappings('identity', { in: CALLER_RULES });
   for (const r of mappings.rules.in) {
     for (const p of [r.to, r.drop]) {
-      if (typeof p === 'string' && /^\/(id|kind|credential)(\/|$)/.test(p)) throw new OidcError('config', `oidc: mappings may not write "${p}": id, kind and credential come from verification`);
+      if (typeof p === 'string' && /^\/(id|kind|credential|actors)(\/|$)/.test(p)) throw new OidcError('config', `oidc: mappings may not write "${p}": id, kind, actors and credential come from verification`);
     }
   }
 
@@ -280,6 +306,7 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
       // A token without `sub` names no one unless it is an allow-listed agent client.
       const subject = c.sub !== undefined ? str(c.sub) : kind === 'agent' ? clientOf(c) : undefined;
       if (!subject) throw invalid('token has no subject');
+      const actors = actorsOf(c, maxActors);
       const base = { id: subject, kind, roles: [] as string[], scopes: [] as string[] };
       let mapped: unknown;
       try {
@@ -288,7 +315,7 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
         const rule = err instanceof MappingError ? /\b(in\[\d+\])/.exec(err.message)?.[1] : undefined;
         throw mappingFailed(rule ? `rule ${rule} failed` : 'a rule failed');
       }
-      return finishCaller(mapped, base, c, { clientRoles: clientRolesOf(c, roleClients, namespaceRoles), keepClaims, credential });
+      return finishCaller(mapped, base, c, { clientRoles: clientRolesOf(c, roleClients, namespaceRoles), actors, keepClaims, credential });
     },
   };
 }

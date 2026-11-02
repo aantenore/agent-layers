@@ -26,7 +26,7 @@ export type RunStatus = 'completed' | 'failed' | 'stopped' | 'waiting';
 
 /** Why a run did not complete. Core values; config may add values `like` one of them. */
 export type StopCode =
-  | 'guard_block' | 'denied' | 'aborted' | 'timeout' | 'limit' | 'needs_input' | 'needs_auth' | 'rejected' | 'error'
+  | 'guard_block' | 'denied' | 'aborted' | 'timeout' | 'limit' | 'hop_limit' | 'needs_input' | 'needs_auth' | 'rejected' | 'error'
   | (string & {});
 
 /** Structured stop reason. Required on a RunResult whose status is not `completed`. */

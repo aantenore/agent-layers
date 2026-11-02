@@ -1,6 +1,6 @@
 # The SDK language
 
-Version 1.0.
+Version 1.1. Version 1.1 adds, all optional: `Caller.actors` (the delegation chain), `CallContext.bounds`, `lineage` and `delegation` (run bounds), the shapes `Actor`, `Bounds`, `Lineage` and `Delegation`, and the core stop code `hop_limit` ([ADR 0002](../docs/decisions/0002-delegation-bounds.md)).
 
 The data that crosses a port is written in one language owned by this project: fixed and minimal at the core, versioned as a whole, extensible through declared extensions. Standards and technologies appear only inside adapters, which translate at the edges. The reasoning is in [ADR 0001](../docs/decisions/0001-sdk-language.md); this page is the reference.
 
@@ -51,7 +51,7 @@ Every shape has an optional `ext` unless its schema says otherwise. Fixed shapes
 | `EvalResult` (with `EvalScore`) | [`eval-result.json`](schemas/eval-result.json) | [`EvaluatorPort`](ports/EvaluatorPort.md) |
 | `Feedback` | [`feedback.json`](schemas/feedback.json) | [`FeedbackPort`](ports/FeedbackPort.md) |
 
-Shapes defined on their port page only: `KnowledgeQuery`, `MemoryScope`, `MemoryItem`, `CallContext`, `InboundContext`. Shared definitions (`Ext`, `Attrs`, `AttrFilter`, `Part`, `Usage`, `StopReason`, `PublicCaller` and every vocabulary) are in [`schemas/common.json`](schemas/common.json).
+Shapes defined on their port page only: `KnowledgeQuery`, `MemoryScope`, `MemoryItem`, `CallContext`, `InboundContext`. Shared definitions (`Ext`, `Attrs`, `AttrFilter`, `Part`, `Usage`, `StopReason`, `PublicCaller`, `Actor`, `Bounds`, `Lineage`, `Delegation` and every vocabulary) are in [`schemas/common.json`](schemas/common.json).
 
 Rules that cross shapes:
 
@@ -78,7 +78,7 @@ A vocabulary is a set of values defined by the SDK. The core branches only on co
 | `guardAction` | `allow`, `block`, `redact` | no | `GuardVerdict.action` |
 | `guardLabel` | `pii`, `secret`, `injection`, `toxicity`, `policy`, `other` | values with `like` | `GuardVerdict.labels` |
 | `runStatus` | `completed`, `failed`, `stopped`, `waiting` | no | `RunResult.status` |
-| `stopCode` | `guard_block`, `denied`, `aborted`, `timeout`, `limit`, `needs_input`, `needs_auth`, `rejected`, `error` | values with `like` | `RunResult.reason.code` |
+| `stopCode` | `guard_block`, `denied`, `aborted`, `timeout`, `limit`, `hop_limit`, `needs_input`, `needs_auth`, `rejected`, `error` | values with `like` | `RunResult.reason.code` |
 | `event` | `run.start`, `model.reply`, `tool.call`, `tool.result`, `text`, `run.end` | namespaced types | `RunEvent.type` |
 | `callerKind` | `user`, `agent` (`anonymous` only inside `AccessQuestion`) | no | `Caller.kind` |
 | `approvalStatus` | `pending`, `approved`, `denied`, `expired` | no | `Approval.status` |
@@ -231,10 +231,10 @@ The port operations are unchanged. The core emits only `agent.*` names. Standard
 | --- | --- |
 | Spans | `agent.run`, `agent.model.call`, `agent.cache.lookup`, `agent.router.select`, `agent.tool.call`, `agent.access.check`, `agent.guard.check`, `agent.knowledge.search` |
 | Event | `agent.knowledge.error` |
-| Metrics | `agent.model.tokens` (attribute `agent.tokens.kind`: `input` or `output`), `agent.tool.calls`, `agent.access.decisions`, `agent.guard.actions` |
+| Metrics | `agent.model.tokens` (attribute `agent.tokens.kind`: `input` or `output`), `agent.tool.calls`, `agent.access.decisions`, `agent.guard.actions`, `agent.bounds.stops` (attribute `agent.run.reason`) |
 | Mandatory attribute | `agent.layer` on every span, event and metric |
 | Adapter | `agent.adapter` on core spans: the configured adapter that did the work (`reinloop`, `rule-router`), set by the stack |
-| Run | `agent.run.id`, `agent.name`, `agent.run.status`, `agent.run.reason` (the stop code) |
+| Run | `agent.run.id`, `agent.name`, `agent.run.status`, `agent.run.reason` (the stop code), `agent.run.hops`, `agent.run.max_hops`, `agent.run.deadline_ms`, `agent.run.root`, `agent.run.parent`, `agent.caller.actors` |
 | Model | `agent.model.requested`, `agent.model.used`, `agent.model.finish`, `agent.tokens.input`, `agent.tokens.output` |
 | Tool | `agent.tool.name`, `agent.tool.source`, `agent.tool.outcome` |
 | Guard | `agent.guard.name`, `agent.guard.stage`, `agent.guard.action` |
@@ -269,11 +269,26 @@ A run that does not complete carries a structured reason, required whenever `sta
 | --- | --- |
 | `code` | Stop code vocabulary. The only field consumers branch on. |
 | `layer` | Layer that stopped the run. |
-| `by` | Instance that stopped it: a guard name, an approval adapter, a remote agent. |
+| `by` | Instance that stopped it: a guard name, an approval adapter, a remote agent, or a core check (`sdk.deadline`, `sdk.budget`, `sdk.hops`). For people and telemetry only. |
 | `stage` | Guard stage, for guard stops. |
 | `detail` | Internal text. Never parsed. |
 
 A run that stops for a human answer ends with status `waiting`, reason `needs_input` or `needs_auth`. For a pending approval the reason is `{ "code": "needs_input", "layer": "identity", "by": "<approval instance>", "detail": "<approval id>" }`. The governed tool result that asked for it carries `ext["sdk.approval"]`, so a runtime can end the run without parsing text. A later run in the same session (same session id, same caller) that makes the same call, same tool and same arguments, gets the decision: approved runs once, denied is refused, still pending returns the same approval id (see [ApprovalPort](ports/ApprovalPort.md)). The session carries the decision, not the conversation: `basic-runtime` and `reinloop` start each run from its input, so the follow-up message must lead the model to the same call.
+
+The run bounds stop a run with core codes: the deadline with `timeout` (`by: "sdk.deadline"`), the token or cost budget with `limit` (`by: "sdk.budget"`), the hop limit of a chain of agents with `hop_limit` (`by: "sdk.hops"`, refused before the run starts). See [Run bounds](#run-bounds).
+
+## Run bounds
+
+Every run has bounds, also when it runs alone: a deadline, a token and a cost budget, and a hop count with a hop limit. The host computes them when the run starts, from `limits.run` and from what a calling agent sent (`CallContext.delegation`), which can only tighten them; `hops` is the larger of the sent count and the verified actor chain (`Caller.actors`, plus one when the caller is an agent). `CallContext.bounds` is a read view of the run's ledger, shared by every copy of the context; the core debits it. Across a hop, time travels as remaining milliseconds, never as a clock time. Shapes, all in [`common.json`](schemas/common.json):
+
+| Shape | Fields |
+| --- | --- |
+| `Actor` | `id`, `kind` (`callerKind`), `name?`, `issuer?` |
+| `Bounds` | `deadlineAt?` (ISO time), `hops`, `maxHops`, `tokens?`, `costUsd?`, `reserved?` (`{tokens?, costUsd?}`) |
+| `Lineage` | `rootRunId`, `parentRunId` |
+| `Delegation` | `remainingMs`, `hops`, `maxHops`, `tokens?`, `costUsd?`, `rootRunId?`, `parentRunId?` |
+
+The reasoning is in [ADR 0002](../docs/decisions/0002-delegation-bounds.md); the A2A carrier is the [bounds extension](extensions/bounds-v1.md).
 
 ## Trace context
 

@@ -92,6 +92,13 @@ Every request goes through the same steps before any route runs (details in the
    parse is ignored and starts a new trace. The gateway bounds them only: longer than `gateway.maxTraceChars` (512) or
    outside printable ASCII, a value is dropped.
 
+5. **Run bounds.** `Agent-Bounds` (`remaining-ms=45000, hops=2, max-hops=4, tokens=1000, cost-usd=0.5`) and
+   `Agent-Lineage` (`root="run-a1", parent="run-b7"`) are RFC 9651 dictionaries a calling agent may send. The gateway
+   parses them into the route's `ctx.delegation`, each bounded by `gateway.maxTraceChars`, before the body is read; a
+   malformed or repeated header, or invalid values, is a 400. Every channel passes them on to the run, where they can
+   only tighten `limits.run` ([0002](decisions/0002-delegation-bounds.md)). A2A clients send the same values in the
+   [bounds extension](../spec/extensions/bounds-v1.md) instead; when both are present, the tighter values apply.
+
 Agent cards and the health endpoints are public. Sessions (MCP) and tasks (A2A) belong to the caller that created
 them: another caller presenting their id gets "not found".
 

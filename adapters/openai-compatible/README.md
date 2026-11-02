@@ -97,6 +97,9 @@ model endpoint: `base_url = <gateway>/v1`, `api_key = <a credential the identity
     field with `session.from: "user"`) is the run's session, scoped to the caller: a later request with the same value
     continues it, so a call that waited for an approval finds the decision. Letters, digits, `_`, `.`, `:` and `-`, up
     to 128 characters; another value, or an anonymous request, means no session.
+- Run bounds: the gateway reads `Agent-Bounds` and `Agent-Lineage` request headers (see the gateway README) and the
+  channel passes them to the run, which can only tighten the stack's limits. A malformed header is a 400 from the
+  gateway before this channel runs.
 - `stream: true` answers with Server-Sent Events in the Chat Completions chunk format, ending with `data: [DONE]`;
   `stream_options.include_usage` adds a final usage chunk.
 - Requests must be `Content-Type: application/json` (415 otherwise).

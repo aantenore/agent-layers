@@ -1,10 +1,10 @@
 import { defineAdapter, limitProperties, PORT_VERSIONS } from '@agent-layers/core';
 import { createOidcCredentials, type OidcCredentialsOptions } from './credentials.ts';
-import { CALLER_RULES, CLAIMS_KEY, createOidcIdentity, EXP_KEY, type OidcIdentityOptions } from './identity.ts';
+import { CALLER_RULES, CLAIMS_KEY, createOidcIdentity, EXP_KEY, MAY_ACT_KEY, type OidcIdentityOptions } from './identity.ts';
 import { JWS_ALGORITHMS } from './jwt.ts';
 import { CREDENTIAL_LIMITS, IDENTITY_LIMITS } from './limits.ts';
 
-export { agentKind, CALLER_RULES, CLAIMS_KEY, clientOf, clientRolesOf, createOidcIdentity, DEFAULT_ALGORITHMS, EXP_KEY, type AgentClients } from './identity.ts';
+export { actorsOf, agentKind, CALLER_RULES, CLAIMS_KEY, clientOf, clientRolesOf, createOidcIdentity, DEFAULT_ALGORITHMS, EXP_KEY, MAY_ACT_KEY, type AgentClients } from './identity.ts';
 export type { OidcIdentityHooks, OidcIdentityOptions, OidcIdentityPort } from './identity.ts';
 export { createOidcCredentials, ACCESS_TOKEN_TYPE, TOKEN_EXCHANGE_GRANT } from './credentials.ts';
 export type { OidcCredentialsHooks, OidcCredentialsOptions, OidcCredentialPort } from './credentials.ts';
@@ -45,14 +45,14 @@ export const identityAdapter = defineAdapter<'IdentityPort', OidcIdentityOptions
         clockSkewSec: 'Tolerance for exp, nbf and iat', jwksMinRefreshMs: 'Minimum interval between key set fetches after an unknown kid or a failure',
         jwksMaxAgeMs: 'Key set cache lifetime', timeoutMs: 'Time limit per discovery or key set request', maxKeyTries: 'Most keys tried for a token without a kid',
         maxTokenChars: 'Longest token accepted', maxResponseBytes: 'Largest discovery or key set document read',
-        errorDescriptionChars: 'Characters of a provider error description kept in an error message',
+        errorDescriptionChars: 'Characters of a provider error description kept in an error message', maxActors: 'Longest act chain accepted in a token',
       }),
     },
     required: ['issuer'],
     additionalProperties: false,
   },
   limits: IDENTITY_LIMITS,
-  ext: { produces: [CLAIMS_KEY, EXP_KEY] },
+  ext: { produces: [CLAIMS_KEY, EXP_KEY, MAY_ACT_KEY] },
   mappingDefaults: { in: { shape: 'Caller', rules: CALLER_RULES } },
   create: (options, ctx) => createOidcIdentity(options, { mappings: ctx.mappings }, ctx.name),
 });
@@ -76,6 +76,7 @@ export const credentialAdapter = defineAdapter<'CredentialPort', OidcCredentials
       mode: { enum: ['on-behalf-of', 'self'] },
       authMethod: { enum: ['client_secret_basic', 'client_secret_post'] },
       audienceParam: { enum: ['audience', 'resource', 'none'] },
+      actor: { enum: ['self'] },
       allowHttp: { type: 'boolean' },
       ...limitProperties(CREDENTIAL_LIMITS, {
         refreshSkewSec: 'Renew a cached token this long before it expires', defaultTtlSec: 'Lifetime assumed when the response gives none',

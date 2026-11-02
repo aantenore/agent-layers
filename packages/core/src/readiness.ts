@@ -24,7 +24,7 @@ export interface Readiness {
   /**
    * Warnings that do not fail the check: ext keys an adapter reads that nothing in the profile produces, and, on the
    * production tier, a model cache shared across callers while knowledge sources are configured, and inbound
-   * channels or triggers without `sessions.secret`.
+   * channels or triggers without `sessions.secret`; on any tier, a cost budget without model prices.
    */
   warnings: string[];
 }
@@ -66,6 +66,7 @@ export async function readiness(config: ResolvedConfig, registry: AdapterRegistr
   }
   const warnings = [...language.warnings];
   if (config.tier === 'production') warnings.push(...sharedCacheWarnings(config), ...sessionSecretWarnings(config));
+  warnings.push(...pricingWarnings(config));
   return { ok: problems.length === 0 && !limits.some((l) => l.severity === 'fail'), tier: config.tier, requires, problems, limits, warnings };
 }
 
@@ -75,6 +76,13 @@ function sharedCacheWarnings(config: ResolvedConfig): string[] {
   const knowledge = layers.knowledge && typeof layers.knowledge === 'object' ? Object.values(layers.knowledge).filter((v) => v != null) : [];
   if (config.pipeline.cacheScope !== 'shared' || layers.cache == null || knowledge.length === 0) return [];
   return ['pipeline.cacheScope is shared while knowledge sources are configured: a cached answer built from one caller\'s passages can be served to another caller; use "caller"'];
+}
+
+/** A cost budget is enforced only on priced model calls (and on what remote agents report). */
+function pricingWarnings(config: ResolvedConfig): string[] {
+  const max = config.limits.run?.maxCostUsd;
+  if (max === undefined || max === 'unbounded' || Object.keys(config.pipeline.pricing ?? {}).length) return [];
+  return ['limits.run.maxCostUsd is set but pipeline.pricing is empty: the cost budget counts only what remote agents report; add the prices of your models'];
 }
 
 /** Session ids leave the process (A2A context ids): without a key, their owner digest is a plain hash of the caller id. */

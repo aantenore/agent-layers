@@ -18,6 +18,7 @@ How a run ends:
 | Final answer | `completed` | none |
 | Guard block | `stopped` | `{ code: 'guard_block', layer: 'guardrail', by: '<guard>', stage }` |
 | Turn limit (`maxTurns`) | `stopped` | `{ code: 'limit', layer: 'harness', detail: 'turns' }` |
+| Run bounds of the stack (`limits.run`: deadline, token or cost budget), checked by the core | `stopped` | `{ code: 'timeout', layer: 'harness', by: 'sdk.deadline' }` / `{ code: 'limit', layer: 'harness', by: 'sdk.budget' }` |
 | Caller aborted / timeout | `stopped` | `{ code: 'aborted' }` / `{ code: 'timeout' }` |
 | Governed call waiting for an approval (`ApprovalPending`, or a result with `ext["sdk.approval"]`) | `waiting` | `{ code: 'needs_input', layer: 'identity', by: '<approval instance>', detail: '<approval id>' }` |
 | Any other error | `failed` | `{ code: 'error', detail: '<error name>' }` |
@@ -32,7 +33,7 @@ The adapter reads `ext["sdk.approval"]` of governed tool results and writes no `
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `maxTurns` | integer | `8` | Model calls per run |
+| `maxTurns` | integer | `8` | Model calls per run; an extra limit on top of the stack's run bounds (`limits.run`), whichever is reached first stops the run |
 | `pricing` | object | none | USD per million tokens by model id, `{ "<model>": { "inputPerMTok": 3, "outputPerMTok": 15 } }`. The run reports `costUsd` when every model call is priced; otherwise it has none |
 
 Limits accept `${env:NAME}`. Ranges and checks: [docs/limits.md](../../docs/limits.md).

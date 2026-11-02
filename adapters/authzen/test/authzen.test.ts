@@ -165,3 +165,15 @@ test('authzen passes AuthorizationPort conformance', async () => {
     await s.close();
   }
 });
+
+test('the delegation chain reaches the PDP as subject.properties.actors; malformed entries are dropped', async () => {
+  const s = await authzenPdp();
+  try {
+    const delegated = { ...alice, actors: [{ id: 'planner', kind: 'agent' }, { id: 7 }, { id: 'billing-bot', kind: 'agent', issuer: 'https://idp' }], credential: 'secret-token' };
+    await createAuthzen({ url: s.url }).evaluate(question(delegated as never));
+    assert.deepEqual(s.seen[0]!.body.subject.properties.actors, [{ id: 'planner', kind: 'agent' }, { id: 'billing-bot', kind: 'agent', issuer: 'https://idp' }]);
+    assert.ok(!JSON.stringify(s.seen[0]!.body).includes('secret-token'));
+  } finally {
+    await s.close();
+  }
+});
