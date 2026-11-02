@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createStaticCredentials, createStaticIdentity } from '../src/index.ts';
+import { createStaticCredentials, createStaticIdentity, identityAdapter } from '../src/index.ts';
 
 const identity = createStaticIdentity({
   tokens: {
@@ -27,4 +27,9 @@ test('credentials resolve by audience, then default, else reject', async () => {
   assert.equal(await port.token('api'), 'tok-api');
   assert.equal(await port.token('other'), 'tok-any');
   await assert.rejects(createStaticCredentials({ tokens: { api: 'x' } }).token('other'), /^Error: no token for audience other$/);
+});
+
+test('devCredential offers the first token of the table, none when the table is empty', () => {
+  assert.equal(identityAdapter.devCredential?.({ tokens: { 'dev-token': { subject: 'dev' }, other: { subject: 'o' } } }), 'dev-token');
+  assert.equal(identityAdapter.devCredential?.({ tokens: {} }), undefined);
 });

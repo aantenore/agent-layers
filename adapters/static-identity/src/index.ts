@@ -91,6 +91,8 @@ export const identityAdapter = defineAdapter<'IdentityPort', StaticIdentityOptio
     additionalProperties: false,
   },
   ext: { produces: [CLAIMS_KEY] },
+  // The first token of the table: the CLI's default caller on a prototype profile.
+  devCredential: (options) => Object.keys(options?.tokens ?? {})[0],
   create: (options, ctx) => createStaticIdentity(options, ctx.name),
 });
 

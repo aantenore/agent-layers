@@ -1,5 +1,5 @@
 import {
-  addUsage, callsOf, defineLimits, limitValue, replyText, stopReasonOf, textMessage, toolInfos,
+  addUsage, ApprovalPending, callsOf, defineLimits, limitValue, replyText, runEndOf, stopReasonOf, textMessage, toolInfos,
   type AgentSpec, type CallContext, type Message, type RunEvent, type RunInput, type RunResult, type StopReason, type Stack, type ToolResult, type Usage,
 } from '@agent-layers/core';
 
@@ -64,22 +64,31 @@ export async function* runLoop(stack: Stack, agent: AgentSpec, input: RunInput, 
       for (const call of calls) {
         yield { type: 'tool.call', id: call.id, tool: call.tool };
         const started = Date.now();
-        const out: ToolResult = call.invalid !== undefined
-          ? { ok: false, text: 'Arguments must be a JSON object' }
-          : await tools.callTool(call.tool, call.args, ctx);
+        let out: ToolResult;
+        let pending: ApprovalPending | undefined;
+        try {
+          out = call.invalid !== undefined ? { ok: false, text: 'Arguments must be a JSON object' } : await tools.callTool(call.tool, call.args, ctx);
+        } catch (err) {
+          // The stack's tools throw ApprovalPending for a call waiting for a person.
+          if (!(err instanceof ApprovalPending)) throw err;
+          pending = err;
+          out = { ok: false, text: `Waiting for approval ${err.approval}` };
+        }
         yield { type: 'tool.result', id: call.id, tool: call.tool, ok: out.ok, durationMs: Date.now() - started };
         messages.push({ role: 'tool', parts: [{ type: 'result', callId: call.id, ok: out.ok, text: out.text, ...(out.data !== undefined ? { data: out.data } : {}) }] });
+        // Tools that return a pending result instead (`ext["sdk.approval"]`) end the run the same way.
         const approval = out.ext?.['sdk.approval'];
-        if (typeof approval === 'string') {
+        if (!pending && typeof approval === 'string') {
           const by = stack.ports.approval?.name;
-          return end('waiting', '', { code: 'needs_input', layer: 'identity', ...(by ? { by } : {}), detail: approval });
+          pending = new ApprovalPending(approval, { tool: call.tool, ...(by ? { by } : {}) });
         }
+        if (pending) return end('waiting', '', pending.stopReason);
       }
     }
     return end('stopped', '', { code: 'limit', layer: 'harness', detail: 'turns' });
   } catch (err) {
     if (ctx.signal?.aborted) return end('stopped', '', abortReason(ctx.signal));
-    const reason = stopReasonOf(err);
-    return end(reason.code === 'error' ? 'failed' : 'stopped', '', reason);
+    const { status, reason } = runEndOf(err);
+    return end(status, '', reason);
   }
 }

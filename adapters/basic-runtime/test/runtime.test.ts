@@ -58,6 +58,7 @@ test('a call waiting for approval ends the run waiting', async () => {
   const result = await agent.run('save note');
   assert.equal(result.status, 'waiting');
   assert.deepEqual(result.reason, { code: 'needs_input', layer: 'identity', by: s.ports.approval!.name, detail: 'ap-1' });
+  assert.deepEqual(result.ext, { 'sdk.approval': { id: 'ap-1', by: s.ports.approval!.name, tool: 'math__save' } }, 'the stack writes the approval, structured');
   assert.equal(result.output, '');
   assert.deepEqual(result.events?.map((e) => e.type), ['run.start', 'model.reply', 'tool.call', 'tool.result', 'run.end']);
   assert.equal((result.events?.[3] as { ok: boolean }).ok, false);
@@ -141,7 +142,7 @@ test('a call with unparsed arguments is answered with a tool error', async () =>
 test('basic-runtime passes RuntimePort conformance and checkAdapter', async () => {
   const { s } = await stack();
   const spec = { name: 'calc', instructions: '', model: 'mock', tools: ['math__*'] };
-  const report = await checkAdapter(adapter, { options: {}, fixtures: { stack: s, agent: spec, input: 'add 4 and 5' } });
+  const report = await checkAdapter(adapter, { options: {}, fixtures: { stack: s, agent: spec, input: 'add 4 and 5', toolInput: 'add 1 and 2' } });
   assert.deepEqual(report.failures, []);
   assert.equal(report.ok, true);
   await s.close();

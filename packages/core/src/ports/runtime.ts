@@ -1,3 +1,4 @@
+import type { OwnerDigest } from '../inbound.ts';
 import type { Layer } from '../layers.ts';
 import type { Stack } from '../stack.ts';
 import type { CallContext, Ext, PortBase } from './base.ts';
@@ -111,11 +112,14 @@ export interface TriggerSink {
   agents(): string[];
   /**
    * Accepts a trigger and starts its run without waiting for it; resolves to the run id. Rejects when the trigger
-   * cannot be accepted: unknown agent, or no caller where the host requires one.
+   * cannot be accepted: unknown agent, or no caller where the host requires one. `sessionId` (since 1.1.0) is the
+   * session of the run, from the event (see `inboundSessionId`).
    */
-  accept(trigger: Trigger, ctx?: { caller?: Caller }): Promise<{ runId: string }>;
+  accept(trigger: Trigger, ctx?: { caller?: Caller; sessionId?: string }): Promise<{ runId: string }>;
   /** Verifies a credential (for example the trigger's configured service credential); absent without an identity layer. */
   verify?(credential: string): Promise<Caller>;
+  /** Digest of a session owner, keyed with the stack's `sessions.secret`: pass it to `inboundSessionId` (since 1.1.0). */
+  ownerDigest?: OwnerDigest;
 }
 
 /** Delivers triggers to a handler until closed (`start`), or receives them on a host server (`mount`). */

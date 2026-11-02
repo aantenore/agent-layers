@@ -142,7 +142,7 @@
       }
     },
     "production": {
-      "description": "Enterprise systems: OIDC identity with on-behalf-of tokens, OPA, Presidio, SQLite state, reinloop; loopback gateway with Host checks.",
+      "description": "Enterprise systems: OIDC identity with on-behalf-of tokens, OPA, Presidio, SQLite state and approvals, reinloop; loopback gateway with Host checks.",
       "extends": "pilot",
       "tier": "production",
       "gateway": { "host": "127.0.0.1", "allowedHosts": ["localhost", "127.0.0.1"] },
@@ -162,7 +162,7 @@
           "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:18080/realms/agents}", "clientId": "${env:OIDC_CLIENT_ID:-agent-runtime}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
         },
         "authorization": { "adapter": "opa", "options": { "url": "${env:OPA_URL:-http://localhost:8181}" } },
-        "approval": null,
+        "approval": { "adapter": "sqlite-approval", "options": { "path": ".agent-layers/approvals.db", "ttlMs": 86400000 } },
         "guardrails": [
           {
             "adapter": "presidio",

@@ -143,6 +143,11 @@ to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge
   `server/discover`, `tools/list`, `tools/call`, with the version in `params._meta` and the `MCP-Protocol-Version`,
   `Mcp-Method` and `Mcp-Name` headers (mismatch: 400 `-32020`; unknown revision: 400 `-32022` listing the served ones;
   unknown method: 404 `-32601`). Other legacy methods answer `-32601`; batches are refused. `DELETE /mcp` ends a session; `GET /mcp` (server-initiated streams) is not offered (405).
+- A call waiting for an approval answers a tool result with `isError: true` and `_meta["agent-layers/approval"] =
+  {id}`, so a client (a runtime in another process) can end its run waiting. Calls in an MCP session are keyed by it,
+  so a repeated call finds its approval; a stateless request names its session in
+  `params._meta["agent-layers/session"]` (key set by `sessionMetaKey`), scoped to the caller; an anonymous stateless
+  request gets no session.
 - Sessions expire after `sessionTtlMs` idle and after `maxSessionAgeMs` in any case. They are capped per caller and in
   total: a caller over its cap loses its own least recently used session (calls running in it are aborted); a full
   server makes room by evicting the least recently used session of the authenticated caller that holds the most.
@@ -165,6 +170,7 @@ to the caller, telemetry. Knowledge sources appear as read-only tools `knowledge
 | `include` / `exclude` | string[] | all / none | Globs of tool names to expose or hide |
 | `serverName` | string | `agent-layers` | `serverInfo.name` |
 | `sse` | boolean | `false` | Always answer with an SSE stream |
+| `sessionMetaKey` | string | `agent-layers/session` | `params._meta` key a stateless request carries its session in |
 | `sessionTtlMs` | integer | `1800000` | Idle time before a session is forgotten |
 | `maxSessionAgeMs` | integer | `3600000` | Absolute lifetime of a session |
 | `maxSessions` | integer | `1000` | Sessions in total |

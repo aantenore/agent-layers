@@ -13,7 +13,7 @@ export { NEEDS_CALLER, sampleQuestion } from './suites/control.ts';
 export type { ModelFixtures, RouterFixtures, CacheFixtures } from './suites/model.ts';
 export type { KnowledgeFixtures, RuntimeFixtures, ToolFixtures } from './suites/agent.ts';
 export type { AuthorizationFixtures, CredentialFixtures, GuardFixtures, GuardSample, IdentityFixtures } from './suites/control.ts';
-export { inboundFetch } from './suites/edge.ts';
+export { CONFORMANCE_APPROVAL, conformanceInput, inboundFetch } from './suites/edge.ts';
 export type { ChannelFixtures, DeployFixtures, TriggerFixtures } from './suites/edge.ts';
 export type { EvaluatorFixtures, TelemetryFixtures } from './suites/insight.ts';
 
@@ -101,7 +101,9 @@ export async function checkAdapter(d: AnyAdapter, opts: CheckAdapterOptions = {}
     failures.push(`create: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!instance) return { port: d.port, adapter: d.name, ok: false, failures, skipped: [] };
-  const report = await conformance(d.port, instance as never, opts.fixtures, opts.limits, declarationOf(d));
+  // Suites whose checks depend on the port version (RuntimePort) read the one the descriptor declares.
+  const fixtures = d.port === 'RuntimePort' ? { portVersion: d.portVersion, ...(opts.fixtures ?? {}) } : opts.fixtures;
+  const report = await conformance(d.port, instance as never, fixtures, opts.limits, declarationOf(d));
   await instance.close?.().catch(() => {});
   const all = [...failures, ...report.failures];
   return { ...report, adapter: d.name, ok: all.length === 0, failures: all };

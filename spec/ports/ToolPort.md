@@ -41,7 +41,7 @@ Boundary: anything with side effects is a tool. Read-only context retrieval is [
 | `data?` | Any | Structured result. |
 | `ext?` | Ext | Adapter-specific fields. |
 
-Governed results carry `ext["sdk.outcome"]`, one of `ok`, `error`, `denied`, `blocked`, `redacted`, `pending`, so telemetry and evaluation never parse `text`. A result that waits for a human approval also carries `ext["sdk.approval"]`, the approval id.
+Governed results carry `ext["sdk.outcome"]`, one of `ok`, `error`, `denied`, `blocked`, `redacted`, `pending`, so telemetry and evaluation never parse `text`. A result that waits for a human approval also carries `ext["sdk.approval"]`, the approval id; the stack's own tools throw `ApprovalPending` instead inside a run (see [RuntimePort](RuntimePort.md)).
 
 ## Semantics
 

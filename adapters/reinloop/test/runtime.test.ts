@@ -80,6 +80,7 @@ test('a call waiting for approval ends the run waiting', async () => {
   const r = await agent.run('save note');
   assert.equal(r.status, 'waiting');
   assert.deepEqual(r.reason, { code: 'needs_input', layer: 'identity', by: s.ports.approval!.name, detail: 'ap-1' });
+  assert.deepEqual(r.ext, { 'sdk.approval': { id: 'ap-1', by: s.ports.approval!.name, tool: 'math__save' } });
   assert.equal(r.output, '');
   assert.deepEqual(types(r.events)?.filter((t) => t !== 'reinloop.usage'), ['run.start', 'model.reply', 'tool.call', 'run.end']);
   assert.deepEqual(r.events?.at(-1), { type: 'run.end', status: 'waiting', reason: r.reason, usage: r.usage, costUsd: 0 });
@@ -184,7 +185,7 @@ test('an answer cut at the token limit completes and says so; an empty cut answe
 test('reinloop passes RuntimePort conformance and checkAdapter', async () => {
   const { s } = await stack();
   const spec = { name: 'calc', instructions: '', model: 'mock', tools: ['math__*'] };
-  const report = await checkAdapter(adapter, { options: { budget: { maxTurns: 4 } }, fixtures: { stack: s, agent: spec, input: 'add 4 and 5' } });
+  const report = await checkAdapter(adapter, { options: { budget: { maxTurns: 4 } }, fixtures: { stack: s, agent: spec, input: 'add 4 and 5', toolInput: 'add 1 and 2' } });
   assert.deepEqual(report.failures, []);
   assert.equal(report.ok, true);
   await s.close();

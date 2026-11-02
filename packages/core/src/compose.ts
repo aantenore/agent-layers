@@ -1,13 +1,14 @@
 import { AdapterRegistry, importAdapters, packageLoader, type AnyAdapter } from './adapter.ts';
 import { agentSpec, configuredAdapters, type AdapterRef, type ConfiguredAdapter, type ResolvedConfig } from './config.ts';
-import { AdapterError, AgentLayersError, ConfigError, errorMessage, GuardrailBlocked, MissingLayerError } from './errors.ts';
-import { boundExt, SDK_NAMESPACE, extNamespace } from './ext.ts';
+import { AdapterError, AgentLayersError, ApprovalPending, ConfigError, errorMessage, GuardrailBlocked, MissingLayerError, runEndOf } from './errors.ts';
+import { boundExt, SDK_NAMESPACE, extNamespace, withExt } from './ext.ts';
 import { limitValue } from './limits.ts';
 import {
   createMappings, effectiveRules, extReads, extWrites, loadMappingFunctions, rulesAgainstShape, type Mappings, type MappingRule,
 } from './mappings.ts';
+import { ownerDigest } from './inbound.ts';
 import { ATTR, EVENT, SPAN } from './names.ts';
-import { PORTS } from './ports/catalog.ts';
+import { PORTS, versionAtLeast } from './ports/catalog.ts';
 import type { CallContext } from './ports/base.ts';
 import type { ChannelHandle } from './ports/channel.ts';
 import type { GuardPort } from './ports/guard.ts';
@@ -90,6 +91,18 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
     throw err;
   }
 
+  // Key of the owner digest in client session ids (see inboundSessionId).
+  let sessionSecret: string | undefined;
+  try {
+    const ref = config.sessions?.secret;
+    if (ref?.includes('${secret:') && !ports.secrets) throw new ConfigError(['sessions.secret references ${secret:...} but no secrets adapter is configured']);
+    sessionSecret = ref ? String(await resolveSecretRefs(ref, ports.secrets, 'infra', 'sessions')) : undefined;
+  } catch (err) {
+    await Promise.allSettled(created.map((c) => c.close?.()));
+    throw err;
+  }
+  const digest = ownerDigest(sessionSecret);
+
   const k = config.pipeline.knowledge ?? {};
   const mode = k.mode ?? 'system';
   const toolSources: Record<string, ToolPort> = { ...ports.tools };
@@ -102,7 +115,17 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
     ...(ports.credentials ? { credentials: ports.credentials } : {}),
     ...(config.pipeline.approvalTimeoutMs ? { approvalTimeoutMs: config.pipeline.approvalTimeoutMs } : {}),
   };
-  const tools = governedTools(toolSources, governance);
+  // Runs in progress → the approval a call of the run is waiting for: a runtime that catches ApprovalPending and
+  // ends the run with its stop reason still gets `ext["sdk.approval"]` and the `waiting` status.
+  const waiting: Waiting = new Map();
+  // A runtime built for RuntimePort 1.0 may turn a thrown tool error into tool text and complete the run: it gets the
+  // pending result it knows instead, and `onPending` still marks a run it ends with needs_input as waiting.
+  const runtimeRef = entries.find((e) => e.slot === 'runtime');
+  const runtimeVersion = runtimeRef && registry.get(runtimeRef.port, runtimeRef.ref.adapter)?.portVersion;
+  const tools = governedTools(toolSources, {
+    ...governance, pendingAs: runtimeVersion && !versionAtLeast(runtimeVersion, '1.1.0') ? 'result' : 'error',
+    onPending: (pending, ctx) => { if (waiting.has(ctx.runId)) waiting.set(ctx.runId, pending); },
+  });
 
   const models = new Map<string, ModelPort>();
   const modelWith = (sourceNames: readonly string[]): ModelPort => {
@@ -126,14 +149,13 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
     return m;
   };
 
-  // Tools for hosted channels: the governed tools plus the knowledge sources as read-only tools.
+  // Tools for hosted channels: the governed tools plus the knowledge sources as read-only tools. A call waiting for an
+  // approval is a pending result here (`ext["sdk.approval"]`), which the channel passes on in its protocol.
   let hostedTools: ToolPort | undefined;
   const toolsForHost = (): ToolPort => {
     if (hostedTools) return hostedTools;
     const knowledgeAsTools = mode !== 'tools' && Object.keys(ports.knowledge).length && !ports.tools.knowledge;
-    hostedTools = knowledgeAsTools
-      ? governedTools({ ...ports.tools, knowledge: knowledgeTools(ports.knowledge, toolOpts) }, governance)
-      : tools;
+    hostedTools = governedTools(knowledgeAsTools ? { ...ports.tools, knowledge: knowledgeTools(ports.knowledge, toolOpts) } : toolSources, governance);
     return hostedTools;
   };
 
@@ -154,7 +176,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
     agent(name) {
       let p = bound.get(name);
       if (!p) {
-        p = bindAgent(stack, name, context, extBytes);
+        p = bindAgent(stack, name, context, extBytes, waiting);
         bound.set(name, p);
         p.catch(() => bound.delete(name));
       }
@@ -170,6 +192,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
         ...(ports.identity ? { verify: (c: string) => stack.verify(c) } : {}),
         ...(ports.model ? { model: () => modelWith([]) } : {}),
         tools: toolsForHost,
+        ownerDigest: digest,
       };
     },
     async start(opts = {}) {
@@ -202,7 +225,25 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
   return stack;
 }
 
-async function bindAgent(stack: Stack, name: string, context: Stack['context'], extBytes: number): Promise<RunnableAgent> {
+type Waiting = Map<string, ApprovalPending | undefined>;
+
+/** The result of a run ended by a pending approval or a guard block thrown out of the runtime. */
+function endedBy(err: unknown, runId: string): RunResult | undefined {
+  if (!(err instanceof ApprovalPending) && !(err instanceof GuardrailBlocked)) return undefined;
+  const { status, reason } = runEndOf(err);
+  return { runId, status, output: '', reason, ...(err instanceof ApprovalPending ? { ext: err.approvalExt } : {}) };
+}
+
+/**
+ * A run that stopped for an approval a call of it is waiting for: status `waiting` and `ext["sdk.approval"]`, whether
+ * the runtime let `ApprovalPending` propagate or ended the run with its stop reason.
+ */
+function withApproval(result: RunResult, pending: ApprovalPending | undefined): RunResult {
+  if (!pending || (result.status !== 'waiting' && result.reason?.code !== 'needs_input')) return result;
+  return { ...result, status: 'waiting', reason: result.reason ?? pending.stopReason, ext: withExt(result.ext, pending.approvalExt)! };
+}
+
+async function bindAgent(stack: Stack, name: string, context: Stack['context'], extBytes: number, waiting: Waiting): Promise<RunnableAgent> {
   const spec = await agentSpec(stack.config, name);
   const runtime = stack.ports.runtime;
   if (!runtime) throw new MissingLayerError('harness', 'runtime adapter');
@@ -214,11 +255,15 @@ async function bindAgent(stack: Stack, name: string, context: Stack['context'], 
       const ctx = context({ ...init, agent: name });
       return stack.telemetry.span(SPAN.run, { [ATTR.layer]: 'harness', [ATTR.name]: name, [ATTR.runId]: ctx.runId }, async (span) => {
         let result: RunResult;
+        waiting.set(ctx.runId, undefined);
         try {
-          result = await inner.run(input, ctx);
+          result = withApproval(await inner.run(input, ctx), waiting.get(ctx.runId));
         } catch (err) {
-          if (!(err instanceof GuardrailBlocked)) throw err;
-          result = { runId: ctx.runId, status: 'stopped', output: '', reason: err.stopReason };
+          const ended = endedBy(err, ctx.runId);
+          if (!ended) throw err;
+          result = ended;
+        } finally {
+          waiting.delete(ctx.runId);
         }
         result = boundExt(result, extBytes, (bytes) => stack.telemetry.event(EVENT.extDropped, { [ATTR.layer]: 'harness', [ATTR.extBytes]: bytes, [ATTR.extShape]: 'RunResult' }));
         span.setAttributes({ [ATTR.runStatus]: result.status, ...(result.reason ? { [ATTR.runReason]: String(result.reason.code) } : {}) });
@@ -226,8 +271,19 @@ async function bindAgent(stack: Stack, name: string, context: Stack['context'], 
         return result;
       }, ctx.trace ? { parent: ctx.trace } : undefined);
     },
-    ...(inner.stream ? { stream: (input: RunInput, init = {}) => inner.stream!(input, context({ ...init, agent: name })) } : {}),
+    ...(inner.stream ? { stream: (input: RunInput, init = {}) => streamEnded(inner.stream!(input, context({ ...init, agent: name }))) } : {}),
   };
+}
+
+/** A runtime's stream whose pending approval or guard block, thrown instead of ended, becomes its `run.end` event. */
+async function* streamEnded(events: AsyncIterable<RunEvent>): AsyncGenerator<RunEvent> {
+  try {
+    yield* events;
+  } catch (err) {
+    const end = endedBy(err, '');
+    if (!end) throw err;
+    yield { type: 'run.end', status: end.status, ...(end.reason ? { reason: end.reason } : {}) };
+  }
 }
 
 /** Streams a run; for a runtime without streaming, the result becomes a `text` event and a `run.end` event. */
@@ -260,16 +316,20 @@ function namedGuard(g: GuardPort, name: string, ref: AdapterRef): GuardPort {
 
 /** Replaces `${secret:NAME}` in adapter options through the secrets slot. */
 async function resolveSecrets(ref: AdapterRef, secrets: StackPorts['secrets'], layer: (typeof PORTS)[keyof typeof PORTS]['layer']): Promise<unknown> {
-  const options = ref.options ?? {};
-  if (!JSON.stringify(options).includes('${secret:')) return options;
-  if (!secrets) throw new AdapterError(layer, ref.adapter, 'options reference ${secret:...} but no secrets adapter is configured');
+  return resolveSecretRefs(ref.options ?? {}, secrets, layer, ref.adapter);
+}
+
+/** Replaces `${secret:NAME}` in every string of `value` through the secrets slot; errors name `owner`. */
+async function resolveSecretRefs(value: unknown, secrets: StackPorts['secrets'], layer: (typeof PORTS)[keyof typeof PORTS]['layer'], owner: string): Promise<unknown> {
+  if (!JSON.stringify(value).includes('${secret:')) return value;
+  if (!secrets) throw new AdapterError(layer, owner, 'options reference ${secret:...} but no secrets adapter is configured');
   const walk = async (v: unknown): Promise<unknown> => {
     if (typeof v === 'string') {
       let out = v;
       for (const m of v.matchAll(SECRET_REF)) {
-        const value = await secrets.get(m[1]!);
-        if (value === undefined) throw new AdapterError(layer, ref.adapter, `secret "${m[1]}" not found`);
-        out = out.replace(m[0], value);
+        const found = await secrets.get(m[1]!);
+        if (found === undefined) throw new AdapterError(layer, owner, `secret "${m[1]}" not found`);
+        out = out.replace(m[0], found);
       }
       return out;
     }
@@ -277,7 +337,7 @@ async function resolveSecrets(ref: AdapterRef, secrets: StackPorts['secrets'], l
     if (isPlainObject(v)) return Object.fromEntries(await Promise.all(Object.entries(v).map(async ([k2, x]) => [k2, await walk(x)])));
     return v;
   };
-  return walk(options);
+  return walk(value);
 }
 
 /** Mapping key of an adapter instance: the slot for single slots, `<slot>.<instance>` otherwise. */

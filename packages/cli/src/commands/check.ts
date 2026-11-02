@@ -26,7 +26,7 @@ export async function check(io: Io, args: CheckArgs): Promise<number> {
   if (args.skipConformance) io.out('conformance: skipped');
   else if (blocking) io.out('conformance: skipped until every adapter is installed');
   else {
-    const token = resolveToken(p, args.token);
+    const token = await resolveToken(p, args.token);
     const { reports, error, callerError } = await conformAll(p, { env: p.env, ...(args.layer ? { layer: args.layer } : {}), ...(token ? { token } : {}) });
     if (error) { io.out(`  FAIL compose: ${error}`); failed = true; }
     if (callerError) { io.out(`  FAIL caller: ${callerError}`); failed = true; }

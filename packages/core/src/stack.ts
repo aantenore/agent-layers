@@ -58,7 +58,11 @@ export interface Stack {
   readonly telemetry: TelemetryPort;
   /** Model with knowledge injection, guards, cache and router applied. Throws when no model is configured. */
   readonly model: ModelPort;
-  /** Every tool source, prefixed and governed (authorization, guards, credentials). */
+  /**
+   * Every tool source, prefixed and governed (authorization, guards, credentials). A call waiting for an approval throws
+   * `ApprovalPending`, which ends the run `waiting`; for a runtime built for RuntimePort 1.0 it is the pending result
+   * (`ext["sdk.approval"]`) instead.
+   */
   readonly tools: ToolPort;
   /** Model for one agent: injects only the agent's knowledge sources. */
   modelFor(agent: AgentSpec): ModelPort;

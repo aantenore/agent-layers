@@ -68,6 +68,13 @@ string, objects are JSON). Nothing else is evaluated. Without `input` the run in
 
 The credential is never logged or echoed.
 
+## Session
+
+The `agentsession` extension attribute (or the one named by `sessionAttribute`) is the session of the run, scoped to
+the run caller: events with the same value share a session, so a call that waited for an approval finds the decision
+in a later run. Letters, digits, `_`, `.`, `:` and `-`, up to 128 characters; another value, or an event accepted
+without a caller, means no session.
+
 ## Responses
 
 | Status | When |
@@ -89,6 +96,7 @@ Errors have the shape `{ "error": { "message", "type" } }`.
 | `path` | string | `/v1/events` | Path of the endpoint |
 | `routes` | object[] | required | `{ type, agent, input?, source? }`, at least one |
 | `credential` | string | none | Service credential verified per event and used as the run caller |
+| `sessionAttribute` | string | `agentsession` | Extension attribute that carries the run session (1 to 20 lower-case letters and digits) |
 
 ```json
 { "layers": { "triggers": [{ "adapter": "cloudevents", "options": { "credential": "${secret:EVENTS_TOKEN}", "routes": [{ "type": "com.example.order.*", "agent": "assistant", "input": "New order event {{id}}: {{data}}" }] } }] } }

@@ -26,10 +26,12 @@ one address, with authentication, limits and access logs in one place.
 - `verify?(credential: String) → Caller` — verify an inbound credential through the identity port; absent when no identity port is configured.
 - `model?() → ModelPort` — the stack's governed model: guards, cache, router and telemetry, without knowledge injection. Absent when no model is configured.
 - `tools?() → ToolPort` — the stack's governed tools (policy, approval, authorization, guards, credentials bound to the caller), with the knowledge sources as read-only tools.
+- `ownerDigest?(owner: String) → String` — the digest of a session owner, keyed with the stack's `sessions.secret`. A channel that takes a session from its client builds the session id with `inboundSessionId(channel, caller, value, host.ownerDigest)`: scoped to the verified caller, none for an anonymous request.
 
 `InboundMount`:
 
 - `routes: [InboundRoute]` — what the channel answers.
+- `exposeHeaders?: [String]` — response headers a browser client must read on a cross-origin request (a session id, for example). The host adds them to `Access-Control-Expose-Headers` when CORS is on.
 - `close?() → ()` — release what the mount holds (sessions, pending streams).
 
 `InboundRoute`:
@@ -71,7 +73,7 @@ The channel moves the shapes of the runtime: input in, [RunResult](../schemas/ru
 - A channel must only call agents listed by `host.agents()`.
 - `serve` does not block until the end of the channel: it returns the handle. Use `done` or `close` to wait for or end it.
 - `signal` in `opts` stops the channel like `close`.
-- Approvals and long-running work can be surfaced by a channel (a later run in the same session that makes the same call gets the decision of a `waiting` run), but the contract does not require it (see [ApprovalPort](ApprovalPort.md)).
+- Approvals and long-running work can be surfaced by a channel (a later run in the same session that makes the same call gets the decision of a `waiting` run), but the contract does not require it (see [ApprovalPort](ApprovalPort.md)). A channel that takes a session from the client scopes it to the caller (`inboundSessionId` in `@agent-layers/core`), so the same value from another caller is another session.
 
 ## Errors
 
@@ -90,6 +92,7 @@ The channel moves the shapes of the runtime: input in, [RunResult](../schemas/ru
 - `serve`, when present, resolves to a handle with a `close` function; `close` completes.
 - `mount`, when present, resolves to at least one route with a path starting with `/`, a `handle` function and upper-case methods.
 - When an exercise fixture is given (for `serve` or for `mount`): after driving the channel, the host received the expected input. Otherwise this part is skipped.
+- When a `sendMount` fixture is given (the fake host ends a run, or a call of its tool, `completed`, `waiting` for an approval or `stopped` by a guard, as the text asks): the verified caller reaches the host; the client can tell a `waiting` run from a completed one, and sees the states the fixture expects; with `sessions`, a session given twice reaches the host as the same `sessionId` and two sessions as two. Otherwise this part is skipped.
 - `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history

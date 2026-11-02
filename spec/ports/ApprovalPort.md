@@ -9,7 +9,7 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 ## Operations
 
 - `request(req: ApprovalRequest) → Approval`
-  Create an approval in status `pending` and return it.
+  Create an approval in status `pending` and return it. With a `key` that already has a pending, unexpired approval not consumed, return that one instead (checked and created in one atomic step), so `lookup` finds the approval a person decides.
 - `get(id: String) → Approval?`
   Return the approval, or nothing for an unknown id.
 - `decide(id: String, decision: {approved: Boolean, by?: String, reason?: String}) → Approval`
@@ -46,7 +46,7 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
   - `denied`: the call is denied, with the reason when present; the denial stands for that key.
   - `pending`: the call returns the same approval id; no new approval is created.
   - `expired` or nothing: the stack calls `request` with the key.
-  Without an approval port, `ask` denies. With one, the call waits up to a configured time (default: it does not wait); an approval decided `approved` during that wait is consumed by the waiting call. If the answer is still pending, the tool result has `ok: false`, carries `ext["sdk.approval"]` (the approval id) and `ext["sdk.outcome"] = "pending"`, and the runtime may end the run as `waiting` (see [RuntimePort](RuntimePort.md)). A later run in the same session, by the same caller, that makes the same call (same tool, same arguments) gets the decision. Only `approved` lets the call proceed; `denied` and `expired` deny, with the reason when present. A port without `lookup` (1.0.0) is asked again on every call.
+  Without an approval port, `ask` denies. With one, the call waits up to a configured time (default: it does not wait); an approval decided `approved` during that wait is consumed by the waiting call. If the answer is still pending, the tool result has `ok: false`, carries `ext["sdk.approval"]` (the approval id) and `ext["sdk.outcome"] = "pending"`; inside a run the stack's tools throw `ApprovalPending` instead (for a runtime built for RuntimePort 1.1.0 or later; one built for 1.0.0 gets the pending result), and the run ends `waiting` with `ext["sdk.approval"] = {id, by?, tool?}` on its result (see [RuntimePort](RuntimePort.md)). Channels pass the pending result on in their protocol (MCP: `_meta["agent-layers/approval"] = {id}` on the tool result). A later run in the same session, by the same caller, that makes the same call (same tool, same arguments) gets the decision. Only `approved` lets the call proceed; `denied` and `expired` deny, with the reason when present. A port without `lookup` (1.0.0) is asked again on every call.
 - Approvals contain the tool arguments. Keep them as private as the run itself and do not log them beyond what the audit trail needs.
 - Answering is not tied to a channel: any component with access to `decide` (a chat button, a web page, a command) can answer.
 
@@ -78,4 +78,4 @@ Put a human in the loop for actions the policy marks `ask`. Approvals are durabl
 - 0.2.0 — the embedded access request may carry an `anonymous` subject; `subject.properties.authenticated` added
 - 0.1.0 — initial
 
-Example adapters: `memory-approval` (in-process store).
+Example adapters: `memory-approval` (in-process store), `sqlite-approval` (durable, one SQLite file).

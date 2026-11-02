@@ -28,7 +28,9 @@ From the command line: `agent-layers gateway --profile <name> [--port <n>] [--ho
 4. Authentication, unless the route is `public` (discovery documents): `Authorization: Bearer <credential>` verified
    through the identity port, and the verified `caller` passed to the route. No credential: 401 with
    `WWW-Authenticate: Bearer realm="agent-layers"`, unless the config sets `anonymous: true`. A credential that does not
-   verify: always 401 with `error="invalid_token"`; the adapter's error text is never returned.
+   verify: always 401 with `error="invalid_token"`; the adapter's error text is never returned. With
+   `auth: { "scheme": "header", "header": "X-Api-Key" }` the credential is the raw value of that header (an API key)
+   and the challenge is `ApiKey realm="agent-layers"`.
 5. Body limit (413) and time limit (504); an error inside a route is a 500 without its message.
 6. Trace context: `traceparent` / `tracestate` are copied unchanged into `trace: {parent, state}` for the route and
    the run; the telemetry adapter owns the format. The gateway only bounds them: a value longer than `maxTraceChars`

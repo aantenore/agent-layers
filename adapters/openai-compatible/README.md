@@ -91,6 +91,12 @@ model endpoint: `base_url = <gateway>/v1`, `api_key = <a credential the identity
     `waiting` (the run stopped for an approval or input and can be resumed) also answers `stop`, with the output so
     far; `stopped` (a guard block, a denial) answers `content_filter` with no content, the reason staying inside;
     `failed` is HTTP 500. Streamed, `text` events become `delta.content` and `run.end` gives the finish and usage.
+    Not streamed, a run that did not complete adds `x-agent-run-status` (`waiting`, `stopped`), and a waiting run
+    the approval it waits for, `x-agent-approval: <id>`.
+  - **Session**: the `Agent-Session` request header (or the header named by `session.header`, or the body's `user`
+    field with `session.from: "user"`) is the run's session, scoped to the caller: a later request with the same value
+    continues it, so a call that waited for an approval finds the decision. Letters, digits, `_`, `.`, `:` and `-`, up
+    to 128 characters; another value, or an anonymous request, means no session.
 - `stream: true` answers with Server-Sent Events in the Chat Completions chunk format, ending with `data: [DONE]`;
   `stream_options.include_usage` adds a final usage chunk.
 - Requests must be `Content-Type: application/json` (415 otherwise).
@@ -105,6 +111,7 @@ model endpoint: `base_url = <gateway>/v1`, `api_key = <a credential the identity
 | `agents` | boolean or string[] | `true` | Agents exposed as `agent:<name>`: all, none, or a list |
 | `ownedBy` | string | `agent-layers` | `owned_by` in the model list |
 | `reasoning` | boolean | `false` | Return the model's reasoning (`reasoning_content`) on alias routes, after the output guards |
+| `session` | object | `{ "from": "header", "header": "Agent-Session" }` | Where an agent run finds its session: a request header, or the body's `user` field (`from: "user"`) |
 
 ```json
 {

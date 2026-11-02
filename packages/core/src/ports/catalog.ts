@@ -50,9 +50,9 @@ export const PORTS: Readonly<Record<PortName, PortInfo>> = Object.freeze({
   DeployPort: { port: 'DeployPort', layer: 'infra', version: '1.0.0', description: 'Turn service specs into running endpoints' },
   SecretPort: { port: 'SecretPort', layer: 'infra', version: '1.0.0', description: 'Resolve secret references' },
   ModelPort: { port: 'ModelPort', layer: 'llm', version: '1.0.0', description: 'Model calls with tool calls, optionally streamed' },
-  RuntimePort: { port: 'RuntimePort', layer: 'harness', version: '1.0.0', description: 'Bind an agent spec to a runnable agent' },
+  RuntimePort: { port: 'RuntimePort', layer: 'harness', version: '1.1.0', description: 'Bind an agent spec to a runnable agent' },
   StatePort: { port: 'StatePort', layer: 'harness', version: '1.0.0', description: 'Session event log' },
-  TriggerPort: { port: 'TriggerPort', layer: 'interface', version: '1.0.0', description: 'Start runs from events and schedules' },
+  TriggerPort: { port: 'TriggerPort', layer: 'interface', version: '1.1.0', description: 'Start runs from events and schedules' },
   KnowledgePort: { port: 'KnowledgePort', layer: 'knowledge', version: '1.0.0', description: 'Search a knowledge source, answer with passages' },
   MemoryPort: { port: 'MemoryPort', layer: 'knowledge', version: '1.0.0', description: 'Long-term memory: remember, recall, forget' },
   IngestionPort: { port: 'IngestionPort', layer: 'knowledge', version: '1.0.0', description: 'Load, refresh and delete documents in a knowledge backend' },
@@ -83,10 +83,27 @@ export function portsOf(layer: Layer): PortInfo[] {
   return Object.values(PORTS).filter((p) => p.layer === layer);
 }
 
-/** True when an adapter built for `adapterVersion` can serve a port at `portVersion` (same major; 0.x: same minor). */
+/**
+ * True when an adapter built for `adapterVersion` can serve a port at `portVersion`: same major and a minor no newer
+ * than the core's (an adapter built for a newer minor may rely on fields this core does not have); 0.x: same minor.
+ */
 export function compatibleVersion(adapterVersion: string, portVersion: string): boolean {
   const [am = '', an = ''] = adapterVersion.split('.');
   const [pm = '', pn = ''] = portVersion.split('.');
   if (am !== pm) return false;
-  return am !== '0' || an === pn;
+  if (am === '0') return an === pn;
+  return /^\d+$/.test(an) && /^\d+$/.test(pn) && Number(an) <= Number(pn);
+}
+
+/** True when `version` (major.minor.patch) is `min` or later: for behaviour a port added in a minor version. */
+export function versionAtLeast(version: string | undefined, min: string): boolean {
+  const a = (version ?? '').split('.').map(Number);
+  const b = min.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (Number.isNaN(x)) return false;
+    if (x !== y) return x > y;
+  }
+  return true;
 }

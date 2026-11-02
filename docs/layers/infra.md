@@ -246,7 +246,9 @@ OpenTofu run in containers, nothing is installed on the host.
 
 ### Pipeline
 
-`.github/workflows/ci.yml` runs on `workflow_dispatch` only. Jobs: `lint` (`node --check`, JSON parse, docs check,
+`.github/workflows/ci.yml` runs the `checks` job on every push to `main` and every pull request: `npm ci`, build,
+typecheck, package tests, docs check and the swap matrix cells that need no external service. The other jobs run on
+`workflow_dispatch` only: `lint` (`node --check`, JSON parse, docs check,
 Helm, OpenTofu), `layer-tests` (matrix over the `layers` input, a list of layer ids: `make up`, `make test`,
 `make down`) and `release`, which documents the dev, staging, prod image promotion (same digest, no rebuild, approval
 on `prod`) but builds nothing yet.

@@ -93,3 +93,17 @@ test('lookup reports an expired approval', async () => {
   await sleep(15);
   assert.equal((await port.lookup!('k'))?.status, 'expired');
 });
+
+test('concurrent requests for a key with a pending approval share it, so lookup finds the one that is decided', async () => {
+  const port = createMemoryApproval();
+  const [a, b] = await Promise.all([port.request({ ...req, key: 'k' }), port.request({ ...req, key: 'k' })]);
+  assert.equal(b.id, a.id);
+  await port.decide(a.id, { approved: true });
+  assert.equal((await port.lookup!('k', { consume: true }))?.status, 'approved');
+  const next = await port.request({ ...req, key: 'k' });
+  assert.notEqual(next.id, a.id, 'a decided request is not reused');
+  const short = createMemoryApproval({ ttlMs: 5 });
+  const expired = await short.request({ ...req, key: 'e' });
+  await sleep(15);
+  assert.notEqual((await short.request({ ...req, key: 'e' })).id, expired.id, 'an expired request is not reused');
+});

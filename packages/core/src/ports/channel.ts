@@ -1,3 +1,4 @@
+import type { OwnerDigest } from '../inbound.ts';
 import type { CallContext, PortBase } from './base.ts';
 import type { Caller } from './identity.ts';
 import type { ModelPort } from './model.ts';
@@ -16,6 +17,8 @@ export interface ChannelHost {
   model?(): ModelPort;
   /** The governed tools (policy, approval, authorization, guards, credentials), knowledge sources included as read-only tools. */
   tools?(): ToolPort;
+  /** Digest of a session owner, keyed with the stack's `sessions.secret`: pass it to `inboundSessionId`. */
+  ownerDigest?: OwnerDigest;
 }
 
 export interface ChannelHandle {
@@ -52,6 +55,8 @@ export interface InboundRoute {
 /** The routes a mounted channel or trigger adds to a host server. */
 export interface InboundMount {
   routes: InboundRoute[];
+  /** Response headers a browser client must be able to read on a cross-origin request (`Access-Control-Expose-Headers`). */
+  exposeHeaders?: string[];
   close?(): Promise<void>;
 }
 

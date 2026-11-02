@@ -1,6 +1,6 @@
 # TriggerPort
 
-Layer: `interface` (L8 Interfaces, channels & triggers) · Version: 1.0.0 · Conformance: `checkTrigger`
+Layer: `interface` (L8 Interfaces, channels & triggers) · Version: 1.1.0 · Conformance: `checkTrigger`
 
 ## Purpose
 
@@ -18,11 +18,13 @@ A trigger implements `start` (it pulls or schedules by itself), `mount` (it rece
 `TriggerSink`, provided by the host:
 
 - `agents() → [String]` — the agents a trigger may name.
-- `accept(trigger: Trigger, ctx?: {caller?: Caller}) → {runId: String}` — accept the trigger and start its run in
+- `accept(trigger: Trigger, ctx?: {caller?: Caller, sessionId?: String}) → {runId: String}` — accept the trigger and start its run in
   the background. Rejects when it cannot be accepted: an unknown agent, or no caller where the host requires one
   (a production-tier host never runs a trigger anonymously).
 - `verify?(credential: String) → Caller` — verify the trigger's own credential (a service credential from its
   configuration) through the identity port.
+- `ownerDigest?(owner: String) → String` — the digest of a session owner, keyed with the stack's `sessions.secret`;
+  pass it to `inboundSessionId`, which gives no session to an anonymous event (since 1.1.0).
 - `TriggerHandle.close() → ()`
   Stop delivering and release the source.
 
@@ -69,6 +71,7 @@ A trigger implements `start` (it pulls or schedules by itself), `mount` (it rece
 
 ## Version history
 
+- 1.1.0 — optional `sessionId` in `TriggerSink.accept`: the run's session, from the event (scoped to the caller with `inboundSessionId`); optional `TriggerSink.ownerDigest`
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `Trigger.kind` (was `type`) and `at` (was `time`); the upstream event id goes in `ext`; `TriggerSink.accept(trigger, {caller})`
 - 0.1.0 — initial
 - 0.2.0 — `start` is optional; `mount` receives events on a host server through a `TriggerSink`; the reference host runs triggers with the identity it was started with

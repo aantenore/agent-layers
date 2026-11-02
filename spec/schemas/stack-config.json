@@ -37,6 +37,9 @@
     "gateway": {
       "$ref": "#/$defs/gateway"
     },
+    "sessions": {
+      "$ref": "#/$defs/sessions"
+    },
     "limits": {
       "$ref": "#/$defs/limits"
     },
@@ -1109,6 +1112,39 @@
           },
           "description": "Accepted Host names (name or name:port); default: loopback names when bound to loopback."
         },
+        "auth": {
+          "type": "object",
+          "description": "Where a request carries its credential: Authorization: Bearer (default) or the raw value of a named header (API keys).",
+          "properties": {
+            "scheme": {
+              "enum": [
+                "bearer",
+                "header"
+              ]
+            },
+            "header": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]+$",
+              "description": "Header that carries the credential when scheme is header."
+            }
+          },
+          "additionalProperties": false,
+          "if": {
+            "properties": {
+              "scheme": {
+                "const": "header"
+              }
+            },
+            "required": [
+              "scheme"
+            ]
+          },
+          "then": {
+            "required": [
+              "header"
+            ]
+          }
+        },
         "cors": {
           "type": "object",
           "properties": {
@@ -1124,6 +1160,18 @@
             "origins"
           ],
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessions": {
+      "type": "object",
+      "description": "Client sessions of inbound channels and triggers.",
+      "properties": {
+        "secret": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Key of the owner digest inside session ids (HMAC-SHA-256), as ${secret:NAME} or ${env:NAME}; without it the digest is a plain hash of the caller id."
         }
       },
       "additionalProperties": false
@@ -2088,6 +2136,9 @@
         },
         "gateway": {
           "$ref": "#/$defs/gateway"
+        },
+        "sessions": {
+          "$ref": "#/$defs/sessions"
         },
         "limits": {
           "$ref": "#/$defs/limits"

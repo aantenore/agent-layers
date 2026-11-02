@@ -37,7 +37,7 @@ not duplicated.
 | `stopped` by a budget | `stopped`, reason `{ code: 'limit', layer: 'harness', by: 'reinloop', detail: '<limit>' }` (`maxTurns`, `maxCostUsd`, ...) |
 | `stopped` at `max_tokens` without an answer | `stopped`, reason as above with `detail: 'max_tokens'` |
 | guard block (model or tool) | `stopped`, the guard's stop reason (`guard_block`, `by` the guard, `stage`), empty output |
-| governed call waiting for an approval (`ext["sdk.approval"]`) | `waiting`, reason `{ code: 'needs_input', layer: 'identity', by: '<approval instance>', detail: '<approval id>' }`, empty output |
+| governed call waiting for an approval (`ApprovalPending`, or a result with `ext["sdk.approval"]`) | `waiting`, reason `{ code: 'needs_input', layer: 'identity', by: '<approval instance>', detail: '<approval id>' }`, empty output |
 | `interrupted` (caller aborted) | `stopped`, reason `{ code: 'aborted' }`, or `{ code: 'timeout' }` when the signal expired |
 | `failed` | `failed`, reason from the error the model raised (`stopReasonOf`: `error` with the error name as `detail`), else `{ code: 'error', layer: 'harness', by: 'reinloop' }` |
 
@@ -56,7 +56,8 @@ Telemetry the pipeline cannot see: `reinloop.compaction` and `reinloop.args_inva
 `harness` and `agent.name`, and their own attributes are in the `reinloop.` namespace. The adapter opens no model or
 tool spans of its own: the stack's `agent.model.call` and `agent.tool.call` already cover each call.
 
-`ext`: the adapter reads `ext["sdk.approval"]` of governed tool results and writes no `ext` keys.
+`ext`: the adapter reads `ext["sdk.approval"]` of governed tool results and writes no `ext` keys; the stack adds
+`ext["sdk.approval"] = {id, by, tool}` to a waiting result.
 
 Agent settings: `settings.temperature`, `settings.maxOutputTokens` and `settings.stop` go to the model.
 `ext["reinloop.retryMaxTokens"]` (number) makes reinloop repeat an answer cut at the token limit once with that limit.

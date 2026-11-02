@@ -61,6 +61,87 @@ test('pollMs sets the wait between GetTask calls', async () => {
   }
 });
 
+/** A remote agent that records the JSON-RPC methods it receives; `handler` answers each call. */
+async function recordingAgent(handler: (method: string, res: import('node:http').ServerResponse) => void) {
+  const methods: string[] = [];
+  const server = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const method = (JSON.parse(body) as { method: string }).method;
+    methods.push(method);
+    handler(method, res);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  return { methods, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`, close: () => { server.closeAllConnections(); server.close(); } };
+}
+const json = (res: import('node:http').ServerResponse, body: unknown) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+
+test('a run that times out cancels its remote task', async () => {
+  const remote = await recordingAgent((method, res) => json(res, method === 'CancelTask' ? { jsonrpc: '2.0', id: 1, result: { id: 't1', status: { state: 'TASK_STATE_CANCELED' } } } : working));
+  const client = await runtimeFor(remote.url, { timeoutMs: 150, pollMs: 10 });
+  try {
+    const r = await (await client.agent('assistant')).run('hi');
+    assert.equal(r.status, 'failed');
+    assert.equal(r.reason?.code, 'timeout');
+    assert.equal(remote.methods.at(-1), 'CancelTask');
+  } finally {
+    await client.close();
+    remote.close();
+  }
+});
+
+test('an aborted run cancels its remote task with the 0.3 method name', async () => {
+  const remote = await recordingAgent((method, res) => json(res, method === 'tasks/cancel'
+    ? { jsonrpc: '2.0', id: 1, result: { kind: 'task', id: 't1', contextId: 'c1', status: { state: 'canceled' } } }
+    : { jsonrpc: '2.0', id: 1, result: { kind: 'task', id: 't1', contextId: 'c1', status: { state: 'working' } } }));
+  const client = await runtimeFor(remote.url, { version: '0.3', pollMs: 10 });
+  try {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 100);
+    const r = await (await client.agent('assistant')).run('hi', { signal: ac.signal });
+    assert.equal(r.status, 'stopped');
+    assert.equal(r.reason?.code, 'aborted');
+    assert.equal(remote.methods.at(-1), 'tasks/cancel');
+  } finally {
+    await client.close();
+    remote.close();
+  }
+});
+
+test('a failed or slow CancelTask leaves the run result as it was, within cancelTimeoutMs', async () => {
+  for (const answer of ['error', 'silent'] as const) {
+    const remote = await recordingAgent((method, res) => {
+      if (method !== 'CancelTask') return json(res, working);
+      if (answer === 'error') res.writeHead(500).end();
+    });
+    const client = await runtimeFor(remote.url, { timeoutMs: 100, pollMs: 10, cancelTimeoutMs: 100 });
+    try {
+      const started = Date.now();
+      const r = await (await client.agent('assistant')).run('hi');
+      assert.equal(r.status, 'failed', answer);
+      assert.equal(r.reason?.code, 'timeout', answer);
+      assert.equal(r.reason?.detail, 'remote agent timed out', answer);
+      assert.ok(remote.methods.includes('CancelTask'), answer);
+      assert.ok(Date.now() - started < 2000, answer);
+    } finally {
+      await client.close();
+      remote.close();
+    }
+  }
+});
+
+test('a run that ends on its own sends no CancelTask', async () => {
+  const remote = await recordingAgent((method, res) => json(res, completed('done')));
+  const client = await runtimeFor(remote.url, {});
+  try {
+    assert.equal((await (await client.agent('assistant')).run('hi')).output, 'done');
+    assert.deepEqual(remote.methods, ['SendMessage']);
+  } finally {
+    await client.close();
+    remote.close();
+  }
+});
+
 test('maxTasksPerCaller refuses a task over the cap', async () => {
   const stack = await compose(resolveProfile({
     agents: { assistant: { instructions: 'Be brief.', model: 'mock' } },
@@ -92,10 +173,12 @@ test('limits from ${env:...} are coerced to numbers; out-of-range values are rej
   await registry.create('ChannelPort', 'a2a', { maxTasks: 'unbounded' }, ctx);
   await registry.create('RuntimePort', 'a2a', { url: 'http://127.0.0.1:9/', timeoutMs: '5000', pollMs: '100' }, ctx);
   await registry.create('RuntimePort', 'a2a', { url: 'http://127.0.0.1:9/', timeoutMs: 'unbounded' }, ctx);
+  await registry.create('RuntimePort', 'a2a', { url: 'http://127.0.0.1:9/', cancelTimeoutMs: '2000' }, ctx);
   await assert.rejects(registry.create('ChannelPort', 'a2a', { maxTasks: 3 }, ctx), /maxTasks/);
   await assert.rejects(registry.create('ChannelPort', 'a2a', { maxTasksPerCaller: 0 }, ctx), /maxTasksPerCaller/);
   await assert.rejects(registry.create('ChannelPort', 'a2a', { taskTtlMs: 'unbounded' }, ctx), /taskTtlMs/);
   await assert.rejects(registry.create('ChannelPort', 'a2a', { maxTasks: 40, maxTasksPerCaller: 11 }, ctx), /quarter/);
   await assert.rejects(registry.create('RuntimePort', 'a2a', { url: 'http://127.0.0.1:9/', timeoutMs: 0 }, ctx), /timeoutMs/);
   await assert.rejects(registry.create('RuntimePort', 'a2a', { url: 'http://127.0.0.1:9/', pollMs: 'unbounded' }, ctx), /pollMs/);
+  await assert.rejects(registry.create('RuntimePort', 'a2a', { url: 'http://127.0.0.1:9/', cancelTimeoutMs: 'unbounded' }, ctx), /cancelTimeoutMs/);
 });

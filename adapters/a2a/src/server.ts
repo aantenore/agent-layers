@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { defineLimits, limitValue, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type RunResult, type TraceContext } from '@agent-layers/core';
+import { randomUUID } from 'node:crypto';
+import { defineLimits, limitValue, ownerDigest, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type RunResult, type TraceContext } from '@agent-layers/core';
 import {
   A2A_VERSION, ERRORS, getResult, LEGACY_VERSION, METHODS, partsText, sendResult, streamEvent, TERMINAL,
   type TaskRunMetadata, type TaskState, type TaskValue, type WireVersion,
@@ -174,7 +174,8 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         const controller = new AbortController();
         const value: TaskValue = { id, contextId, state: 'working', timestamp: new Date().toISOString() };
         // The session log of a context belongs to one caller: the same contextId from another caller is another session.
-        const sessionId = `a2a-${createHash('sha256').update(owner).digest('hex').slice(0, 16)}-${contextId}`;
+        // The owner digest is keyed with the stack's sessions.secret: the session id may leave the process.
+        const sessionId = `a2a-${(host.ownerDigest ?? ownerDigest())(owner)}-${contextId}`;
         const done = host.run(agent, text, {
           runId: id, sessionId, signal: controller.signal, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(trace ? { trace } : {}),
         }).then((r) => {

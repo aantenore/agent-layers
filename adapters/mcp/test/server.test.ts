@@ -1,11 +1,11 @@
 // The stack's governed tools served as an MCP server through the gateway, called over streamable HTTP.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { compose, defineAdapter, PORT_VERSIONS, resolveProfile, type Stack, type StackConfig, type ToolPort } from '@agent-layers/core';
+import { compose, defineAdapter, PORT_VERSIONS, resolveProfile, type CallContext, type ChannelHost, type Stack, type StackConfig, type ToolPort } from '@agent-layers/core';
 import { checkAdapter, inboundFetch } from '@agent-layers/conformance';
 import { serveStack, type GatewayHandle } from '@agent-layers/gateway';
 import { credentialAdapter, identityAdapter } from '@agent-layers/adapter-static-identity';
-import { channelAdapter } from '../src/index.ts';
+import { channelAdapter, createMcpServerChannel } from '../src/index.ts';
 
 const seen: { tool: string; subject?: string; token?: string }[] = [];
 
@@ -138,6 +138,20 @@ test('the inbound descriptor passes ChannelPort conformance', async () => {
         const res = await inboundFetch(mount, new Request('http://gateway.test/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) }));
         assert.ok(res.headers.get('mcp-session-id'));
       },
+      // A stateless tools/call of the host's tool; the outcome is the approval in `_meta`, else ok or error.
+      sessions: true,
+      expectStates: { completed: 'ok', waiting: 'waiting:conformance-approval', stopped: 'error' },
+      async sendMount(mount: Parameters<typeof inboundFetch>[0], text: string, opts: { session?: string }) {
+        const _meta = { ...metaOf(), ...(opts.session ? { 'agent-layers/session': opts.session } : {}) };
+        const res = await inboundFetch(mount, new Request('http://gateway.test/mcp', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'mcp-protocol-version': MODERN, 'mcp-method': 'tools/call', 'mcp-name': 'conformance__echo' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'conformance__echo', arguments: { text }, _meta } }),
+        }));
+        const { result } = await res.json() as { result: { isError: boolean; _meta?: Record<string, { id: string }> } };
+        const approval = result._meta?.['agent-layers/approval']?.id;
+        return approval ? `waiting:${approval}` : result.isError ? 'error' : 'ok';
+      },
     },
   });
   assert.deepEqual(report.failures, []);
@@ -269,4 +283,32 @@ test('the legacy session flow is unchanged next to the modern one', async () => 
   assert.equal(list.body.result.resultType, undefined);
   assert.equal(list.body.result.tools.length, 3);
   assert.equal((await modern('tools/list')).status, 200);
+});
+
+test('stateless calls: an anonymous session in _meta is ignored, a verified one uses the host owner digest', async () => {
+  const contexts: CallContext[] = [];
+  const host: ChannelHost = {
+    agents: () => [],
+    run: async () => { throw new Error('unused'); },
+    tools: () => ({
+      listTools: async () => [{ name: 'x__echo', description: 'echo', params: { type: 'object' } }],
+      callTool: async (_n, _a, c) => { contexts.push(c); return { ok: true, text: 'ok' }; },
+    }),
+    ownerDigest: () => 'keyed',
+  };
+  const mount = await createMcpServerChannel({}).mount!(host);
+  const call = (caller?: { id: string; kind: 'user'; roles: []; scopes: [] }) => inboundFetch(mount, new Request('http://gateway.test/mcp', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'mcp-protocol-version': MODERN, 'mcp-method': 'tools/call', 'mcp-name': 'x__echo' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x__echo', arguments: {}, _meta: { ...metaOf(), 'agent-layers/session': 'shared' } } }),
+  }), { caller });
+  await call();
+  await call();
+  await call({ id: 'alice', kind: 'user', roles: [], scopes: [] });
+  assert.deepEqual(contexts.map((c) => c.sessionId), [undefined, undefined, 'mcp-keyed-shared']);
+});
+
+test('the mount declares mcp-session-id as a header browser clients may read', async () => {
+  const mount = await createMcpServerChannel({}).mount!({ agents: () => [], run: async () => { throw new Error('unused'); } });
+  assert.deepEqual(mount.exposeHeaders, ['mcp-session-id']);
 });

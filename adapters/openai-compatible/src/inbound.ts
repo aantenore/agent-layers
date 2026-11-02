@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  GuardrailBlocked, MissingLayerError, replyToDeltas,
+  GuardrailBlocked, inboundSessionId, MissingLayerError, replyToDeltas,
   type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type ModelDelta, type ModelReply, type ModelRequest, type RunEvent,
   type RunResult, type Usage, type Vocabularies,
 } from '@agent-layers/core';
@@ -18,7 +18,19 @@ export interface OpenAICompatibleChannelOptions {
   ownedBy?: string;
   /** Return the model's reasoning (`reasoning_content`) on model routes, after the output guards (default false). */
   reasoning?: boolean;
+  /**
+   * Where an agent run finds its session, so a later request continues it (a pending approval is found again): the
+   * request header `header` (`from: "header"`, default, header `Agent-Session`) or the body's `user` field
+   * (`from: "user"`). The value is scoped to the caller. No session when absent or malformed.
+   */
+  session?: { from?: 'header' | 'user'; header?: string };
 }
+
+/** Request header that carries the session of an agent run, by default. */
+export const SESSION_HEADER = 'agent-session';
+/** Response headers of a non-streamed agent run that did not complete: its status, and the approval it waits for. */
+export const RUN_STATUS_HEADER = 'x-agent-run-status';
+export const APPROVAL_HEADER = 'x-agent-approval';
 
 const AGENT_PREFIX = 'agent:';
 
@@ -174,18 +186,33 @@ export function createOpenAICompatibleChannel(
       const finishOfRun = (status: RunResult['status']) => (status === 'stopped' ? 'content_filter' : 'stop');
       const answered = (status: RunResult['status']) => status !== 'failed';
 
-      async function viaAgent(agent: string, p: Parsed, ctx: InboundContext): Promise<Response> {
+      /** The session of an agent run, from the configured header or the `user` field. */
+      const sessionOf = (req: Request, p: Parsed, ctx: InboundContext): string | undefined => inboundSessionId(name, ctx.caller,
+        options.session?.from === 'user' ? p.req.ext?.['openai.user'] : req.headers.get(options.session?.header ?? SESSION_HEADER), host.ownerDigest);
+
+      /** A waiting run's approval id, from `ext["sdk.approval"]`. */
+      const approvalOf = (r: RunResult): string | undefined => {
+        const a = r.ext?.['sdk.approval'] as { id?: unknown } | undefined;
+        return typeof a?.id === 'string' ? a.id : undefined;
+      };
+
+      async function viaAgent(agent: string, p: Parsed, ctx: InboundContext, sessionId: string | undefined): Promise<Response> {
         const call = context(ctx);
         const id = `chatcmpl-${call.runId}`;
         const created = now();
         const model = `${AGENT_PREFIX}${agent}`;
         const input = { messages: p.req.messages };
-        const run = { runId: call.runId, signal: ctx.signal, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}) };
-        const headers = { 'x-agent-run-id': call.runId };
+        const run = {
+          runId: call.runId, signal: ctx.signal, ...(sessionId ? { sessionId } : {}), ...(ctx.caller ? { caller: ctx.caller } : {}), ...(ctx.trace ? { trace: ctx.trace } : {}),
+        };
+        const headers: Record<string, string> = { 'x-agent-run-id': call.runId };
         const chunk = (delta: unknown, finish_reason: string | null) => ({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta, finish_reason, logprobs: null }] });
         const usageChunk = (usage: Usage | undefined) => ({ id, object: 'chat.completion.chunk', created, model, choices: [], usage: usageOut(usage) ?? null });
         if (!p.stream || !host.stream) {
           const r = await host.run(agent, input, run);
+          if (r.status !== 'completed') headers[RUN_STATUS_HEADER] = r.status;
+          const approval = r.status === 'waiting' ? approvalOf(r) : undefined;
+          if (approval) headers[APPROVAL_HEADER] = approval;
           if (!answered(r.status)) return json({ error: { message: 'the agent run failed', type: 'server_error', param: null, code: null } }, 500, headers);
           const content = r.status === 'stopped' ? '' : r.output;
           const usage = usageOut(r.usage);
@@ -237,14 +264,15 @@ export function createOpenAICompatibleChannel(
           if (parsed.model.startsWith(AGENT_PREFIX)) {
             const agent = parsed.model.slice(AGENT_PREFIX.length);
             if (!agents().includes(agent)) return error(404, `The model \`${parsed.model}\` does not exist`, 'invalid_request_error', 'model_not_found');
-            return viaAgent(agent, parsed, ctx);
+            return viaAgent(agent, parsed, ctx, sessionOf(req, parsed, ctx));
           }
           if (!Object.hasOwn(aliases, parsed.model)) return error(404, `The model \`${parsed.model}\` does not exist`, 'invalid_request_error', 'model_not_found');
           return viaModel(parsed.model, parsed, ctx);
         },
       };
 
-      return { routes: [listModels, completions] };
+      // Browser clients on another origin read the run id, the status of a run that did not complete and its approval.
+      return { routes: [listModels, completions], exposeHeaders: ['x-agent-run-id', RUN_STATUS_HEADER, APPROVAL_HEADER] };
     },
   };
 }

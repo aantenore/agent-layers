@@ -80,7 +80,8 @@ Every request goes through the same steps before any route runs (details in the
    passed to the route and to every model call, tool call and run. A credential that does not verify is a 401 with
    `WWW-Authenticate`, and the adapter's error text is never returned. A request without a credential is a 401 unless
    `gateway.anonymous: true`. On the production tier the gateway refuses to start without an identity adapter or with
-   `anonymous: true`.
+   `anonymous: true`. With `gateway.auth: { "scheme": "header", "header": "X-Api-Key" }` the credential is the raw
+   value of that header instead (an API key), verified the same way, and `Authorization` is not read.
 3. **Limits.** Body size (`maxBodyBytes`, 413), time limit (`requestTimeoutMs`, 504, streams included), header and
    body upload time (`headersTimeoutMs`, `bodyTimeoutMs`), JSON content types (415). Defaults and safe ranges are in
    [limits.md](limits.md#gateway). An error inside a route is a 500 without its message.
@@ -96,6 +97,26 @@ them: another caller presenting their id gets "not found".
 
 Triggers run in the background with the trigger's own caller (a service credential in its options, verified per
 event) or, without one, with the caller that sent the event; never anonymously unless `gateway.anonymous: true`.
+
+A client continues a session, so that a call waiting for an approval finds the decision in a later run: the
+`Agent-Session` header or the `user` field on `/v1/chat/completions`, the MCP session (or
+`params._meta["agent-layers/session"]` on a stateless request), the A2A context id, the `agentsession` CloudEvents
+extension. Each is scoped to the verified caller; an anonymous request (`gateway.anonymous: true`) gets no client
+session, so two anonymous clients sending the same value never share approvals. A run that waits for an approval answers `X-Agent-Run-Status: waiting` and
+`X-Agent-Approval: <id>` on `/v1/chat/completions` (not streamed), `input-required` over A2A, and a tool result with
+`_meta["agent-layers/approval"] = {id}` over MCP.
+
+A session id names its owner by a digest of the caller id (`<channel>-<digest>-<value>`), and it can leave the
+process: an `a2a` runtime sends it as the context id to the remote agent. Set `sessions.secret` to a secret
+reference (`"sessions": { "secret": "${secret:SESSION_KEY}" }`, resolved through the secrets layer like adapter
+options) and the digest is an HMAC-SHA-256 keyed with it, which nobody outside can match against known caller ids.
+Without it the digest is a plain SHA-256 of the caller id, and `agent-layers check` warns on a production-tier
+profile with channels or triggers. A profile can override `sessions`; changing the secret starts new sessions.
+
+The gateway mounts routes and never starts triggers: a trigger that only starts in its own process, such as
+`cron-trigger`, does not fire under it. The gateway reports each one at start-up (`agent.config.warning` and a line
+in the `agent-layers gateway` output); run schedules with `agent-layers dev` or `stack.start()` in a process of their
+own.
 
 ## Configure
 
@@ -118,7 +139,8 @@ event) or, without one, with the caller that sent the event; never anonymously u
 ```
 
 `gateway` takes `port`, `host`, `inbound` (instance names to mount; every mountable channel and trigger by default),
-`anonymous`, `publicOrigin`, `cors`, `allowedOrigins`, `allowedHosts` and the limits `maxBodyBytes`, `requestTimeoutMs`,
+`anonymous`, `auth` (`scheme`: `bearer` by default or `header`, with `header` the header name), `publicOrigin`, `cors`,
+`allowedOrigins`, `allowedHosts` and the limits `maxBodyBytes`, `requestTimeoutMs`,
 `headersTimeoutMs`, `bodyTimeoutMs`, `closeGraceMs`, `corsMaxAgeS`, `maxRequestIdChars` and `maxTraceChars`, and a profile can override
 any of them. `agent-layers gateway --profile production [--port n] [--host h]` composes the
 profile, refuses to start a production-tier profile that fails the readiness gate, prints the mounted routes, and

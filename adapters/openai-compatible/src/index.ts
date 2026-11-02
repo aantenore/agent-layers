@@ -6,7 +6,7 @@ import { createOpenAICompatibleChannel, type OpenAICompatibleChannelOptions } fr
 import { sseData } from './sse.ts';
 import { DeltaReader, EXT_KEYS, replyIn, requestOut } from './wire.ts';
 
-export { createOpenAICompatibleChannel, parseChatBody, type OpenAICompatibleChannelOptions } from './inbound.ts';
+export { APPROVAL_HEADER, createOpenAICompatibleChannel, parseChatBody, RUN_STATUS_HEADER, SESSION_HEADER, type OpenAICompatibleChannelOptions } from './inbound.ts';
 export { SseLimitError, sseData } from './sse.ts';
 
 /** Options, validated against `optionsSchema` before `create` runs. */
@@ -171,6 +171,15 @@ export const channelAdapter = defineAdapter<'ChannelPort', OpenAICompatibleChann
       agents: { anyOf: [{ type: 'boolean' }, { type: 'array', items: { type: 'string', minLength: 1 } }] },
       ownedBy: { type: 'string', minLength: 1 },
       reasoning: { type: 'boolean' },
+      session: {
+        type: 'object',
+        description: 'Where an agent run finds its session: a request header (default Agent-Session) or the body\'s user field.',
+        properties: {
+          from: { enum: ['header', 'user'] },
+          header: { type: 'string', pattern: '^[A-Za-z0-9!#$%&\'*+.^_`|~-]+$' },
+        },
+        additionalProperties: false,
+      },
     },
     additionalProperties: false,
   },

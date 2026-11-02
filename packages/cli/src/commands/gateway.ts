@@ -32,6 +32,7 @@ export async function gateway(io: Io, args: GatewayArgs, wait: () => Promise<voi
     const gw = await serveStack(stack, { ...options, ...(port !== undefined ? { port } : {}), ...(args.host ? { host: args.host } : {}) });
     io.err(`gateway ${gw.url} · profile ${p.config.profile ?? '(base)'} · tier ${p.config.tier}`);
     for (const r of gw.routes) io.err(`  ${r}`);
+    for (const w of gw.warnings) io.err(`  warning: ${w}`);
     if (!gw.routes.length) io.err('  no mountable channels or triggers: only /healthz and /readyz are served');
     await wait();
     io.err('gateway stopping…');

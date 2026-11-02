@@ -99,7 +99,9 @@ agent by):
 
 Transport failures are failed runs with a fixed `reason.detail` (`remote agent call failed`; code `timeout` with
 `remote agent timed out`; `stopped` + `aborted` when the caller aborted); error bodies are not read, so a token echoed
-by the remote side never reaches the run result. The output of a failed or stopped task is not passed on.
+by the remote side never reaches the run result. The output of a failed or stopped task is not passed on. When a run
+is aborted or times out while its task is still working, the adapter sends `CancelTask` (`tasks/cancel` on 0.3) so the
+remote agent stops too; the call is bounded by `cancelTimeoutMs` and its failure does not change the run result.
 
 The task is translated at the edge: `mappingDefaults.in` on `RunResult` takes rules from the stack config
 (`mappings.runtime.in`); they read the remote task document (`/metadata/...`, `/status/state`) and write the run
@@ -116,6 +118,7 @@ result or `/ext/a2a.*`. Without rules the result is unchanged.
 | `headers` | object | none | Static headers |
 | `timeoutMs` | integer | `300000` | Time limit of a run, polling included |
 | `pollMs` | integer | `500` | Interval of `GetTask` while the task is working |
+| `cancelTimeoutMs` | integer | `5000` | Time limit of the `CancelTask` sent when a run is aborted or times out |
 
 Limits accept `${env:NAME}`; `timeoutMs` also accepts `"unbounded"`, which `agent-layers check` fails on the production
 tier. Ranges and checks: [docs/limits.md](../../docs/limits.md).

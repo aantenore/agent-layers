@@ -23,7 +23,8 @@ export interface Readiness {
   limits: LimitFinding[];
   /**
    * Warnings that do not fail the check: ext keys an adapter reads that nothing in the profile produces, and, on the
-   * production tier, a model cache shared across callers while knowledge sources are configured.
+   * production tier, a model cache shared across callers while knowledge sources are configured, and inbound
+   * channels or triggers without `sessions.secret`.
    */
   warnings: string[];
 }
@@ -64,7 +65,7 @@ export async function readiness(config: ResolvedConfig, registry: AdapterRegistr
     if (empty) problems.push({ kind: 'missing-layer', slot, message: `${slot}: required by profile ${config.profile ?? '(base)'} but not configured` });
   }
   const warnings = [...language.warnings];
-  if (config.tier === 'production') warnings.push(...sharedCacheWarnings(config));
+  if (config.tier === 'production') warnings.push(...sharedCacheWarnings(config), ...sessionSecretWarnings(config));
   return { ok: problems.length === 0 && !limits.some((l) => l.severity === 'fail'), tier: config.tier, requires, problems, limits, warnings };
 }
 
@@ -74,4 +75,11 @@ function sharedCacheWarnings(config: ResolvedConfig): string[] {
   const knowledge = layers.knowledge && typeof layers.knowledge === 'object' ? Object.values(layers.knowledge).filter((v) => v != null) : [];
   if (config.pipeline.cacheScope !== 'shared' || layers.cache == null || knowledge.length === 0) return [];
   return ['pipeline.cacheScope is shared while knowledge sources are configured: a cached answer built from one caller\'s passages can be served to another caller; use "caller"'];
+}
+
+/** Session ids leave the process (A2A context ids): without a key, their owner digest is a plain hash of the caller id. */
+function sessionSecretWarnings(config: ResolvedConfig): string[] {
+  if (config.sessions?.secret) return [];
+  const inbound = configuredAdapters(config.layers).some((a) => a.slot === 'channels' || a.slot === 'triggers');
+  return inbound ? ['sessions.secret is not set: client session ids carry a plain hash of the caller id, which a remote agent receiving them could match against known ids; set it to a ${secret:...} reference'] : [];
 }

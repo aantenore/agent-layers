@@ -6,25 +6,27 @@ export const TOKEN_ENV = 'AGENT_LAYERS_TOKEN';
 
 /**
  * Credential the CLI presents as the caller: `--token`, then AGENT_LAYERS_TOKEN, then, for prototype-tier profiles only,
- * the first token of the static-identity adapter in the identity slot.
+ * the development credential of the identity adapter (its descriptor's `devCredential`, when it has one).
  */
-export function resolveToken(p: Pick<Project, 'config' | 'env'>, flag?: string): string | undefined {
+export async function resolveToken(p: Pick<Project, 'config' | 'env' | 'registry'>, flag?: string): Promise<string | undefined> {
   const given = flag || p.env[TOKEN_ENV];
   if (given) return given;
   if (p.config.tier !== 'prototype') return undefined;
   const ref = p.config.layers.identity as AdapterRef | null | undefined;
-  if (ref?.adapter !== 'static-identity') return undefined;
-  const tokens = ref.options?.tokens;
-  return tokens && typeof tokens === 'object' ? Object.keys(tokens)[0] : undefined;
+  if (!ref?.adapter) return undefined;
+  // An adapter that cannot be loaded offers no credential; check and compose report the load failure themselves.
+  const descriptor = await p.registry.resolve('IdentityPort', ref.adapter).catch(() => undefined);
+  const token = descriptor?.devCredential?.(ref.options ?? {});
+  return typeof token === 'string' && token ? token : undefined;
 }
 
 /**
  * Verifies the caller's credential through the identity slot. Anonymous (undefined) when the stack has no identity
  * port or no credential is available; a credential that does not verify ends the command. The token is never printed.
  */
-export async function authenticate(stack: Stack, p: Pick<Project, 'config' | 'env'>, flag?: string): Promise<Caller | undefined> {
+export async function authenticate(stack: Stack, p: Pick<Project, 'config' | 'env' | 'registry'>, flag?: string): Promise<Caller | undefined> {
   if (!stack.ports.identity) return undefined;
-  const token = resolveToken(p, flag);
+  const token = await resolveToken(p, flag);
   if (!token) return undefined;
   try {
     return await stack.verify(token);

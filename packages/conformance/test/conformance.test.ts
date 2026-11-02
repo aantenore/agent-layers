@@ -98,7 +98,9 @@ test('tools: an unknown tool must return ok false and fixtures check text and ok
 });
 
 test('runtime: a stopped run needs a reason with a code', async () => {
-  const runtime = (result: object) => ({ bind: () => ({ name: 'a', run: async () => result }) }) as never;
+  const runtime = (result: object) => ({
+    bind: () => ({ name: 'a', run: async (_i: unknown, c?: { signal?: AbortSignal }) => (c?.signal?.aborted ? { runId: 'r', status: 'stopped', output: '', reason: { code: 'aborted' } } : result) }),
+  }) as never;
   const f = { stack: {}, agent: { name: 'a' } };
   assert.deepEqual((await conformance('RuntimePort', runtime({ runId: 'r', status: 'completed', output: 'ok' }), f)).failures, []);
   const r = await conformance('RuntimePort', runtime({ runId: 'r', status: 'stopped', output: '' }), f);

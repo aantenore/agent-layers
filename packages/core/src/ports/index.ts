@@ -13,4 +13,4 @@ export type * from './tool.ts';
 export type * from './catalog.ts';
 export { GUARD_STAGES } from './guard.ts';
 export { ANONYMOUS, publicCaller } from './identity.ts';
-export { PORTS, PORT_VERSIONS, compatibleVersion, isPortName, portsOf } from './catalog.ts';
+export { PORTS, PORT_VERSIONS, compatibleVersion, isPortName, portsOf, versionAtLeast } from './catalog.ts';

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  limitValue, matchesAny, type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type Risk, type ToolPort,
+  inboundSessionId, limitValue, matchesAny, type CallContext, type ChannelHost, type ChannelPort, type InboundContext, type InboundRoute, type LimitValue, type Risk, type ToolPort,
   type ToolSpec,
 } from '@agent-layers/core';
 
@@ -32,7 +32,17 @@ export interface McpServerChannelOptions {
    * `maxSessions`). A caller's own least recently used session makes room for its new one; a full anonymous pool answers 429.
    */
   maxSessionsPerCaller?: LimitValue;
+  /**
+   * `params._meta` key a stateless request (modern revision) may carry its session in, so a repeated call finds its
+   * approval (default `agent-layers/session`). Scoped to the caller.
+   */
+  sessionMetaKey?: string;
 }
+
+/** `_meta` key of a tool result waiting for an approval: `{id}`, the approval id. */
+export const APPROVAL_META = 'agent-layers/approval';
+/** Default `params._meta` key of the session of a stateless request. */
+export const SESSION_META = 'agent-layers/session';
 
 /**
  * Protocol revisions served on the same endpoint, latest first. Modern revisions are stateless (no handshake, no session:
@@ -183,7 +193,10 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
             try {
               const out = await tools.callTool(tool, args as Record<string, unknown>, callContext(ctx, AbortSignal.any([ctx.signal, controller.signal]), sessionId));
               const structured = out.data && typeof out.data === 'object' && !Array.isArray(out.data) ? { structuredContent: out.data } : {};
-              return { content: [{ type: 'text', text: out.text }], isError: !out.ok, ...structured };
+              // A call waiting for a person says which approval, so a client (a remote runtime) can end its run waiting.
+              const approval = out.ext?.['sdk.approval'];
+              const meta = typeof approval === 'string' ? { _meta: { [APPROVAL_META]: { id: approval } } } : {};
+              return { content: [{ type: 'text', text: out.text }], isError: !out.ok, ...structured, ...meta };
             } finally {
               inflight.delete(key);
             }
@@ -229,8 +242,10 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
               });
             case 'tools/list':
               return reply(req, { jsonrpc: '2.0', id, result: { ...complete, ...cache, ...(await dispatch(m, new Map(), ctx) as object) } });
-            case 'tools/call':
-              return reply(req, { jsonrpc: '2.0', id, result: { ...complete, ...(await dispatch(m, new Map(), ctx) as object) } });
+            case 'tools/call': {
+              const sessionId = inboundSessionId(name, ctx.caller, meta?.[options.sessionMetaKey ?? SESSION_META], host.ownerDigest);
+              return reply(req, { jsonrpc: '2.0', id, result: { ...complete, ...(await dispatch(m, new Map(), ctx, sessionId) as object) } });
+            }
             default:
               return jsonError(404, -32601, `method not found: ${m.method}`, id);
           }
@@ -317,6 +332,8 @@ export function createMcpServerChannel(options: McpServerChannelOptions = {}, na
 
       return {
         routes: [route],
+        // A browser client reads the session id of a legacy handshake from the response.
+        exposeHeaders: ['mcp-session-id'],
         async close() {
           for (const s of sessions.values()) for (const c of s.inflight.values()) c.abort();
           sessions.clear();

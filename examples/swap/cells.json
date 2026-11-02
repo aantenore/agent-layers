@@ -55,6 +55,19 @@
     "observe": { "output": "\"name\":\"agent\\.run\"" }
   },
   {
+    "id": "eval-layer-signals",
+    "layer": "eval",
+    "value": [{ "adapter": "expected-eval" }, { "adapter": "layer-signals" }],
+    "description": "Per-layer signals from the run's events and telemetry scored next to the expected answers. Seen as more scores than the three expected-eval gives the smoke dataset.",
+    "observe": { "output": "/([4-9]|[1-9]\\d+) scores passed" }
+  },
+  {
+    "id": "channels-gateway",
+    "layer": "channels",
+    "value": [{ "adapter": "openai-compatible", "options": { "models": { "mock": "mock" } } }, { "adapter": "mcp" }, { "adapter": "a2a" }],
+    "description": "Channels mounted by the gateway added to the test profile: check runs their conformance (mount and routes); eval does not use them."
+  },
+  {
     "id": "guard-presidio",
     "layer": "guardrails",
     "value": [{ "adapter": "presidio", "options": { "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}", "anonymizerUrl": "${env:PRESIDIO_ANONYMIZER_URL:-http://localhost:5001}", "entities": ["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "IP_ADDRESS"] } }],

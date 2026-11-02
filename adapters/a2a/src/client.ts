@@ -3,7 +3,7 @@ import {
   activeTrace, anySignal, ATTR, defineLimits, isAbort, limitValue, messageText, noMappings, timeoutSignal,
   type CallContext, type LimitValue, type Mappings, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason,
 } from '@agent-layers/core';
-import { A2A_VERSION, INTERRUPTED, LEGACY_VERSION, messageWire, METHOD_OF, readResult, TERMINAL, type TaskState, type WireVersion } from './wire.ts';
+import { A2A_VERSION, INTERRUPTED, LEGACY_VERSION, messageWire, METHOD_OF, METHODS, readResult, TERMINAL, type TaskState, type WireVersion } from './wire.ts';
 
 /** Options of the outbound descriptor: a remote A2A agent as the stack's runtime. */
 export interface A2ARuntimeOptions {
@@ -25,12 +25,15 @@ export interface A2ARuntimeOptions {
   timeoutMs?: LimitValue;
   /** Interval between GetTask calls while a task is still working (default 500). */
   pollMs?: number;
+  /** Time limit of the CancelTask call sent when a run is aborted or times out (default 5000). */
+  cancelTimeoutMs?: number;
 }
 
 /** Configurable limits of the outbound descriptor; see docs/limits.md. */
 export const RUNTIME_LIMITS = defineLimits({
   timeoutMs: { path: 'options.timeoutMs', default: 300_000, unit: 'ms', min: 1, unbounded: 'fail', safe: { max: 3_600_000 } },
   pollMs: { path: 'options.pollMs', default: 500, unit: 'ms', min: 10, safe: { min: 100, max: 10_000 } },
+  cancelTimeoutMs: { path: 'options.cancelTimeoutMs', default: 5_000, unit: 'ms', min: 1, max: 60_000 },
 });
 
 const RUN_FAILED = 'remote agent call failed';
@@ -79,6 +82,8 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
   const version: WireVersion = options.version ?? A2A_VERSION;
   const timeoutMs = limitValue(RUNTIME_LIMITS.timeoutMs, options.timeoutMs);
   const pollMs = limitValue(RUNTIME_LIMITS.pollMs, options.pollMs);
+  const cancelTimeoutMs = limitValue(RUNTIME_LIMITS.cancelTimeoutMs, options.cancelTimeoutMs);
+  const cancelMethod = Object.keys(METHODS).find((m) => METHODS[m]!.op === 'cancel' && METHODS[m]!.version === version)!;
   let endpoint: Promise<string> | undefined;
   // Origins the operator configured: only these may be private or loopback targets.
   const configured = new Set([options.url, options.endpoint, ...(options.allowedEndpoints ?? [])].filter((u): u is string => !!u).map((u) => new URL(u).origin));
@@ -147,6 +152,15 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
         return body.result;
       }
 
+      /**
+       * Best effort: asks the remote agent to stop a task the run gave up on, so it does not keep working. Bounded by
+       * `cancelTimeoutMs`, with its own signal (the run's is already aborted); a failure leaves the run's result as is.
+       */
+      async function cancel(id: string, ctx: CallContext): Promise<void> {
+        const signal = timeoutSignal(cancelTimeoutMs) ?? new AbortController().signal;
+        try { await call(cancelMethod, { id }, { ...ctx, signal }, signal); } catch { /* the run already has its result */ }
+      }
+
       return {
         name: agent.name,
         async run(input, init = {}) {
@@ -156,15 +170,18 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
           const ended = (reason: Omit<StopReason, 'layer' | 'by'>, status: RunResult['status'] = 'failed'): RunResult =>
             ({ runId: ctx.runId, status, output: '', reason: { ...reason, layer: 'harness', by } });
           return stack.telemetry.span('a2a.send', { [ATTR.layer]: 'harness', [ATTR.name]: agent.name, [ATTR.runId]: ctx.runId, 'a2a.version': version }, async (span) => {
+            let taskId: string | undefined;
             const message = messageWire({ messageId: randomUUID(), role: 'user', text: inputText(input), ...(ctx.sessionId ? { contextId: ctx.sessionId } : {}) }, version);
             try {
               let read = readResult(await call(METHOD_OF[version].send, { message }, ctx, signal));
               if (read.message !== undefined) return mappings.in(read.raw, { runId: ctx.runId, status: 'completed', output: read.message } satisfies RunResult);
               while (read.task && !TERMINAL.includes(read.task.state) && !INTERRUPTED.includes(read.task.state)) {
+                taskId = read.task.id;
                 await new Promise((r) => setTimeout(r, pollMs));
                 signal.throwIfAborted();
                 read = readResult(await call(METHOD_OF[version].get, { id: read.task.id }, ctx, signal));
               }
+              taskId = undefined;
               if (!read.task) return ended({ code: 'error', detail: 'remote agent sent no task' });
               const task = read.task;
               span.setAttributes({ 'a2a.task.state': task.native ?? task.state });
@@ -182,6 +199,8 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
               };
               return mappings.in(read.raw, result);
             } catch (err) {
+              // A task still working on the remote side is canceled there too; a failed cancel does not change the result.
+              if (taskId && signal.aborted) await cancel(taskId, ctx);
               if (ctx.signal?.aborted) return ended({ code: 'aborted' }, 'stopped');
               // A fixed detail: error text can carry URLs or credentials.
               return isAbort(err) ? ended({ code: 'timeout', detail: 'remote agent timed out' }) : ended({ code: 'error', detail: RUN_FAILED });

@@ -1,6 +1,6 @@
 # RuntimePort
 
-Layer: `harness` (L3 Agent runtime) · Version: 1.0.0 · Conformance: `checkRuntime`
+Layer: `harness` (L3 Agent runtime) · Version: 1.1.0 · Conformance: `checkRuntime`
 
 ## Purpose
 
@@ -64,7 +64,7 @@ Statuses: `completed` (the agent answered), `failed` (an error ended the run), `
 | `stage?` | Guard stage, for `guard_block`. |
 | `detail?` | Internal text for people. Never parsed, never shown to the caller. |
 
-A run that waits for an approval ends with status `waiting` and reason `{code: "needs_input", layer: "identity", by: <approval instance>, detail: <approval id>}`. The governed tool result that asked for the approval carries `ext["sdk.approval"]` (the approval id), so a runtime can end the run without parsing text. A later run in the same session (same session id, same caller) that makes the same call, same tool and same arguments, gets the decision: approved runs once, denied is refused, still pending returns the same approval id (see [ApprovalPort](ApprovalPort.md)). The session carries the decision, not the conversation: `basic-runtime` and `reinloop` start each run from its input, so the follow-up message must lead the model to the same call.
+A run that waits for an approval ends with status `waiting` and reason `{code: "needs_input", layer: "identity", by: <approval instance>, detail: <approval id>}`, and the stack writes `ext["sdk.approval"] = {id, by?, tool?}` on the result: the approval id, the approval instance and the prefixed tool name, so a caller reads the id without parsing `detail` (since 1.1.0). Inside a run, a call of the stack's tools that waits for an approval throws `ApprovalPending` (from `@agent-layers/core`, like `GuardrailBlocked`) when the runtime's descriptor declares `portVersion` 1.1.0 or later; a runtime built for 1.0.0 gets the pending result instead, since it may turn a thrown tool error into tool text. A runtime may let it propagate, and the stack ends the run as above, or end the run itself with `runEndOf(err)` (status `waiting`, reason `err.stopReason`). Tools that return the pending result instead (a governed `ToolPort` outside a stack) carry `ext["sdk.approval"]` (the approval id) on the tool result, so a runtime can end the run without parsing text. A later run in the same session (same session id, same caller) that makes the same call, same tool and same arguments, gets the decision: approved runs once, denied is refused, still pending returns the same approval id (see [ApprovalPort](ApprovalPort.md)). The session carries the decision, not the conversation: `basic-runtime` and `reinloop` start each run from its input, so the follow-up message must lead the model to the same call.
 
 ### Run events
 
@@ -86,14 +86,14 @@ Adapter events are named `<namespace>.<name>` (for example `reinloop.compaction`
 - The caller flows through: `ctx.caller` is passed to every model, knowledge and tool call made during the run, and its `credential` is never written to events, logs or traces.
 - The runtime sees only the tools the agent's globs match, and calls them by prefixed name.
 - A guardrail block ends the run with status `stopped` and a reason `{code: "guard_block", layer: "guardrail", by: <guard>, stage}`, rather than crashing the caller.
-- A run honours `ctx.signal`.
+- A run honours `ctx.signal`: when it fires, the run ends as soon as it can with status `stopped` and reason `aborted` (or the stop reason the signal carries, such as `timeout`).
 - Session continuity (history across runs) is provided through [StatePort](StatePort.md) when the runtime supports it; the contract does not require it.
 - Each run produces telemetry spans tagged with `agent.layer` (see [TelemetryPort](TelemetryPort.md)).
 
 ## Errors
 
 - `bind` rejects when the spec cannot be honoured (unknown model setup, invalid settings).
-- Run problems the agent can describe are returned as a `RunResult` with status `failed`, `stopped` or `waiting` and a structured `reason`. Cancellation rejects.
+- Run problems the agent can describe are returned as a `RunResult` with status `failed`, `stopped` or `waiting` and a structured `reason`. Cancellation does not reject: it is a `stopped` result (see Semantics).
 
 ## Escape hatch
 
@@ -105,10 +105,12 @@ Adapter events are named `<namespace>.<name>` (for example `reinloop.compaction`
 
 - `bind` is a function.
 - With a stack and an agent fixture: `bind` resolves, the agent's `name` equals the spec's, and `run` returns a result that validates against `run-result.json`; a result whose status is not `completed` has a `reason`. Without fixtures the run checks are skipped.
+- With the fixtures, for a runtime whose descriptor declares 1.1.0 or later (`checkAdapter` reads it; `conformance` takes `portVersion` in the fixtures, default the core's): a run whose signal is already aborted resolves `stopped` with reason `aborted` (or `timeout`); a streamed run ends with a `run.end` of the run's status, and its `text` events add up to the output of a completed run (when the runtime streams); every model and tool call of a run carries the run's caller; with a `toolInput` fixture, a tool call that throws `ApprovalPending` ends the run `waiting` with `needs_input`, or lets the error through.
 - `ext` keys written by the adapter are namespaced, in its namespace and declared (`checkExt`).
 
 ## Version history
 
+- 1.1.0 — the stack's tools throw `ApprovalPending` for a call waiting for an approval and the stack ends the run `waiting`; `RunResult.ext["sdk.approval"] = {id, by?, tool?}`; conformance checks abort, stream, caller and approval
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `AgentSpec.settings` and `ext` replace `params`; status `waiting`; structured `RunResult.reason`; core event types with fixed payloads
 - 0.2.0 — optional `costUsd` on RunResult
 - 0.1.0 — initial

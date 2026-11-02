@@ -159,14 +159,14 @@ This repository is MIT. Reference technologies are used as separate processes or
 | OpenTelemetry Collector | Apache-2.0 | telemetry |
 | Langfuse | MIT core (the `ee/` directories are under a separate commercial license and are not used) | telemetry |
 | Jaeger | Apache-2.0 | telemetry |
-| promptfoo | MIT | eval |
+| promptfoo | MIT | eval (reference runner; EvaluatorPort adapter planned) |
 | Docker Compose | Apache-2.0 | infra |
 | Traefik | MIT | infra (docs) |
 | Argo CD | Apache-2.0 | infra (docs) |
 | OpenTofu | MPL-2.0 | infra (docs) |
 | OpenBao | MPL-2.0 | infra (docs) |
 | LibreChat | MIT | interface (planned) |
-| A2A | Apache-2.0 | interface (planned) |
+| A2A | Apache-2.0 | interface, harness (`a2a` adapter: channel and runtime) |
 | AG-UI | MIT | interface (planned) |
 
 All of the above are OSI-approved licenses (for the split-licensed projects, only the open-source parts are used).

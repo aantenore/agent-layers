@@ -119,12 +119,32 @@ const gateway: JsonSchema = {
     publicOrigin: { type: 'string', minLength: 1 },
     allowedOrigins: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Origins accepted besides the gateway\'s own; other Origin headers get 403.' },
     allowedHosts: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Accepted Host names (name or name:port); default: loopback names when bound to loopback.' },
+    auth: {
+      type: 'object',
+      description: 'Where a request carries its credential: Authorization: Bearer (default) or the raw value of a named header (API keys).',
+      properties: {
+        scheme: { enum: ['bearer', 'header'] },
+        header: { type: 'string', pattern: '^[A-Za-z0-9!#$%&\'*+.^_`|~-]+$', description: 'Header that carries the credential when scheme is header.' },
+      },
+      additionalProperties: false,
+      if: { properties: { scheme: { const: 'header' } }, required: ['scheme'] },
+      then: { required: ['header'] },
+    },
     cors: {
       type: 'object',
       properties: { origins: { type: 'array', items: { type: 'string', minLength: 1 } } },
       required: ['origins'],
       additionalProperties: false,
     },
+  },
+  additionalProperties: false,
+};
+
+const sessions: JsonSchema = {
+  type: 'object',
+  description: 'Client sessions of inbound channels and triggers.',
+  properties: {
+    secret: { type: 'string', minLength: 1, description: 'Key of the owner digest inside session ids (HMAC-SHA-256), as ${secret:NAME} or ${env:NAME}; without it the digest is a plain hash of the caller id.' },
   },
   additionalProperties: false,
 };
@@ -233,6 +253,7 @@ const profile: JsonSchema = {
     policy: { type: 'array', items: { $ref: '#/$defs/policyRule' } },
     pipeline: { $ref: '#/$defs/pipeline' },
     gateway: { $ref: '#/$defs/gateway' },
+    sessions: { $ref: '#/$defs/sessions' },
     limits: { $ref: '#/$defs/limits' },
     vocabularies: { $ref: '#/$defs/vocabularies' },
     mappings: { $ref: '#/$defs/mappings' },
@@ -256,6 +277,7 @@ export const configSchema: JsonSchema = {
     policy: { type: 'array', items: { $ref: '#/$defs/policyRule' } },
     pipeline: { $ref: '#/$defs/pipeline' },
     gateway: { $ref: '#/$defs/gateway' },
+    sessions: { $ref: '#/$defs/sessions' },
     limits: { $ref: '#/$defs/limits' },
     vocabularies: { $ref: '#/$defs/vocabularies' },
     mappings: { $ref: '#/$defs/mappings' },
@@ -264,7 +286,7 @@ export const configSchema: JsonSchema = {
   },
   additionalProperties: false,
   $defs: {
-    adapterRef: ref, adapterRefOverlay: refOverlay, append, layers, layersOverlay, policyRule, pipeline, gateway, limits,
+    adapterRef: ref, adapterRefOverlay: refOverlay, append, layers, layersOverlay, policyRule, pipeline, gateway, sessions, limits,
     ext, agentSettings, agent, vocabularies, mappingRule, mappings, profile,
   },
 };

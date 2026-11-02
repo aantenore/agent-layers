@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
-  ATTR, coerceLimits, configuredAdapters, ConfigError, findRoute, GATEWAY_LIMITS, InboundRejected, limitList, limitValue, readiness, validateLimits,
+  ATTR, coerceLimits, configuredAdapters, ConfigError, EVENT, findRoute, GATEWAY_LIMITS, InboundRejected, limitList, limitValue, readiness, validateLimits,
   type Caller, type ChannelPort, type GatewayConfig, type TraceContext, type InboundContext, type InboundRoute, type Stack, type TelemetryPort,
   type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
@@ -24,6 +24,8 @@ export interface GatewayHandle {
   port: number;
   /** Mounted routes, as `METHOD path (instance)`, for start-up logs. */
   routes: string[];
+  /** Configured inbound adapters the gateway does not run (triggers that only start, such as in-process schedules). */
+  warnings: string[];
   /** Stops accepting requests, waits for those in flight and for trigger runs, then releases the mounts. */
   close(): Promise<void>;
 }
@@ -33,6 +35,11 @@ const RESERVED = ['/healthz', '/readyz'];
 const REQUEST_ID_CHARS = /^[A-Za-z0-9._-]+$/;
 const REALM = 'agent-layers';
 const LOOPBACK = ['127.0.0.1', 'localhost', '::1'];
+/**
+ * Response headers exposed to cross-origin clients whatever is mounted, joined by each mount's `exposeHeaders`.
+ * `mcp-session-id` stays here until every MCP channel declares it on its mount.
+ */
+const EXPOSE_HEADERS = ['mcp-session-id', 'x-request-id'];
 /** Printable ASCII: what a trace header may carry once it is copied into the run. */
 const TRACE_CHARS = /^[\x20-\x7e]+$/;
 
@@ -58,13 +65,7 @@ const untilAborted = (signal: AbortSignal): Promise<never> => new Promise((_, re
 
 /** The channel and trigger instances of a stack, named as in its config, that can be mounted on a host server. */
 export function mountableInbound(stack: Stack, names?: readonly string[]): { name: string; port: InboundAdapterInstance }[] {
-  const all: { name: string; port: InboundAdapterInstance }[] = [];
-  const index = { channels: 0, triggers: 0 };
-  for (const e of configuredAdapters(stack.config.layers)) {
-    if (e.slot !== 'channels' && e.slot !== 'triggers') continue;
-    const port = (stack.ports[e.slot] as InboundAdapterInstance[])[index[e.slot]++];
-    if (port) all.push({ name: e.key, port });
-  }
+  const all = inboundOf(stack);
   if (!names) return all.filter((x) => typeof x.port.mount === 'function');
   return names.map((n) => {
     const found = all.find((x) => x.name === n);
@@ -72,6 +73,29 @@ export function mountableInbound(stack: Stack, names?: readonly string[]): { nam
     if (typeof found.port.mount !== 'function') throw new ConfigError([`gateway.inbound: "${n}" cannot be mounted on the gateway (it has no mount())`]);
     return found;
   });
+}
+
+/** Every channel and trigger instance of a stack, named as in its config. */
+function inboundOf(stack: Stack): { name: string; port: InboundAdapterInstance }[] {
+  const all: { name: string; port: InboundAdapterInstance }[] = [];
+  const index = { channels: 0, triggers: 0 };
+  for (const e of configuredAdapters(stack.config.layers)) {
+    if (e.slot !== 'channels' && e.slot !== 'triggers') continue;
+    const port = (stack.ports[e.slot] as InboundAdapterInstance[])[index[e.slot]++];
+    if (port) all.push({ name: e.key, port });
+  }
+  return all;
+}
+
+/**
+ * Triggers of a stack that only start (timers in the process, such as `cron-trigger`): the gateway mounts routes and
+ * never starts triggers, so under it they never fire. One warning per trigger.
+ */
+export function unmountedTriggers(stack: Stack): string[] {
+  const triggers = new Set<unknown>(stack.ports.triggers);
+  return inboundOf(stack)
+    .filter(({ port }) => triggers.has(port) && typeof port.mount !== 'function' && typeof (port as TriggerPort).start === 'function')
+    .map(({ name }) => `trigger "${name}" only starts in its own process (agent-layers dev, stack.start()): the gateway does not run it`);
 }
 
 /**
@@ -83,6 +107,10 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   const tier = stack.config.tier;
   // Anonymous callers only when the config says so; never on the production tier.
   const anonymous = opts.anonymous === true;
+  // Where the credential travels: `Authorization: Bearer` by default, or the raw value of a named header (API keys).
+  const authHeader = opts.auth?.scheme === 'header' ? opts.auth.header?.toLowerCase() : undefined;
+  if (opts.auth?.scheme === 'header' && !authHeader) throw new ConfigError(['gateway.auth.header: required when gateway.auth.scheme is "header"']);
+  const challenge = authHeader ? `ApiKey realm="${REALM}"` : `Bearer realm="${REALM}"`;
   // Options may come from code as well as from the stack config: same coercion and ranges (docs/limits.md).
   const raw = Object.fromEntries(Object.keys(GATEWAY_LIMITS).map((k) => [k, (opts as Record<string, unknown>)[k]]).filter(([, v]) => v !== undefined));
   const { gateway: limits } = coerceLimits(limitList(GATEWAY_LIMITS), { gateway: raw as GatewayConfig });
@@ -108,6 +136,8 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     ? opts.inbound.map((port, i) => ({ name: port.name ?? `inbound-${i}`, port }))
     : mountableInbound(stack, stack.config.gateway.inbound);
   const triggers = new Set<unknown>(stack.ports.triggers);
+  const warnings = unmountedTriggers(stack);
+  for (const w of warnings) telemetry.event(EVENT.configWarning, { [ATTR.layer]: 'interface', [ATTR.error]: w });
 
   let draining = false;
   const inflight = new Set<Promise<unknown>>();
@@ -120,6 +150,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   const host = stack.host();
   const sink: TriggerSink = {
     agents: () => stack.agents(),
+    ...(host.ownerDigest ? { ownerDigest: host.ownerDigest } : {}),
     ...(stack.ports.identity ? { verify: (c: string) => stack.verify(c) } : {}),
     async accept(trigger, ctx = {}) {
       const agent = trigger.agent ?? stack.agents()[0];
@@ -128,7 +159,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
       if (draining) throw new InboundRejected('forbidden', 'the gateway is shutting down');
       const input = typeof trigger.data === 'string' ? trigger.data : JSON.stringify(trigger.data ?? {});
       const attrs = { [ATTR.layer]: 'interface' as const, [ATTR.triggerKind]: trigger.kind, [ATTR.runId]: trigger.id, [ATTR.name]: agent };
-      track(host.run(agent, input, { runId: trigger.id, ...(ctx.caller ? { caller: ctx.caller } : {}) })
+      track(host.run(agent, input, { runId: trigger.id, ...(ctx.caller ? { caller: ctx.caller } : {}), ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}) })
         .then((r) => telemetry.event('gateway.trigger.done', { ...attrs, [ATTR.runStatus]: String(r.status) }))
         .catch(() => telemetry.event('gateway.trigger.done', { ...attrs, [ATTR.runStatus]: 'failed' })));
       return { runId: trigger.id };
@@ -136,12 +167,14 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   };
 
   const mounted: Mounted[] = [];
+  const exposeHeaders = new Set(EXPOSE_HEADERS);
   const closers: (() => Promise<void>)[] = [];
   try {
     for (const { name, port } of selected) {
       if (typeof port.mount !== 'function') throw new ConfigError([`gateway: inbound "${name}" cannot be mounted (it has no mount())`]);
       const mount = triggers.has(port) ? await (port as TriggerPort).mount!(sink) : await (port as ChannelPort).mount!(host);
       if (mount.close) closers.push(() => mount.close!());
+      for (const h of mount.exposeHeaders ?? []) exposeHeaders.add(h.toLowerCase());
       for (const route of mount.routes) {
         if (RESERVED.includes(route.path)) throw new ConfigError([`gateway: inbound "${name}" uses the reserved path ${route.path}`]);
         const clash = mounted.find((m) => m.route.path === route.path && (!m.route.methods || !route.methods || m.route.methods.some((x) => route.methods!.includes(x))));
@@ -162,16 +195,16 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   let origin = '';
 
   async function authenticate(req: IncomingMessage): Promise<{ caller?: Caller } | Response> {
-    const header = req.headers.authorization;
+    const header = req.headers[authHeader ?? 'authorization'];
     if (!header) {
       if (anonymous) return {};
-      return errorResponse(401, 'authentication required', 'authentication_error', { 'www-authenticate': `Bearer realm="${REALM}"` });
+      return errorResponse(401, 'authentication required', 'authentication_error', { 'www-authenticate': challenge });
     }
-    const m = /^Bearer\s+(\S+)\s*$/i.exec(header);
-    const invalid = () => errorResponse(401, 'invalid credential', 'authentication_error', { 'www-authenticate': `Bearer realm="${REALM}", error="invalid_token"` });
-    if (!m || !stack.ports.identity) return invalid();
+    const credential = typeof header !== 'string' ? undefined : authHeader ? /^\s*(\S+)\s*$/.exec(header)?.[1] : /^Bearer\s+(\S+)\s*$/i.exec(header)?.[1];
+    const invalid = () => errorResponse(401, 'invalid credential', 'authentication_error', { 'www-authenticate': `${challenge}, error="invalid_token"` });
+    if (!credential || !stack.ports.identity) return invalid();
     try {
-      return { caller: await stack.verify(m[1]!) };
+      return { caller: await stack.verify(credential) };
     } catch {
       // The identity adapter's message can name the credential or its issuer: the client learns only that it failed.
       return invalid();
@@ -182,7 +215,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     const allowed = opts.cors?.origins;
     const from = req.headers.origin;
     if (!allowed || !from || !(allowed.includes('*') || allowed.includes(from))) return {};
-    return { 'access-control-allow-origin': from, vary: 'Origin', 'access-control-expose-headers': 'mcp-session-id, x-request-id' };
+    return { 'access-control-allow-origin': from, vary: 'Origin', 'access-control-expose-headers': [...exposeHeaders].join(', ') };
   }
 
   /**
@@ -316,6 +349,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     url,
     port,
     routes: mounted.map((m) => `${m.route.methods?.join('|') ?? '*'} ${m.route.path} (${m.instance})`),
+    warnings,
     close() {
       closing ??= (async () => {
         draining = true;

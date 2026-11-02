@@ -25,8 +25,9 @@ No port is on 0.x any more; the rule stays here for history and for adapters tha
 While the major version is 0, a minor bump may be breaking. Compatibility is therefore stricter:
 
 - An adapter declares the port version it implements as `portVersion`.
-- An adapter is compatible with a port when the major versions are equal and, for major 0, the minor versions are equal as well. For major 1 and above, any minor or patch of the same major is compatible.
-- Examples: `0.1.3` serves `0.1.0`; `0.2.0` does not serve `0.1.0`; `1.4.0` serves `1.0.0`; `2.0.0` does not serve `1.9.0`.
+- An adapter is compatible with a port when the major versions are equal and, for major 0, the minor versions are equal as well. For major 1 and above, the adapter's minor must not be newer than the core's: an adapter built for an older minor serves a newer core (minors only add optional things), while one built for a newer minor may rely on fields this core does not have. Patches do not matter.
+- Examples: `0.1.3` serves `0.1.0`; `0.2.0` does not serve `0.1.0`; `1.0.0` serves `1.4.0`; `1.4.0` does not serve `1.0.0`; `2.0.0` does not serve `1.9.0`.
+- Behaviour a minor adds is applied to adapters that declare it: the stack throws `ApprovalPending` only into runtimes declaring RuntimePort 1.1.0 or later, and conformance runs the 1.1.0 runtime checks only for them.
 
 This is the rule implemented by `compatibleVersion` in `packages/core/src/ports/catalog.ts`. A runtime must refuse to wire an adapter whose declared version is not compatible with the port version it runs.
 

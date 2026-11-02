@@ -38,6 +38,12 @@ export function createMemoryApproval(options: MemoryApprovalOptions = {}, name =
     name,
     native: () => entries,
     async request(req) {
+      // A pending, unexpired request for the same key is the one a person will decide: reuse it, so `lookup` finds it.
+      // Checked and recorded in one synchronous step, so concurrent requests cannot both create one.
+      for (const id of [...(req.key ? byKey.get(req.key) ?? [] : [])].reverse()) {
+        const entry = entries.get(id);
+        if (entry && !entry.consumed && view(entry).status === 'pending') return view(entry);
+      }
       const expiresAt = req.expiresAt ? Date.parse(req.expiresAt) : Number.isFinite(ttlMs) ? Date.now() + ttlMs : undefined;
       const request = stored(req);
       if (expiresAt !== undefined && !request.expiresAt) request.expiresAt = new Date(expiresAt).toISOString();

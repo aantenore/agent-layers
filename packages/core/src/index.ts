@@ -11,7 +11,7 @@ export {
   parseConfig, readRawConfig, resolveProfile, validateConfig,
 } from './config.ts';
 export type {
-  AdapterRef, AgentConfig, AppendList, ConfiguredAdapter, GatewayConfig, LayersConfig, LayersOverlay, LimitsConfig, LoadOptions, PipelineConfig, ProfileConfig, ResolvedConfig, StackConfig,
+  AdapterRef, AgentConfig, AppendList, ConfiguredAdapter, GatewayConfig, LayersConfig, LayersOverlay, LimitsConfig, LoadOptions, PipelineConfig, ProfileConfig, ResolvedConfig, SessionsConfig, StackConfig,
 } from './config.ts';
 export { readiness, type Readiness, type ReadinessProblem } from './readiness.ts';
 export { diffProfiles, formatDiff, type DiffRow, type DiffStatus } from './diff.ts';
@@ -21,7 +21,7 @@ export {
   type TelemetryRecord, type TraceCodec, type TraceIdSet, type TraceIds,
 } from './telemetry.ts';
 export { ATTR, EVENT, METRIC, SPAN } from './names.ts';
-export { findRoute, routeMatches } from './inbound.ts';
+export { INBOUND_SESSION_ID, findRoute, inboundSessionId, ownerDigest, routeMatches, type OwnerDigest } from './inbound.ts';
 export {
   addUsage, assembleDeltas, callsOf, lastUserText, messageText, newUserMessageIndexes, parseArgs, partsText, replyText, replyToDeltas, textMessage, toolInfos,
 } from './messages.ts';

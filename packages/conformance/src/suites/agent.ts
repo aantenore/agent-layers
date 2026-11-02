@@ -1,8 +1,112 @@
-import type { AgentSpec, AttrFilter, Document, IngestionPort, KnowledgePort, MemoryPort, RunEvent, RuntimePort, Stack, StatePort, ToolPort } from '@agent-layers/core';
+import {
+  ApprovalPending, PORT_VERSIONS, versionAtLeast,
+  type AgentSpec, type AttrFilter, type CallContext, type Caller, type Document, type IngestionPort, type KnowledgePort, type MemoryPort, type RunEvent, type RunnableAgent,
+  type RunResult, type RuntimePort, type Stack, type StatePort, type ToolPort,
+} from '@agent-layers/core';
 import { Checks, testContext } from '../check.ts';
 import { conforms } from '../schemas.ts';
 
-export interface RuntimeFixtures { stack?: Stack; agent?: AgentSpec; input?: string }
+export interface RuntimeFixtures {
+  stack?: Stack;
+  agent?: AgentSpec;
+  input?: string;
+  /** An input that makes the agent call a tool: enables the approval check (a pending approval ends the run `waiting`). */
+  toolInput?: string;
+  /**
+   * RuntimePort version the runtime implements (`checkAdapter` passes its descriptor's; default: the core's). The
+   * behaviour checks (abort, stream ≡ run, caller, approval) apply from 1.1.0.
+   */
+  portVersion?: string;
+}
+
+const CONFORMANCE_CALLER: Caller = { id: 'conformance-user', kind: 'user', roles: [], scopes: [] };
+
+/**
+ * The fixture stack seen through recorders: every model and tool call context is kept, and with `pending` every tool
+ * call throws `ApprovalPending`, as the stack's governed tools do for a call waiting for a person.
+ */
+function probeStack(stack: Stack, contexts: CallContext[], pending: boolean): Stack {
+  const probe = Object.create(stack) as Stack;
+  return Object.assign(probe, {
+    modelFor(agent: AgentSpec) {
+      const model = stack.modelFor(agent);
+      return Object.assign(Object.create(model), {
+        chat: (req: Parameters<typeof model.chat>[0], ctx: CallContext) => { contexts.push(ctx); return model.chat(req, ctx); },
+        ...(model.stream ? { stream: (req: Parameters<typeof model.chat>[0], ctx: CallContext) => { contexts.push(ctx); return model.stream!(req, ctx); } } : {}),
+      });
+    },
+    toolsFor(agent: AgentSpec): ToolPort {
+      const tools = stack.toolsFor(agent);
+      return {
+        ...(tools.name ? { name: tools.name } : {}),
+        listTools: (ctx) => tools.listTools(ctx),
+        async callTool(name, args, ctx) {
+          contexts.push(ctx);
+          if (pending) throw new ApprovalPending('conformance-approval', { by: 'conformance', tool: name });
+          return tools.callTool(name, args, ctx);
+        },
+      };
+    },
+  });
+}
+
+/** The events of a streamed run, or undefined when it threw (recorded as a failure). */
+async function collect(c: Checks, agent: RunnableAgent, input: string, ctx: Partial<CallContext>): Promise<RunEvent[] | undefined> {
+  return c.attempt('stream', async () => {
+    const events: RunEvent[] = [];
+    for await (const e of agent.stream!(input, ctx)) events.push(e);
+    return events;
+  });
+}
+
+/** Abort, stream ≡ run, caller propagation and approval checks; each needs what the run fixtures give. */
+async function checkRunBehaviour(port: RuntimePort, f: RuntimeFixtures, agent: RunnableAgent, result: RunResult, c: Checks): Promise<void> {
+  const input = f.input ?? 'hello';
+  const name = f.agent!.name;
+
+  // A run whose signal is already aborted ends promptly as a result: stopped, reason aborted (or timeout).
+  const aborted = await c.attempt('run aborted', () => agent.run(input, testContext({ agent: name, signal: AbortSignal.abort() })));
+  if (aborted) c.expect(aborted.status === 'stopped' && ['aborted', 'timeout'].includes(String(aborted.reason?.code)), `run aborted: status ${aborted.status} (${aborted.reason?.code ?? 'no reason'}), expected stopped with reason aborted`);
+
+  // The streamed run ends like the run: a final run.end with the same status, and the same text when it completes.
+  if (agent.stream) {
+    const events = await collect(c, agent, input, testContext({ agent: name }));
+    if (events) {
+      events.forEach((e, i) => c.all(conforms('run-event', e), `stream event[${i}]`));
+      const end = events.at(-1);
+      if (c.expect(end?.type === 'run.end', 'stream: the last event must be run.end')) {
+        c.expect((end as { status?: string }).status === result.status, `stream: ended ${(end as { status?: string }).status}, the run ended ${result.status}`);
+      }
+      const text = events.filter((e) => e.type === 'text').map((e) => (e as { text: string }).text).join('');
+      if (result.status === 'completed') c.expect(text === result.output, 'stream: the text events differ from the run output');
+    }
+  } else c.skip('stream: the runtime does not stream');
+
+  // The caller flows into every model and tool call the run makes.
+  const contexts: CallContext[] = [];
+  const probed = await c.attempt('bind (probe)', () => port.bind(probeStack(f.stack!, contexts, false), f.agent!));
+  if (probed) {
+    await c.attempt('run with a caller', () => probed.run(input, testContext({ agent: name, caller: CONFORMANCE_CALLER })));
+    if (!contexts.length) c.skip('caller: the run made no model or tool call through the stack');
+    else c.expect(contexts.every((x) => x.caller?.id === CONFORMANCE_CALLER.id), 'caller: a model or tool call of the run did not carry the run caller');
+  }
+
+  // A tool call waiting for an approval ends the run waiting (needs_input), or the runtime lets ApprovalPending through.
+  if (!f.toolInput) { c.skip('approval: needs a toolInput fixture'); return; }
+  const calls: CallContext[] = [];
+  const pending = await c.attempt('bind (pending approval)', () => port.bind(probeStack(f.stack!, calls, true), f.agent!));
+  if (!pending) return;
+  let waiting: RunResult | undefined;
+  let thrown: unknown;
+  await c.attempt('run (pending approval)', async () => {
+    try { waiting = await pending.run(f.toolInput!, testContext({ agent: name })); } catch (err) { thrown = err; }
+  });
+  if (thrown !== undefined) c.expect(thrown instanceof ApprovalPending, `approval: the run threw ${thrown instanceof Error ? thrown.name : String(thrown)}`);
+  else if (waiting) {
+    c.expect(waiting.status === 'waiting' && waiting.reason?.code === 'needs_input', `approval: status ${waiting.status} (${waiting.reason?.code ?? 'no reason'}), expected waiting with needs_input`);
+    c.produced('run (pending approval)', waiting);
+  }
+}
 
 export async function checkRuntime(port: RuntimePort, f: RuntimeFixtures = {}, c = new Checks()): Promise<Checks> {
   c.expect(typeof port.bind === 'function', 'bind must be a function');
@@ -15,6 +119,8 @@ export async function checkRuntime(port: RuntimePort, f: RuntimeFixtures = {}, c
     c.all(conforms('run-result', result), 'run result');
     if (result.status !== 'completed') c.expect(typeof result.reason?.code === 'string' && result.reason.code.length > 0, `run: status ${result.status} needs a reason with a code`);
     c.produced('run', result);
+    if (versionAtLeast(f.portVersion ?? PORT_VERSIONS.RuntimePort, '1.1.0')) await checkRunBehaviour(port, f, agent, result, c);
+    else c.skip(`behaviour: RuntimePort ${f.portVersion} predates the abort, stream, caller and approval checks (1.1.0)`);
   }
   return c;
 }

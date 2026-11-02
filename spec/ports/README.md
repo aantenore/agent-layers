@@ -11,7 +11,7 @@ A port is the contract between the stack and one kind of backend. Every port has
 | Model plane | `llm` (L1) | [ModelPort](ModelPort.md) | 1.0.0 | Model calls with tool calls, optionally streamed |
 | Model plane | `cache` (L2) | [CachePort](CachePort.md) | 1.0.0 | Key/value cache for model replies; usable by any layer |
 | Model plane | `cache` (L2) | [RouterPort](RouterPort.md) | 1.0.0 | Pick the model for a request |
-| Agent plane | `harness` (L3) | [RuntimePort](RuntimePort.md) | 1.0.0 | Bind an agent spec to a runnable agent |
+| Agent plane | `harness` (L3) | [RuntimePort](RuntimePort.md) | 1.1.0 | Bind an agent spec to a runnable agent |
 | Agent plane | `harness` (L3) | [StatePort](StatePort.md) | 1.0.0 | Session event log |
 | Agent plane | `knowledge` (L4) | [KnowledgePort](KnowledgePort.md) | 1.0.0 | Search a knowledge source, answer with passages |
 | Agent plane | `knowledge` (L4) | [MemoryPort](MemoryPort.md) | 1.0.0 | Long-term memory: remember, recall, forget |
@@ -23,7 +23,7 @@ A port is the contract between the stack and one kind of backend. Every port has
 | Control plane | `identity` (L6) | [ApprovalPort](ApprovalPort.md) | 1.1.0 | Human approval for actions the policy marks ask |
 | Control plane | `guardrail` (L7) | [GuardPort](GuardPort.md) | 1.0.0 | Allow, block or redact text at four stages |
 | Experience plane | `interface` (L8) | [ChannelPort](ChannelPort.md) | 1.0.0 | Expose agents to people, apps and other agents |
-| Experience plane | `interface` (L8) | [TriggerPort](TriggerPort.md) | 1.0.0 | Start runs from events and schedules |
+| Experience plane | `interface` (L8) | [TriggerPort](TriggerPort.md) | 1.1.0 | Start runs from events and schedules |
 | Insight plane | `telemetry` (L9) | [TelemetryPort](TelemetryPort.md) | 1.0.0 | Spans, events and metrics tagged with `agent.layer` |
 | Insight plane | `eval` (L10) | [EvaluatorPort](EvaluatorPort.md) | 1.0.0 | Score a run of a dataset case |
 | Insight plane | `eval` (L10) | [FeedbackPort](FeedbackPort.md) | 1.0.0 | User feedback attached to runs, as evaluation data |
@@ -41,7 +41,7 @@ Where the boundary between layers is unclear, use these rules:
 
 - `name(param: Type, ...) → Type` is an operation. A trailing `?` marks an optional parameter, field or result. `[T]` is a list, `{K: V}` a map, `Any` any JSON value.
 - Operations that can do I/O are asynchronous: they return a result later and may fail later. A language binding picks its own mechanism (promise, future, blocking call).
-- `signal` is a cancellation signal. When it fires, the operation stops as soon as it can and fails with a cancellation error. It is never turned into a result.
+- `signal` is a cancellation signal. When it fires, the operation stops as soon as it can and fails with a cancellation error. The exception is an agent run ([RuntimePort](RuntimePort.md)): a cancelled run resolves to a result with status `stopped` and reason `aborted`, so the caller always gets a `RunResult`.
 - Data shapes are JSON values. Field names are as written, case included.
 - Time is a string in date-time form.
 

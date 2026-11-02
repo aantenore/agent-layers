@@ -41,8 +41,10 @@ Approvals are keyed by session id, caller and the access question with its argum
 session, by the same caller, that makes the same call uses the decision: `approved` lets the call run once, `denied`
 refuses it, still `pending` returns the same approval id, `expired` asks again. The session carries the decision, not
 the conversation: `basic-runtime` and `reinloop` start each run from its input, so the follow-up message must lead
-the model to the same call. Inbound adapters set the session: A2A uses the context id (per caller), the MCP server
-its MCP session; a call without a session is keyed by its run.
+the model to the same call. Inbound adapters set the session, scoped to the verified caller: the `Agent-Session`
+header or the `user` field (`openai-compatible`), the MCP session or `params._meta["agent-layers/session"]` on a
+stateless MCP request, the A2A context id, the `agentsession` CloudEvents extension. An anonymous request gets no
+client session, and a call without a session is keyed by its run.
 
 ### Where it sits
 
@@ -54,7 +56,7 @@ flowchart LR
     runtime["RuntimePort<br/>bind, run"]:::agent
     state["StatePort<br/>append, read, list, delete"]:::agent
   end
-  runtime --> state
+  runtime -.->|"events appended by the stack"| state
   runtime -->|"stack.modelFor"| cache["L2 cache"]:::model
   runtime -->|"stack.toolsFor"| tool["L5 tool"]:::agent
   runtime -.->|"agent.run span"| telemetry["L9 telemetry"]:::insight
@@ -159,7 +161,9 @@ policy and knowledge features are not configured, so nothing runs twice. Budgets
 code `limit`, a guardrail block with `guard_block`; run cost is a `costUsd` field of `run.end` and of the run result. Pydantic AI runs as a remote runtime (see [Runtimes](#runtimes)); LangGraph, the OpenAI
 Agents SDK and Google ADK are candidates.
 
-**State.** When a call carries a `sessionId`, the stack appends the run's events to the state slot. `memory-state`
+**State.** When a call carries a `sessionId`, the stack appends the run's events to the state slot. The log is the
+session's audit and replay record: no runtime reads it back yet, so a run does not see the earlier runs of its session
+(conversation continuity from the log is planned). `memory-state`
 loses them on restart. `sqlite-state` keeps them in a WAL-journaled file with a versioned schema (default
 `.agent-layers/state.db`, relative to the stack config); several processes on one host may share it, and a cluster
 needs a networked database behind another StatePort adapter.

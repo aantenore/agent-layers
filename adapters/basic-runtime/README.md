@@ -19,13 +19,14 @@ How a run ends:
 | Guard block | `stopped` | `{ code: 'guard_block', layer: 'guardrail', by: '<guard>', stage }` |
 | Turn limit (`maxTurns`) | `stopped` | `{ code: 'limit', layer: 'harness', detail: 'turns' }` |
 | Caller aborted / timeout | `stopped` | `{ code: 'aborted' }` / `{ code: 'timeout' }` |
-| Governed call waiting for an approval (`ext["sdk.approval"]`) | `waiting` | `{ code: 'needs_input', layer: 'identity', by: '<approval instance>', detail: '<approval id>' }` |
+| Governed call waiting for an approval (`ApprovalPending`, or a result with `ext["sdk.approval"]`) | `waiting` | `{ code: 'needs_input', layer: 'identity', by: '<approval instance>', detail: '<approval id>' }` |
 | Any other error | `failed` | `{ code: 'error', detail: '<error name>' }` |
 
 Reasons never carry error text. A `waiting` run has no output. Agent `settings` (`temperature`, `maxOutputTokens`, `stop`) and the agent's `ext` are passed to the
 model request unchanged (keys in the model adapter's namespace, for example `openai.seed`).
 
-The adapter reads `ext["sdk.approval"]` of governed tool results and writes no `ext` keys.
+The adapter reads `ext["sdk.approval"]` of governed tool results and writes no `ext` keys; the stack adds
+`ext["sdk.approval"] = {id, by, tool}` to a waiting result.
 
 ## Options
 

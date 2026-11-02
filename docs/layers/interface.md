@@ -6,14 +6,15 @@ Layer id `interface` (L8), Experience plane. *Who talks to it and what starts it
 
 How people, apps and other agents talk to an agent, and what starts a run without a person. A channel turns a chat UI,
 an IDE, another agent or a web frontend into a call to the [harness](harness.md) and streams the run back. A trigger
-starts runs from events and schedules. Neither adds agent logic.
+starts runs from events (`cloudevents`, mounted by the gateway) and schedules (`cron-trigger`, in-process timers
+armed by `agent-layers dev`). Neither adds agent logic.
 
 ## Ports
 
 | Port | What it does |
 |---|---|
 | [ChannelPort](../../spec/ports/ChannelPort.md) | `serve` a stack host to people, apps and agents; the host exposes `agents`, `run`, `stream` and `verify` |
-| [TriggerPort](../../spec/ports/TriggerPort.md) | `start` a handler that receives events and schedules |
+| [TriggerPort](../../spec/ports/TriggerPort.md) | `start` delivering scheduled or pulled triggers to a handler, or `mount` routes that receive events on a host server |
 
 Data shapes: [trigger.json](../../spec/schemas/trigger.json), [run-result.json](../../spec/schemas/run-result.json). A
 `Trigger` is `{ id, kind, source, at?, agent?, data? }`; an event standard's own id and extra attributes (the
@@ -75,6 +76,7 @@ that errors surface as channel-native errors.
 | `mcp` | Model Context Protocol server: the governed tools and knowledge, mounted by the gateway |
 | `a2a` | Agent2Agent (A2A) 1.0: agent cards and JSON-RPC, mounted by the gateway |
 | `cloudevents` | CloudEvents 1.0 HTTP binding as a trigger, mounted by the gateway |
+| [`cron-trigger`](../../adapters/cron-trigger) | A fixed interval or a cron expression (UTC) as a trigger, with timers in the running process (prototype) |
 
 How the gateway hosts them: [gateway.md](../gateway.md). Full list: [adapters.md](../adapters.md).
 

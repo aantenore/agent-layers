@@ -70,6 +70,7 @@ Generated from each package's descriptor by `npm run docs:adapters`; `npm run do
 | `identity` | [`oidc`](../adapters/oidc) | outbound | IdentityPort | standard: OpenID Connect / OAuth 2.0 (RFC 7519, RFC 8693) | production | experimental |
 | `identity` | [`opa`](../adapters/opa) | outbound | AuthorizationPort | technology: Open Policy Agent | production | experimental |
 | `identity` | [`rules-authorization`](../adapters/rules-authorization) | outbound | AuthorizationPort | technology: local rule list | prototype, production | experimental |
+| `identity` | [`sqlite-approval`](../adapters/sqlite-approval) | outbound | ApprovalPort | technology: SQLite | prototype, production | experimental |
 | `identity` | [`static-identity`](../adapters/static-identity) | outbound | CredentialPort | technology: static token table (development only) | prototype | experimental |
 | `identity` | [`static-identity`](../adapters/static-identity) | outbound | IdentityPort | technology: static token table (development only) | prototype | experimental |
 | `guardrail` | [`http-guard`](../adapters/http-guard) | outbound | GuardPort | standard: agent-layers guard HTTP contract | prototype, production | experimental |
@@ -83,6 +84,7 @@ Generated from each package's descriptor by `npm run docs:adapters`; `npm run do
 |---|---|---|---|---|---|---|
 | `interface` | [`a2a`](../adapters/a2a) | inbound | ChannelPort | standard: Agent2Agent (A2A) protocol | prototype, production | experimental |
 | `interface` | [`cloudevents`](../adapters/cloudevents) | inbound | TriggerPort | standard: CloudEvents 1.0 HTTP binding | prototype, production | experimental |
+| `interface` | [`cron-trigger`](../adapters/cron-trigger) | inbound | TriggerPort | technology: in-process timers (interval or cron expression) | prototype | experimental |
 | `interface` | [`mcp`](../adapters/mcp) | inbound | ChannelPort | standard: Model Context Protocol | prototype, production | experimental |
 | `interface` | [`openai-compatible`](../adapters/openai-compatible) | inbound | ChannelPort | standard: OpenAI Chat Completions | prototype, production | experimental |
 | `interface` | [`terminal-channel`](../adapters/terminal-channel) | inbound | ChannelPort | technology: terminal (stdin/stdout) | prototype | experimental |
@@ -98,7 +100,7 @@ Generated from each package's descriptor by `npm run docs:adapters`; `npm run do
 | `eval` | [`judge-eval`](../adapters/judge-eval) | outbound | EvaluatorPort | technology: LLM as judge | prototype, production | experimental |
 | `eval` | [`layer-signals`](../adapters/layer-signals) | outbound | EvaluatorPort | technology: per-layer signals from run events and telemetry | prototype, production | experimental |
 
-41 adapters in 35 packages.
+43 adapters in 37 packages.
 <!-- adapters:end -->
 
 ### Planned

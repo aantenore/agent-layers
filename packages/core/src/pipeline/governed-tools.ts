@@ -1,4 +1,4 @@
-import { errorMessage, isAbort } from '../errors.ts';
+import { ApprovalPending, errorMessage, isAbort } from '../errors.ts';
 import { boundExt, withExt } from '../ext.ts';
 import { ATTR, EVENT, METRIC, SPAN } from '../names.ts';
 import type { BoundCredentials, CallContext } from '../ports/base.ts';
@@ -44,6 +44,13 @@ export interface GovernedToolsOptions {
   vocabularies?: Vocabularies;
   /** Largest `ext` bag kept on a tool spec or result (`limits.extBytes`). */
   extBytes?: number;
+  /**
+   * A call waiting for an approval: a pending result (`result`, default) or a thrown `ApprovalPending` (`error`), which
+   * the stack turns into a `waiting` run.
+   */
+  pendingAs?: 'result' | 'error';
+  /** Told of every call left waiting for an approval, before the result is returned or the error thrown. */
+  onPending?(pending: ApprovalPending, ctx: CallContext): void;
 }
 
 /** How a governed call ended; written to `ext["sdk.outcome"]` and to the `agent.tool.outcome` attribute. */
@@ -56,7 +63,8 @@ interface Denial { reason: string; approval?: string }
  * Aggregates several ToolPorts into one, naming tools `<source><separator><tool>`, and governs every call:
  * local policy → approval (for `ask`) → authorization → tool_args guards → call with bound credentials → tool_result
  * guards (over the text and the structured data). Denials and blocks are error results, not exceptions. Every result
- * carries `ext["sdk.outcome"]`; a call waiting for an approval also `ext["sdk.approval"]` (the approval id).
+ * carries `ext["sdk.outcome"]`; a call waiting for an approval also `ext["sdk.approval"]` (the approval id), or throws
+ * `ApprovalPending` with `pendingAs: 'error'`.
  */
 export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: GovernedToolsOptions = {}): ToolPort {
   const sep = opts.separator ?? TOOL_SEPARATOR;
@@ -217,12 +225,18 @@ export function governedTools(ports: Readonly<Record<string, ToolPort>>, opts: G
       const entry = await lookup(name, ctx);
       if (!entry) return { ok: false, text: `Unknown tool "${name}"`, ext: { 'sdk.outcome': 'error' } };
       const t = tel(ctx);
-      return t.span(SPAN.toolCall, { [ATTR.layer]: entry.spec.layer ?? 'tool', [ATTR.toolName]: name, [ATTR.toolSource]: entry.source }, async (span) => {
+      const out = await t.span(SPAN.toolCall, { [ATTR.layer]: entry.spec.layer ?? 'tool', [ATTR.toolName]: name, [ATTR.toolSource]: entry.source }, async (span) => {
         const { outcome, ...r } = await call(name, entry, args ?? {}, ctx);
         span.setAttributes({ [ATTR.toolOutcome]: outcome });
         t.metric(METRIC.toolCalls, 1, { [ATTR.layer]: 'tool', [ATTR.toolName]: name, [ATTR.toolOutcome]: outcome });
         return r;
       });
+      const approval = out.ext?.['sdk.outcome'] === 'pending' ? out.ext['sdk.approval'] : undefined;
+      if (typeof approval !== 'string') return out;
+      const pending = new ApprovalPending(approval, { tool: name, ...(opts.approval?.name ? { by: opts.approval.name } : {}) });
+      opts.onPending?.(pending, ctx);
+      if (opts.pendingAs === 'error') throw pending;
+      return out;
     },
     async close() {
       await Promise.allSettled(Object.values(ports).map((p) => p.close?.()));

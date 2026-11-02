@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  ATTR, defineAdapter, globToRegExp, InboundRejected, noMappings, noopTelemetry, PORT_VERSIONS,
+  ATTR, defineAdapter, globToRegExp, inboundSessionId, InboundRejected, noMappings, noopTelemetry, PORT_VERSIONS,
   type Caller, type InboundContext, type InboundRejection, type Mappings, type TelemetryPort, type Trigger, type TriggerPort, type TriggerSink,
 } from '@agent-layers/core';
 
@@ -21,7 +21,15 @@ export interface CloudEventsOptions {
   routes: CloudEventsRoute[];
   /** The trigger's own service credential, verified through the identity layer for every event. */
   credential?: string;
+  /**
+   * Extension attribute that carries the session of the run (default `agentsession`), so events of one conversation
+   * share a session and a repeated call finds its approval. Scoped to the run caller.
+   */
+  sessionAttribute?: string;
 }
+
+/** Extension attribute of the run session, by default. */
+export const SESSION_ATTRIBUTE = 'agentsession';
 
 /** Extension attribute values CloudEvents allows in JSON. */
 type ExtensionValue = string | number | boolean;
@@ -239,7 +247,9 @@ export function createCloudEventsTrigger(options: CloudEventsOptions, name = 'cl
                 data: renderInput(route.input, event),
                 ext: extOf(event),
               });
-              const { runId } = await telemetry.span('cloudevents.receive', { [ATTR.layer]: 'interface', [ATTR.triggerKind]: trigger.kind, [ATTR.name]: route.agent }, () => sink.accept(trigger, who));
+              const sessionId = inboundSessionId(name, who.caller, event.extensions[options.sessionAttribute ?? SESSION_ATTRIBUTE], sink.ownerDigest);
+              const accepted = { ...who, ...(sessionId ? { sessionId } : {}) };
+              const { runId } = await telemetry.span('cloudevents.receive', { [ATTR.layer]: 'interface', [ATTR.triggerKind]: trigger.kind, [ATTR.name]: route.agent }, () => sink.accept(trigger, accepted));
               return Response.json({ runId, agent: route.agent, eventId: event.id }, { status: 202 });
             } catch (err) {
               if (err instanceof InboundRejected) return rejection(err.kind, err.message);
@@ -282,6 +292,7 @@ export const adapter = defineAdapter<'TriggerPort', CloudEventsOptions>({
         },
       },
       credential: { type: 'string', minLength: 1 },
+      sessionAttribute: { type: 'string', pattern: '^[a-z0-9]{1,20}$', description: 'Extension attribute that carries the session of the run (default agentsession)' },
     },
     required: ['routes'],
     additionalProperties: false,

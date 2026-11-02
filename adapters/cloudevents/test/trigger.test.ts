@@ -11,10 +11,10 @@ const service: Caller = { id: 'events-svc', kind: 'agent', roles: [], scopes: []
 const base = { specversion: '1.0', id: 'evt-77', source: '/shop', type: 'com.example.order.created', time: '2026-10-31T09:30:00Z' };
 
 function sink() {
-  const accepted: { trigger: Trigger; caller?: Caller }[] = [];
+  const accepted: { trigger: Trigger; caller?: Caller; sessionId?: string }[] = [];
   const s: TriggerSink = {
     agents: () => ['assistant'],
-    async accept(trigger, ctx) { accepted.push({ trigger, ...(ctx?.caller ? { caller: ctx.caller } : {}) }); return { runId: trigger.id }; },
+    async accept(trigger, ctx) { accepted.push({ trigger, ...(ctx?.caller ? { caller: ctx.caller } : {}), ...(ctx?.sessionId ? { sessionId: ctx.sessionId } : {}) }); return { runId: trigger.id }; },
     async verify(credential) { if (credential !== 'svc') throw new Error('no'); return service; },
   };
   return { s, accepted };
@@ -125,4 +125,34 @@ test('conformance with the declared ext keys', async () => {
     fixtures: { fireMount: async (mount: InboundMount) => { assert.equal((await post(mount, { ...base, subject: 's', datacontenttype: 'application/json', dataschema: 'https://e.test/s', extra: 'x' })).status, 202); } },
   });
   assert.deepEqual(report.failures, []);
+});
+
+test('the agentsession extension attribute is the run session, scoped to the caller; the attribute name is configurable', async () => {
+  const { s, accepted } = sink();
+  const mount = await createCloudEventsTrigger({ routes }).mount!(s);
+  await post(mount, { ...base, agentsession: 'order-77' });
+  await post(mount, { ...base, id: 'evt-78', agentsession: 'order-77' });
+  await post(mount, { ...base, id: 'evt-79', agentsession: 'not valid' });
+  await post(mount, base);
+  const [a, b, bad, none] = accepted.map((x) => x.sessionId);
+  assert.match(a!, /^cloudevents-[0-9a-f]{16}-order-77$/);
+  assert.equal(b, a, 'two events of one session reach the host with the same session');
+  assert.equal(bad, undefined);
+  assert.equal(none, undefined);
+  const binary = sink();
+  const custom = await createCloudEventsTrigger({ routes, sessionAttribute: 'thread' }).mount!(binary.s);
+  await post(custom, '{}', { 'content-type': 'application/json', 'ce-specversion': '1.0', 'ce-id': 'e1', 'ce-source': '/shop', 'ce-type': 'com.example.x', 'ce-thread': 't-1' });
+  assert.match(binary.accepted[0]!.sessionId!, /-t-1$/);
+});
+
+test('an anonymous event gets no session: two senders of the same agentsession do not share one', async () => {
+  const { s, accepted } = sink();
+  const mount = await createCloudEventsTrigger({ routes }).mount!({ ...s, ownerDigest: () => 'keyed' });
+  const anonymous = (id: string) => inboundFetch(mount, new Request('http://host/v1/events', {
+    method: 'POST', headers: { 'content-type': 'application/cloudevents+json' }, body: JSON.stringify({ ...base, id, agentsession: 'shared' }),
+  }), { caller: undefined });
+  assert.equal((await anonymous('e-1')).status, 202);
+  assert.equal((await anonymous('e-2')).status, 202);
+  await post(mount, { ...base, id: 'e-3', agentsession: 'shared' });
+  assert.deepEqual(accepted.map((x) => x.sessionId), [undefined, undefined, 'cloudevents-keyed-shared']);
 });

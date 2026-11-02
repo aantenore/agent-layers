@@ -1,6 +1,7 @@
 import type { Layer } from './layers.ts';
+import type { Ext } from './ports/base.ts';
 import type { GuardStage } from './ports/guard.ts';
-import type { StopReason } from './ports/runtime.ts';
+import type { RunStatus, StopReason } from './ports/runtime.ts';
 
 /** Base class of every error raised by the core. */
 export class AgentLayersError extends Error {
@@ -52,6 +53,36 @@ export class GuardrailBlocked extends AgentLayersError {
   }
 }
 
+/**
+ * A governed tool call waits for a human approval. The stack's tools throw it inside a run; the stack ends the run
+ * `waiting` with `stopReason` (code `needs_input`) and `ext["sdk.approval"]` (`approvalExt`). A runtime may let it
+ * propagate, or end the run itself with `runEndOf(err)`.
+ */
+export class ApprovalPending extends AgentLayersError {
+  override name = 'ApprovalPending';
+  /** Approval id, for `ApprovalPort.get` / `decide`. */
+  readonly approval: string;
+  /** Approval instance that holds it. */
+  readonly by: string | undefined;
+  /** Prefixed name of the tool waiting for it. */
+  readonly tool: string | undefined;
+  constructor(approval: string, opts: { by?: string; tool?: string } = {}) {
+    super(`approval pending: ${approval}`);
+    this.approval = approval;
+    this.by = opts.by;
+    this.tool = opts.tool;
+  }
+
+  get stopReason(): StopReason {
+    return { code: 'needs_input', layer: 'identity', ...(this.by ? { by: this.by } : {}), detail: this.approval };
+  }
+
+  /** What the stack writes on the RunResult: `ext["sdk.approval"] = {id, by?, tool?}`. */
+  get approvalExt(): Ext {
+    return { 'sdk.approval': { id: this.approval, ...(this.by ? { by: this.by } : {}), ...(this.tool ? { tool: this.tool } : {}) } };
+  }
+}
+
 /** A mapping rule failed or produced an invalid shape. In the identity and authorization slots it rejects or denies. */
 export class MappingError extends AgentLayersError {
   override name = 'MappingError';
@@ -97,9 +128,15 @@ export function isAbort(err: unknown): boolean {
  * the error name only, never its message (which can echo inspected content or a backend's credentials).
  */
 export function stopReasonOf(err: unknown): StopReason {
-  if (err instanceof GuardrailBlocked) return err.stopReason;
+  if (err instanceof GuardrailBlocked || err instanceof ApprovalPending) return err.stopReason;
   if (err instanceof Error && err.name === 'TimeoutError') return { code: 'timeout' };
   if (isAbort(err)) return { code: 'aborted' };
   if (err instanceof MissingLayerError) return { code: 'error', layer: err.layer, detail: err.name };
   return { code: 'error', ...(err instanceof Error ? { detail: err.name } : {}) };
+}
+
+/** How an error ends a run: `waiting` for a pending approval, `failed` for an error, `stopped` otherwise. */
+export function runEndOf(err: unknown): { status: RunStatus; reason: StopReason } {
+  const reason = stopReasonOf(err);
+  return { status: err instanceof ApprovalPending ? 'waiting' : reason.code === 'error' ? 'failed' : 'stopped', reason };
 }

@@ -1,4 +1,4 @@
-import { assembleDeltas, GuardrailBlocked, type CallContext, type ModelPort, type RunStatus, type StopReason, type ToolPort, type ToolSpec } from '@agent-layers/core';
+import { ApprovalPending, assembleDeltas, GuardrailBlocked, type CallContext, type ModelPort, type RunStatus, type StopReason, type ToolPort, type ToolSpec } from '@agent-layers/core';
 import { RunStop, type Provider, type Tool } from 'reinloop';
 import { fromModelReply, toModelRequest } from './convert.ts';
 
@@ -54,9 +54,8 @@ const isCoreRisk = (r: string | undefined): r is 'read' | 'write' | 'exec' => r 
  * One governed SDK tool as a reinloop Tool: name, description, schema, risk and layer pass through; the call goes
  * through the stack's governed tools (policy, approval, authorization, tool guards, bound credentials, the
  * `agent.tool.call` span). Denials and guard blocks come back as error results, as in any runtime. A GuardrailBlocked
- * thrown by a tool ends the run like a model block. A result waiting for an approval (`ext["sdk.approval"]`) ends the
- * run `waiting`, with `approval` as the instance that holds it. In both cases `halt` aborts the batch and `RunStop`
- * ends the loop.
+ * thrown by a tool ends the run like a model block. A call waiting for an approval (`ApprovalPending`, or a result with
+ * `ext["sdk.approval"]`) ends the run `waiting`. In both cases `halt` aborts the batch and `RunStop` ends the loop.
  */
 export function governedTool(tools: ToolPort, spec: ToolSpec, ctx: CallContext, control: RunControl, approval?: string): Tool {
   return {
@@ -77,10 +76,12 @@ export function governedTool(tools: ToolPort, spec: ToolSpec, ctx: CallContext, 
         const out = await tools.callTool(spec.name, input, { ...ctx, signal: t.signal });
         const waitingOn = out.ext?.['sdk.approval'];
         if (typeof waitingOn === 'string') {
-          return stop({ status: 'waiting', reason: { code: 'needs_input', layer: 'identity', ...(approval ? { by: approval } : {}), detail: waitingOn } }, 'needs_input');
+          const pending = new ApprovalPending(waitingOn, { tool: spec.name, ...(approval ? { by: approval } : {}) });
+          return stop({ status: 'waiting', reason: pending.stopReason }, 'needs_input');
         }
         return { content: out.text, ...(out.ok ? {} : { isError: true }) };
       } catch (err) {
+        if (err instanceof ApprovalPending) return stop({ status: 'waiting', reason: err.stopReason }, 'needs_input');
         if (err instanceof RunStop || !(err instanceof GuardrailBlocked)) throw err;
         return stop({ status: 'stopped', reason: err.stopReason }, 'guard_block');
       }

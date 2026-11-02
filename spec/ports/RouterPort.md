@@ -6,6 +6,8 @@ Layer: `cache` (L2 Model access (routing, fallback, quotas, cache)) · Version: 
 
 Decide which model serves a request, so cost and latency policy lives outside agent definitions. An agent asks for a model; the router may pick a different one.
 
+Fallback across providers, retries and quotas are not part of this port: they are delegated to the model backend (for example LiteLLM, the model gateway of `reference/cache`). A port for them is planned.
+
 ## Operations
 
 - `select(req: ModelRequest, ctx: CallContext) → String`

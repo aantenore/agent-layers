@@ -124,6 +124,7 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 |---|---|---|---|---|---|
 | `options.timeoutMs` | `300000` ms | 1–∞ or unbounded | 1–3600000 | fail if unbounded; warn outside safe range | Bounds a whole run, polling included, so a stuck remote agent cannot hold it. |
 | `options.pollMs` | `500` ms | 10–∞ | 100–10000 | warn outside safe range | Sets how often a working task is checked, so the remote agent is not hammered. |
+| `options.cancelTimeoutMs` | `5000` ms | 1–60000 | — | — | Bounds the CancelTask sent when a run is aborted or times out, so a remote agent that does not answer cannot delay the result. |
 
 ### `basic-runtime` · RuntimePort
 
@@ -162,6 +163,15 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 | Setting | Default | Accepted | Safe range | On production | Why |
 |---|---|---|---|---|---|
 | `options.busyTimeoutMs` | `5000` ms | 0–∞ or unbounded | 0–60000 | fail if unbounded; warn outside safe range | Bounds how long a write waits for a lock held by another process. |
+
+### `sqlite-approval` · ApprovalPort
+
+| Setting | Default | Accepted | Safe range | On production | Why |
+|---|---|---|---|---|---|
+| `options.ttlMs` | `unbounded` | 1–∞ or unbounded | — | warn if unbounded | Lets a request nobody answers expire instead of waiting forever. |
+| `options.busyTimeoutMs` | `5000` ms | 0–∞ or unbounded | 0–60000 | fail if unbounded; warn outside safe range | Bounds how long a write waits for a lock held by another process. |
+| `options.pollMs` | `500` ms | 10–∞ | 100–10000 | warn outside safe range | Sets how soon a wait sees a decision taken by another process; too short loads the database, too long delays the answer. |
+| `options.retainMs` | `604800000` ms | 1000–∞ or unbounded | — | warn if unbounded | Deletes consumed and expired approvals after this time, so the file does not grow without end. |
 
 ### `http-knowledge` · KnowledgePort
 

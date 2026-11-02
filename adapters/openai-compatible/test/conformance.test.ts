@@ -30,6 +30,17 @@ test('the inbound descriptor passes ChannelPort conformance through its mounted 
         }));
         assert.equal(res.status, 200);
       },
+      // The outcome a client sees: the run status header when the run did not complete, else the finish reason.
+      sessions: true,
+      expectStates: { completed: 'stop', waiting: 'waiting', stopped: 'stopped' },
+      async sendMount(mount: Parameters<typeof inboundFetch>[0], text: string, opts: { session?: string }) {
+        const res = await inboundFetch(mount, new Request('http://gateway.test/v1/chat/completions', {
+          method: 'POST', headers: { 'content-type': 'application/json', ...(opts.session ? { 'agent-session': opts.session } : {}) },
+          body: JSON.stringify({ model: 'agent:conformance', messages: [{ role: 'user', content: text }] }),
+        }));
+        const body = await res.json() as { choices: { finish_reason: string }[] };
+        return res.headers.get('x-agent-run-status') ?? body.choices[0]!.finish_reason;
+      },
     },
   });
   assert.deepEqual(report.failures, []);

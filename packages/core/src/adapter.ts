@@ -77,6 +77,11 @@ export interface AdapterDescriptor<P extends PortName = PortName, O = any> {
   mappingDefaults?: MappingDefaults;
   /** Reference services this adapter needs running (started through the DeployPort by `up` / `dev`). */
   services?(options: O): ServiceSpec[];
+  /**
+   * Identity adapters with development credentials: one the CLI may present as the caller when none is given, on a
+   * prototype-tier profile only. Undefined when the options hold none.
+   */
+  devCredential?(options: O): string | undefined;
   create(options: O, ctx: AdapterContext): PortTypes[P] | Promise<PortTypes[P]>;
 }
 

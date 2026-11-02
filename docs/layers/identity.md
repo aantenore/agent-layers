@@ -105,9 +105,15 @@ sequenceDiagram
 - Every access decision is emitted to [telemetry](telemetry.md) as an audit event (`agent.access.check` span,
   `agent.access.decisions` metric).
 - When a call needs a person (`ask`), the run ends with status `waiting` and reason `needs_input` (layer `identity`,
-  `by` the approval adapter, `detail` the approval id). A later run in the same session, by the same caller, that
-  makes the same call (same arguments) gets the decision: approved runs once, denied is refused, pending keeps its
-  id. See [harness](harness.md) and [ApprovalPort](../../spec/ports/ApprovalPort.md).
+  `by` the approval adapter, `detail` the approval id); the approval id is read from `ext["sdk.approval"].id` on the
+  result. A later run in the same session, by the same caller, that makes the same call (same arguments) gets the
+  decision: approved runs once, denied is refused, pending keeps its id. Clients name the session per channel: the
+  `Agent-Session` header or the `user` field (`openai-compatible`), `params._meta["agent-layers/session"]` on a
+  stateless MCP request, the `agentsession` CloudEvents extension, the A2A context id. A session is scoped to the
+  verified caller, so an anonymous request gets none; the caller part of the session id is keyed with
+  `sessions.secret` (see [gateway](../gateway.md)). A second call for the same key while its approval is pending gets
+  the same approval. See [harness](harness.md) and [ApprovalPort](../../spec/ports/ApprovalPort.md);
+  `sqlite-approval` keeps approvals across restarts.
 
 ## How to swap
 

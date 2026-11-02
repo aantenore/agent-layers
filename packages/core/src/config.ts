@@ -79,6 +79,20 @@ export interface GatewayConfig {
   allowedOrigins?: string[];
   /** Accepted `Host` names (`name` or `name:port`); default: the loopback names when bound to loopback, any otherwise. */
   allowedHosts?: string[];
+  /**
+   * Where a request carries its credential: `Authorization: Bearer <credential>` (`bearer`, default), or the raw value
+   * of the header named by `header` (`header`, for API keys). The identity adapter verifies it either way.
+   */
+  auth?: { scheme?: 'bearer' | 'header'; header?: string };
+}
+
+/** Client sessions of inbound channels and triggers. */
+export interface SessionsConfig {
+  /**
+   * Key of the owner digest inside session ids (HMAC-SHA-256), as `${secret:NAME}` or `${env:NAME}`. Session ids leave
+   * the process (an A2A runtime sends them as the context id); without a key the digest is a plain hash of the caller id.
+   */
+  secret?: string;
 }
 
 export interface AgentConfig {
@@ -102,6 +116,7 @@ export interface ProfileConfig {
   policy?: PolicyRule[];
   pipeline?: PipelineConfig;
   gateway?: GatewayConfig;
+  sessions?: SessionsConfig;
   limits?: LimitsConfig;
   vocabularies?: VocabulariesConfig;
   mappings?: MappingsConfig;
@@ -117,6 +132,7 @@ export interface StackConfig {
   policy?: PolicyRule[];
   pipeline?: PipelineConfig;
   gateway?: GatewayConfig;
+  sessions?: SessionsConfig;
   limits?: LimitsConfig;
   /** Values added to extensible vocabularies (see spec/language.md). */
   vocabularies?: VocabulariesConfig;
@@ -139,6 +155,7 @@ export interface ResolvedConfig {
   policy: PolicyRule[];
   pipeline: PipelineConfig;
   gateway: GatewayConfig;
+  sessions?: SessionsConfig;
   limits: LimitsConfig;
   vocabularies: VocabulariesConfig;
   mappings: MappingsConfig;
@@ -244,6 +261,7 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
   let policy = config.policy ?? [];
   let pipeline: PipelineConfig = config.pipeline ?? {};
   let gateway: GatewayConfig = config.gateway ?? {};
+  let sessions: SessionsConfig = config.sessions ?? {};
   let limits: LimitsConfig = config.limits ?? {};
   let vocabularies: VocabulariesConfig = config.vocabularies ?? {};
   let mappings: MappingsConfig = mergeMappings({}, config.mappings);
@@ -255,6 +273,7 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
     if (p.policy) policy = p.policy;
     if (p.pipeline) pipeline = deepMerge(pipeline, p.pipeline);
     if (p.gateway) gateway = deepMerge(gateway, p.gateway);
+    if (p.sessions) sessions = deepMerge(sessions, p.sessions);
     if (p.limits) limits = deepMerge(limits, p.limits);
     if (p.vocabularies) vocabularies = deepMerge(vocabularies, p.vocabularies);
     if (p.mappings) mappings = mergeMappings(mappings, p.mappings);
@@ -273,7 +292,8 @@ export function resolveProfile(config: StackConfig, profile?: string, dir = proc
     ...(config.name ? { name: config.name } : {}),
     ...(profile ? { profile } : {}),
     chain, tier, ...(requires ? { requires } : {}),
-    plugins: config.plugins ?? [], layers, policy, pipeline, gateway, limits, vocabularies, mappings, agents: config.agents ?? {}, dir,
+    plugins: config.plugins ?? [], layers, policy, pipeline, gateway, ...(Object.keys(sessions).length ? { sessions } : {}), limits, vocabularies, mappings,
+    agents: config.agents ?? {}, dir,
   };
 }
 

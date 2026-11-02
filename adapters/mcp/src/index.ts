@@ -6,6 +6,7 @@ import { PASSAGE_RULES, METADATA_EXT } from './parse.ts';
 import { coreRisk, createMcpServerChannel, type McpServerChannelOptions } from './server.ts';
 import { createMcpTools, TOOL_EXT, TOOL_RULES, type McpToolsOptions } from './tools.ts';
 
+export { APPROVAL_META, SESSION_META } from './server.ts';
 export { createMcpKnowledge, createMcpServerChannel, createMcpTools, type McpKnowledgeOptions, type McpServerChannelOptions, type McpToolsOptions };
 export { McpClient, McpSession, MCP_PROTOCOL_VERSION, type McpCallResult, type McpToolInfo } from './client.ts';
 export { hashId, matchesFilter, METADATA_EXT, PASSAGE_RULES, parseMcpResult, toPassage } from './parse.ts';
@@ -119,6 +120,7 @@ export const channelAdapter = defineAdapter<'ChannelPort', McpServerChannelOptio
       exclude: strings,
       serverName: { type: 'string', minLength: 1 },
       sse: { type: 'boolean' },
+      sessionMetaKey: { type: 'string', minLength: 1, description: 'params._meta key a stateless request may carry its session in (default agent-layers/session)' },
       ...limitProperties(SERVER_LIMITS, {
         sessionTtlMs: 'Idle time after which a session is forgotten', maxSessionAgeMs: 'Absolute lifetime of a session',
         maxSessions: 'Sessions in total', maxSessionsPerCaller: 'Sessions per authenticated caller and for the anonymous pool',

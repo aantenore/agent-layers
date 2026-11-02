@@ -72,6 +72,7 @@ export const runtimeAdapter = defineAdapter<'RuntimePort', A2ARuntimeOptions>({
       ...limitProperties(RUNTIME_LIMITS, {
         timeoutMs: 'Time limit of a whole run, polling included',
         pollMs: 'Interval between GetTask calls while a task is still working',
+        cancelTimeoutMs: 'Time limit of the CancelTask call sent when a run is aborted or times out',
       }),
     },
     required: ['url'],

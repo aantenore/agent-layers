@@ -1,4 +1,4 @@
-import { findRoute, type ChannelHandle, type ChannelHost, type ChannelPort, type DeployPort, type InboundContext, type InboundMount, type SecretPort, type ServiceSpec, type Trigger, type TriggerPort, type TriggerSink } from '@agent-layers/core';
+import { findRoute, lastUserText, type CallContext, type ChannelHandle, type ChannelHost, type ChannelPort, type DeployPort, type InboundContext, type InboundMount, type SecretPort, type ServiceSpec, type Trigger, type TriggerPort, type TriggerSink } from '@agent-layers/core';
 import { Checks } from '../check.ts';
 import { conforms } from '../schemas.ts';
 
@@ -29,12 +29,47 @@ export async function checkSecrets(port: SecretPort, f: { known?: [string, strin
   return c;
 }
 
-const fakeHost = (c: Checks): ChannelHost & { calls: string[] } => {
+/** Approval id of the fake host's waiting runs and pending tool calls. */
+export const CONFORMANCE_APPROVAL = 'conformance-approval';
+/** Text that makes the fake host end a run (or a tool call) with this status: `conformance:waiting`, `conformance:stopped`. */
+export const conformanceInput = (status: 'completed' | 'waiting' | 'stopped') => `conformance:${status}`;
+
+const statusIn = (text: string) => (text.includes(conformanceInput('waiting')) ? 'waiting' : text.includes(conformanceInput('stopped')) ? 'stopped' : 'completed');
+
+/**
+ * Host that echoes, records every call context, and ends a run (or a call of its one tool, `conformance__echo` with
+ * `{text}`) `waiting` for an approval or `stopped` by a guard when the text asks for it.
+ */
+const fakeHost = (c: Checks): ChannelHost & { calls: string[]; contexts: Partial<CallContext>[] } => {
   const calls: string[] = [];
+  const contexts: Partial<CallContext>[] = [];
   return {
     calls,
+    contexts,
     agents: () => ['conformance'],
-    run: async (_agent, input) => { calls.push(typeof input === 'string' ? input : 'messages'); c.produced('channel input', input); return { runId: 'conformance-run', status: 'completed', output: `echo:${typeof input === 'string' ? input : ''}` }; },
+    run: async (_agent, input, ctx = {}) => {
+      calls.push(typeof input === 'string' ? input : 'messages');
+      contexts.push(ctx);
+      c.produced('channel input', input);
+      const text = typeof input === 'string' ? input : lastUserText(input.messages);
+      const status = statusIn(text);
+      if (status === 'waiting') {
+        return { runId: 'conformance-run', status, output: '', reason: { code: 'needs_input', layer: 'identity', by: 'approval', detail: CONFORMANCE_APPROVAL }, ext: { 'sdk.approval': { id: CONFORMANCE_APPROVAL } } };
+      }
+      if (status === 'stopped') return { runId: 'conformance-run', status, output: '', reason: { code: 'guard_block', layer: 'guardrail', by: 'conformance', stage: 'input' } };
+      return { runId: 'conformance-run', status, output: `echo:${typeof input === 'string' ? input : ''}` };
+    },
+    tools: () => ({
+      listTools: async () => [{ name: 'conformance__echo', description: 'Echoes text.', params: { type: 'object', properties: { text: { type: 'string' } } }, risk: 'read' }],
+      async callTool(_name, args, ctx) {
+        contexts.push(ctx);
+        const text = String(args?.text ?? '');
+        const status = statusIn(text);
+        if (status === 'waiting') return { ok: false, text: `Waiting for approval ${CONFORMANCE_APPROVAL}`, ext: { 'sdk.outcome': 'pending', 'sdk.approval': CONFORMANCE_APPROVAL } };
+        if (status === 'stopped') return { ok: false, text: 'Blocked by guardrail conformance', ext: { 'sdk.outcome': 'blocked' } };
+        return { ok: true, text: `echo:${text}`, ext: { 'sdk.outcome': 'ok' } };
+      },
+    }),
   };
 };
 
@@ -44,6 +79,39 @@ export interface ChannelFixtures {
   /** Drive the mounted channel through its routes (see `inboundFetch`); the fake host records the inputs. */
   exerciseMount?: (mount: InboundMount, host: ChannelHost) => Promise<void>;
   expectInput?: string;
+  /**
+   * Sends `text` through the mounted channel (see `inboundFetch`, whose test caller must reach the host), in session
+   * `session` when given, and returns the outcome as the protocol shows it to the client (a task state, a finish
+   * reason, a header). Enables the caller, status and session checks.
+   */
+  sendMount?: (mount: InboundMount, text: string, opts: { session?: string }) => Promise<string | undefined>;
+  /** Outcome `sendMount` must return for a run (or tool call) that ended with each status; a missing one is not compared. */
+  expectStates?: Partial<Record<'completed' | 'waiting' | 'stopped', string>>;
+  /** The channel carries a client session (`sendMount` honours `session`); default false. */
+  sessions?: boolean;
+}
+
+/** Caller, status mapping and session checks of a mounted channel, through `sendMount`. */
+async function checkSend(mount: InboundMount, host: ReturnType<typeof fakeHost>, f: ChannelFixtures, c: Checks): Promise<void> {
+  const send = (text: string, session?: string) => c.attempt(`send ${text}`, () => f.sendMount!(mount, text, session ? { session } : {}));
+  const states: Partial<Record<'completed' | 'waiting' | 'stopped', string | undefined>> = {};
+  for (const status of ['completed', 'waiting', 'stopped'] as const) {
+    const before = host.contexts.length;
+    states[status] = await send(conformanceInput(status));
+    if (!c.expect(host.contexts.length > before, `send: the host never received "${conformanceInput(status)}"`)) continue;
+    const expected = f.expectStates?.[status];
+    if (expected !== undefined) c.expect(states[status] === expected, `status ${status}: the client saw "${states[status]}", expected "${expected}"`);
+    c.expect(host.contexts.at(-1)?.caller?.id === 'conformance-user', `send: the verified caller did not reach the host (status ${status})`);
+  }
+  c.expect(states.waiting !== states.completed, `status waiting: the client cannot tell it from completed (both "${states.waiting}")`);
+  if (!f.sessions) { c.skip('session: the channel declares no client session'); return; }
+  const sessionAt = async (session: string) => { await send(conformanceInput('completed'), session); return host.contexts.at(-1)?.sessionId; };
+  const first = await sessionAt('conformance-session-1');
+  const again = await sessionAt('conformance-session-1');
+  const other = await sessionAt('conformance-session-2');
+  c.expect(typeof first === 'string' && first.length > 0, 'session: a session given by the client did not reach the host as sessionId');
+  c.expect(first === again, 'session: the same session given twice reached the host as different sessionIds');
+  c.expect(first !== other, 'session: two sessions reached the host as the same sessionId');
 }
 
 /** Calls the route of a mount that matches the request, as a host server would, with a verified test caller. */
@@ -86,6 +154,8 @@ export async function checkChannel(port: ChannelPort, f: ChannelFixtures = {}, c
         await c.attempt('exercise mount', () => f.exerciseMount!(mount, host));
         if (f.expectInput) c.expect(host.calls.includes(f.expectInput), `exercise mount: host never received "${f.expectInput}"`);
       } else c.skip('exercise mount: no fixture');
+      if (f.sendMount) await checkSend(mount, host, f, c);
+      else c.skip('send: no sendMount fixture (caller, status and session checks)');
       if (mount.close) await c.attempt('close mount', () => mount.close!());
     }
   }

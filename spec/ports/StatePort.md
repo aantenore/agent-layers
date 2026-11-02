@@ -4,7 +4,7 @@ Layer: `harness` (L3 Agent runtime) · Version: 1.0.0 · Conformance: `checkStat
 
 ## Purpose
 
-Keep what happened in a session as an append-only log, so a conversation can be resumed, replayed and audited, on any store.
+Keep what happened in a session as an append-only log, so it can be audited and replayed, on any store. The host writes it: the stack appends each run's events when the call carries a session id. No runtime reads the log back yet, so a run does not see the earlier runs of its session; conversation continuity from the log is planned.
 
 ## Operations
 
@@ -54,4 +54,4 @@ Adapter events (`<namespace>.<name>`) and `ext` keys on events are stored and re
 - 1.0.0 — SDK language 1.0 ([0001](../../docs/decisions/0001-sdk-language.md)): `RunEvent` types are the core event types (`run.start`, `model.reply`, ...) and `<namespace>.<name>`; old logs are not converted
 - 0.1.0 — initial
 
-Example adapters: `memory-state` (in-process map).
+Example adapters: `memory-state` (in-process map), `sqlite-state` (one SQLite file through `node:sqlite`).
