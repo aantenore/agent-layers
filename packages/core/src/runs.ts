@@ -195,6 +195,8 @@ export interface RunControlDeps {
 }
 
 export interface RunControl {
+  /** The access target of a run in flight in this process or kept in the run book, or undefined when there is none. */
+  target(runId: string): Promise<AccessTarget | undefined>;
   resume(runId: string, answer: ResumeAnswer, ctx?: Partial<CallContext>): Promise<RunResult>;
   cancel(runId: string, opts?: CancelOptions): Promise<CancelResult>;
   /** Records how a run ended: a waiting run is kept (with its checkpoint), a resumed run that ended otherwise is dropped. */
@@ -250,6 +252,13 @@ export function runControl(deps: RunControlDeps): RunControl {
   }
 
   return {
+    async target(runId) {
+      const live = inflight.get(runId);
+      if (live) return runTarget(runId, live.agent);
+      const rec = (await book.get(runId))?.run;
+      return rec ? runTarget(rec.runId, rec.agent, rec.pending?.tool) : undefined;
+    },
+
     async resume(runId, answer, init = {}) {
       const problem = resumeAnswerProblem(answer);
       if (problem) refuse('invalid', problem);

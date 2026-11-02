@@ -197,6 +197,7 @@ export async function compose(config: ResolvedConfig, opts: ComposeOptions = {})
     agents: () => Object.keys(config.agents),
     resume: (runId, answer, init) => control.resume(runId, answer, init),
     cancel: (runId, o) => control.cancel(runId, o),
+    runTarget: (runId) => control.target(runId),
     agent(name) {
       let p = bound.get(name);
       if (!p) {

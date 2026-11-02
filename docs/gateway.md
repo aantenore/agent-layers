@@ -179,7 +179,9 @@ A run that ended `waiting` can be continued, and any run cancelled, over HTTP
 | `POST /runs/<id>/cancel` with `{ "reason"?: "..." }` | aborts the run in flight in this process, or withdraws a waiting run and its approval (`Stack.cancel`) | `cancel` | `{ runId, outcome: "aborted" \| "cancelled" }` |
 
 Every request is authenticated, then the AuthorizationPort is asked with the verified caller, the action and a target
-`{ kind: "run", id: <run id>, layer: "harness", risk: "exec", agent: "*" }`: that answer opens the route. The stack
+`{ kind: "run", id: <run id>, layer: "harness", risk: "exec", agent: <the run's agent>, attrs?: { tool } }` (`tool`: the
+call the run waits for), so a policy scoped to an agent or a tool applies; a run the stack does not know is asked about
+with `agent: "*"`, so an unknown id and a refused one answer alike: that answer opens the route. The stack
 then applies its own rules: only the caller that started the run may continue or cancel it, unless the
 AuthorizationPort allows the caller `decide` on the approval the run waits for (on the run, target kind `run`, when it
 waits for none); an approval answer is a decision, so it needs `decide` as on `POST /approvals/<id>`, owner included,

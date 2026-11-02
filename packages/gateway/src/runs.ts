@@ -31,9 +31,10 @@ export function runView(r: RunResult): Record<string, unknown> {
 /**
  * Routes over runs: `POST <path>/<id>/resume` with a resume answer (`{ "approval": { "id", "approved", "reason"? } }`
  * or `{ "input": ... }`) and `POST <path>/<id>/cancel` with `{ "reason"? }`. The host authenticates every request; each
- * one is then authorized through the authorization port, action `resume` or `cancel` on a target of kind `run`, before
- * the stack applies its own rules (only the caller that started the run, unless allowed; an approval decided by an
- * allowed caller). No authorization port, an error or no allowing rule: 403.
+ * one is then authorized through the authorization port, action `resume` or `cancel` on a target of kind `run` (the
+ * run's agent and the tool it waits for; `agent: "*"` for a run the stack does not know), before the stack applies its
+ * own rules (only the caller that started the run, unless allowed; an approval decided by an allowed caller). No
+ * authorization port, an error or no allowing rule: 403.
  */
 export function runRoutes(stack: Stack, opts: { path?: string } = {}): InboundRoute[] {
   const authorization = stack.ports.authorization;
@@ -42,7 +43,10 @@ export function runRoutes(stack: Stack, opts: { path?: string } = {}): InboundRo
   const telemetry = stack.telemetry;
 
   async function authorize(action: 'resume' | 'cancel', runId: string, ctx: InboundContext): Promise<Response | undefined> {
-    const question: AccessQuestion = { caller: publicCaller(ctx.caller) ?? { ...ANONYMOUS, roles: [], scopes: [] }, action, target: runTarget(runId, '*') };
+    // The target is the run itself, so a policy scoped to an agent or a tool applies. A run the stack does not know is
+    // asked about as any run: an unknown id and a refused one answer alike to a caller not allowed on every run.
+    const target = await stack.runTarget(runId) ?? runTarget(runId, '*');
+    const question: AccessQuestion = { caller: publicCaller(ctx.caller) ?? { ...ANONYMOUS, roles: [], scopes: [] }, action, target };
     let allowed = false;
     try {
       allowed = (await authorization!.evaluate(question, { signal: ctx.signal })).allowed === true;

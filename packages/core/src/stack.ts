@@ -6,7 +6,7 @@ import type { CancelOptions, CancelResult, ChannelHandle, ChannelHost, ChannelPo
 import type { DeployPort, SecretPort } from './ports/deploy.ts';
 import type { EvaluatorPort, FeedbackPort } from './ports/eval.ts';
 import type { GuardPort } from './ports/guard.ts';
-import type { ApprovalPort, AuthorizationPort, Caller, CredentialPort, IdentityPort } from './ports/identity.ts';
+import type { AccessTarget, ApprovalPort, AuthorizationPort, Caller, CredentialPort, IdentityPort } from './ports/identity.ts';
 import type { IngestionPort, KnowledgePort, MemoryPort } from './ports/knowledge.ts';
 import type { ModelPort } from './ports/model.ts';
 import type { AgentSpec, ResumeAnswer, RunnableAgent, RunResult, RuntimePort, StatePort, TriggerPort } from './ports/runtime.ts';
@@ -92,6 +92,11 @@ export interface Stack {
    * allows `decide` on its approval (or on the run). Rejects with `RunRefused`.
    */
   cancel(runId: string, opts?: CancelOptions): Promise<CancelResult>;
+  /**
+   * The access target of a run in flight in this process or kept waiting (`{ kind: "run", agent, attrs.tool? }`), so a
+   * host can authorize an action on that run before asking for it; undefined when there is no such run.
+   */
+  runTarget(runId: string): Promise<AccessTarget | undefined>;
   /** What channels need to reach the stack. Runs without a caller of their own get `opts.caller`. */
   host(opts?: StartOptions): ChannelHost;
   /**

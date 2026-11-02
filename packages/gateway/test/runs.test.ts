@@ -1,7 +1,7 @@
 // The run routes: resume and cancel over HTTP, authenticated, authorized, then the stack's own rules.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compose, ConfigError, defineAdapter, PORT_VERSIONS, resolveProfile, type Stack, type ToolPort } from '@agent-layers/core';
+import { compose, ConfigError, defineAdapter, PORT_VERSIONS, resolveProfile, type AuthorizationPort, type Stack, type ToolPort } from '@agent-layers/core';
 import { adapter as basicRuntime } from '@agent-layers/adapter-basic-runtime';
 import { adapter as approvalAdapter } from '@agent-layers/adapter-memory-approval';
 import { adapter as mockModel } from '@agent-layers/adapter-mock-model';
@@ -103,6 +103,53 @@ test('cancel: the owner withdraws a waiting run and its approval; a later resume
     assert.equal((await stack.ports.approval!.get(run.approval))!.status, 'cancelled');
     assert.equal((await post(`/runs/${run.runId}/resume`, 'op-key', { approval: { id: run.approval, approved: true } })).status, 409);
     assert.ok(!refunds.includes('B2'));
+  } finally {
+    await gw.close();
+    await stack.close();
+  }
+});
+
+test('resume and cancel are authorized on the run\'s own agent: a policy for agent a does not open a run of agent b', async () => {
+  const onlyA = defineAdapter({
+    port: 'AuthorizationPort', layer: 'identity', name: 'only-a', direction: 'outbound', maps: { technology: 'test double' },
+    portVersion: PORT_VERSIONS.AuthorizationPort, tiers: ['prototype'], optionsSchema: { type: 'object' },
+    create: (): AuthorizationPort => ({
+      evaluate: async (q) => ({ allowed: q.action === 'resume' || q.action === 'cancel' ? q.target.kind === 'run' && q.target.agent === 'a' : true }),
+    }),
+  });
+  const stack = await compose(resolveProfile({
+    agents: { a: { instructions: '', model: 'mock', tools: ['shop__*'] }, b: { instructions: '', model: 'mock', tools: ['shop__*'] } },
+    policy: [{ effect: 'ask', tools: ['shop__refund'] }],
+    layers: {
+      model: { adapter: 'mock-model', options: { rules: [{ match: 'refund (\\w+)', tool: 'refund', args: { order: '{{1}}' } }] } },
+      runtime: { adapter: 'basic-runtime' },
+      tools: { shop: { adapter: 'shop' } },
+      identity: { adapter: 'static-identity', options: { tokens } },
+      approval: { adapter: 'memory-approval' },
+      authorization: { adapter: 'only-a' },
+    },
+  }), { adapters: [mockModel, basicRuntime, shop, identityAdapter, approvalAdapter, onlyA] });
+  const { gw, post } = await serve(stack);
+  try {
+    const ann = await stack.verify('ann-key');
+    const start = async (agent: string, order: string) => {
+      const r = await (await stack.agent(agent)).run(`refund ${order}`, { caller: ann });
+      assert.equal(r.status, 'waiting');
+      return { runId: r.runId, approval: (r.ext!['sdk.approval'] as { id: string }).id };
+    };
+    const ofB = await start('b', 'C3');
+    const approveB = { approval: { id: ofB.approval, approved: true } };
+    assert.equal((await post(`/runs/${ofB.runId}/resume`, 'ann-key', approveB)).status, 403, 'a run of agent b');
+    assert.equal((await post(`/runs/${ofB.runId}/cancel`, 'ann-key', {})).status, 403, 'a run of agent b');
+    assert.equal((await post('/runs/nope/resume', 'ann-key', { input: 'go' })).status, 403, 'an unknown run answers like a refused one');
+    assert.ok(!refunds.includes('C3'));
+    assert.equal((await stack.ports.approval!.get(ofB.approval))!.status, 'pending');
+
+    const ofA = await start('a', 'D4');
+    const res = await post(`/runs/${ofA.runId}/resume`, 'ann-key', { approval: { id: ofA.approval, approved: true } });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json() as { status: string }).status, 'completed');
+    assert.ok(refunds.includes('D4'));
   } finally {
     await gw.close();
     await stack.close();

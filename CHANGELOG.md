@@ -24,7 +24,8 @@ Every package under `packages/*` and `adapters/*` is released with the same vers
   `input-required` task when a message names it (`taskId`), and CancelTask cancels the run in the stack.
 - AuthorizationPort 1.3.0: core actions `resume` and `cancel`, target kind `run`.
 - Gateway: `POST /runs/<id>/resume` and `POST /runs/<id>/cancel`, off unless `gateway.runs.enabled`, authenticated and
-  authorized with actions `resume` and `cancel` on target kind `run` ([docs/gateway.md](docs/gateway.md#runs)).
+  authorized with actions `resume` and `cancel` on target kind `run`, with the run's agent and the tool it waits for
+  (`Stack.runTarget(runId)`), so a policy scoped to an agent or a tool applies ([docs/gateway.md](docs/gateway.md#runs)).
 - Limits `limits.run.resumeTtlMs` (604800000 ms) and `limits.run.maxWaitingInMemory` (1000); telemetry events
   `agent.run.resumed`, `agent.run.cancelled`, `agent.run.keep_failed`, `agent.run.control_failed`.
 - Readiness warns on the production tier when an approval adapter is configured without a store.
