@@ -3,13 +3,17 @@
 //   node scripts/publish-unpublished.mjs                publish what is missing
 //   node scripts/publish-unpublished.mjs --list         print what is missing and exit
 //   node scripts/publish-unpublished.mjs --provenance   any other flag is passed to `npm publish`
+//   node scripts/publish-unpublished.mjs --pause=<seconds>  wait between publishes (default 0)
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { npm, readJson, ROOT, workspaces } from './lib/common.mjs';
 
 const args = process.argv.slice(2);
 const list = args.includes('--list');
-const publishArgs = args.filter((a) => a !== '--list');
+const pauseArg = args.find((a) => a.startsWith('--pause='));
+const pauseSec = Number(pauseArg?.slice('--pause='.length) ?? 0);
+if (!Number.isFinite(pauseSec) || pauseSec < 0) throw new Error(`invalid ${pauseArg}: expected seconds >= 0`);
+const publishArgs = args.filter((a) => a !== '--list' && !a.startsWith('--pause='));
 
 /** True when `name@version` is already on the registry; a 404 (package or version unknown) is false. */
 function published(name, version) {
@@ -30,6 +34,7 @@ if (list || missing.length === 0) {
   process.exit(0);
 }
 for (const [i, { dir, pkg }] of missing.entries()) {
+  if (i > 0 && pauseSec > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pauseSec * 1000);
   console.log(`[${i + 1}/${missing.length}] ${pkg.name}@${pkg.version}`);
   const res = spawnSync(npm, ['publish', '--workspace', dir, '--access', 'public', ...publishArgs], { cwd: ROOT, stdio: 'inherit' });
   if (res.status !== 0) {
