@@ -92,6 +92,11 @@ included), tests to `packages/adapters/test/<name>`, and the adapter skeleton fr
 - Limits `limits.run.resumeTtlMs` (604800000 ms) and `limits.run.maxWaitingInMemory` (1000); telemetry events
   `agent.run.resumed`, `agent.run.cancelled`, `agent.run.keep_failed`, `agent.run.control_failed`.
 - Readiness warns on the production tier when an approval adapter is configured without a store.
+- `reinloop` runtime: `ext["reinloop.budget"]` on an agent (any of the runtime's budget limits, numbers or
+  `"unbounded"`) tightens the runtime budget for that agent only, the smallest value per limit; an invalid one is a
+  `ConfigError` when the agent is bound. A tool result with `ext["reinloop.stop"] === true` ends the run after that
+  tool (reinloop `{ stop: true }`), with its text as the output. The thinking signature of reinloop round-trips through
+  `ReasoningPart.ext["anthropic.signature"]`, so thinking with tool calls replays signed.
 
 ### Changed
 

@@ -1,6 +1,9 @@
 import { messageText, textMessage, type Finish, type Message as SdkMessage, type ModelReply, type ModelRequest as SdkRequest, type Part as SdkPart, type Usage as SdkUsage } from '@agent-layers/core';
 import type { Message, ModelParams, ModelRequest, ModelResponse, Part, StopReason, ToolCallPart } from 'reinloop';
 
+/** `ext` key of a reasoning part that carries the provider's signature of the thinking (`signature` of a reinloop thinking part). */
+const SIGNATURE = 'anthropic.signature';
+
 /**
  * reinloop request → SDK model request: instructions become the system message, parts map one to one. Sampling
  * settings that have a slot in the language go to `settings`; `ext` is the agent's, for the model adapter.
@@ -35,7 +38,7 @@ export function toMessages(instructions: string | undefined, messages: readonly 
 function toPart(p: Part): SdkPart | undefined {
   switch (p.type) {
     case 'text': return { type: 'text', text: p.text };
-    case 'thinking': return { type: 'reasoning', text: p.text };
+    case 'thinking': return { type: 'reasoning', text: p.text, ...(p.signature ? { ext: { [SIGNATURE]: p.signature } } : {}) };
     case 'tool_call': return { type: 'call', id: p.id, tool: p.name, args: objectOf(p.args) };
     case 'tool_result': return { type: 'result', callId: p.callId, ok: !p.isError, text: p.content };
     default: return undefined;
@@ -69,7 +72,10 @@ export function fromMessages(messages: readonly SdkMessage[]): { system: string[
 function fromPart(p: SdkPart, names: Map<string, string>): Part | undefined {
   switch (p.type) {
     case 'text': return { type: 'text', text: (p as { text: string }).text };
-    case 'reasoning': return { type: 'thinking', text: (p as { text: string }).text };
+    case 'reasoning': {
+      const signature = p.ext?.[SIGNATURE];
+      return { type: 'thinking', text: (p as { text: string }).text, ...(typeof signature === 'string' && signature ? { signature } : {}) };
+    }
     case 'call': {
       const c = p as Extract<SdkPart, { type: 'call' }>;
       names.set(c.id, c.tool);

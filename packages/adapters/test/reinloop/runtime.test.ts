@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { checkAdapter, conformance } from '@agent-layers/conformance';
 import { createReinloopRuntime, adapter } from '../../src/reinloop/index.ts';
-import { scriptedModel, seen, stack, textReply } from './helpers.ts';
+import { callReply, scriptedModel, seen, stack, stopTool, textReply } from './helpers.ts';
 
 const types = (events: { type: string }[] | undefined) => events?.map((e) => e.type);
 const rec = (events: unknown) => (events ?? []) as Record<string, unknown>[];
@@ -203,4 +203,48 @@ test('conformance holds for runs that wait, are blocked or hit a budget', async 
   const limited = await stack();
   assert.deepEqual((await run(limited, 'add 1 and 1', { budget: { maxTurns: 1 } })).failures, []);
   await limited.s.close();
+});
+
+test('ext["reinloop.stop"] on a tool result ends the run after that tool, with its text as the output', async () => {
+  const script = scriptedModel([callReply([{ type: 'call', id: 'c1', tool: 'rec__done', args: { text: 'plan' } }])]);
+  const { s } = await stack({}, { layers: { model: { adapter: 'test-script' }, tools: { math: { adapter: 'functions' }, rec: { adapter: 'test-stop' } } } }, {
+    adapters: [script.adapter, stopTool], agent: { tools: ['rec__*'] },
+  });
+  const r = await (await s.agent('calc')).run('go');
+  assert.equal(r.status, 'completed');
+  assert.equal(r.output, 'recorded plan');
+  assert.equal(script.requests.length, 1);
+  await s.close();
+});
+
+test('ext["reinloop.budget"] tightens the runtime budget for that agent only; invalid values are configuration errors', async () => {
+  const reason = (detail: string) => ({ code: 'limit', layer: 'harness', by: 'reinloop', detail });
+  const run = async (runtime: object, budget: unknown) => {
+    const { s } = await stack(runtime, {}, { agent: { ext: { 'reinloop.budget': budget } } });
+    try { return await (await s.agent('calc')).run('add 2 and 3'); } finally { await s.close(); }
+  };
+  const tight = await run({ budget: { maxTurns: 10 } }, { maxToolCalls: 1 });
+  assert.equal(tight.status, 'stopped');
+  assert.deepEqual(tight.reason, reason('maxToolCalls'));
+  // Without a runtime budget the agent's one is added to reinloop's default.
+  assert.deepEqual((await run({}, { maxTurns: 1 })).reason, reason('maxTurns'));
+  // It never loosens the runtime's.
+  assert.deepEqual((await run({ budget: { maxTurns: 1 } }, { maxTurns: 10, maxToolCalls: 'unbounded' })).reason, reason('maxTurns'));
+  assert.equal((await run({ budget: { maxTurns: 5 } }, { maxTurns: 'unbounded' })).status, 'completed');
+  for (const [bad, match] of [[{ maxTurns: 0 }, /maxTurns: must be >= 1/], [{ maxTurns: '3' }, /maxTurns: must be an integer/], [{ turns: 3 }, /turns: unknown budget limit/], [[1], /must be an object/]] as const) {
+    await assert.rejects(run({}, bad), (err: Error) => err.name === 'ConfigError' && match.test(err.message));
+  }
+});
+
+test('signed reasoning from the model is replayed with its signature on the next turn', async () => {
+  const script = scriptedModel([
+    callReply([{ type: 'reasoning', text: 'think', ext: { 'anthropic.signature': 'sig-1' } }, { type: 'call', id: 'c1', tool: 'math__add', args: { a: '1', b: '2' } }]),
+    textReply('done'),
+  ]);
+  const { s } = await stack({}, { layers: { model: { adapter: 'test-script' } } }, { adapters: [script.adapter] });
+  const r = await (await s.agent('calc')).run('go');
+  assert.equal(r.output, 'done');
+  const replayed = script.requests[1]?.messages.flatMap((m) => m.parts).find((p) => p.type === 'reasoning');
+  assert.deepEqual(replayed, { type: 'reasoning', text: 'think', ext: { 'anthropic.signature': 'sig-1' } });
+  await s.close();
 });

@@ -1,9 +1,9 @@
 import {
-  defineAdapter, defineLimits, limitSchema, limitValue, noopTelemetry, PORT_VERSIONS, publicCaller, RunRefused, stopReasonOf, type AgentSpec, type CallContext,
+  ConfigError, defineAdapter, defineLimits, limitProblem, limitSchema, limitValue, noopTelemetry, PORT_VERSIONS, publicCaller, RunRefused, stopReasonOf, type AgentSpec, type CallContext,
   type JsonValue, type LimitValue, type RunEvent, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason,
 } from '@agent-layers/core';
 import {
-  memoryStore, pricingFor, replay, RunStop, stream, summarizeCompaction, windowCompaction, type Agent, type Budget, type CompactionSettings, type Message,
+  DEFAULT_BUDGET, memoryStore, pricingFor, replay, RunStop, stream, summarizeCompaction, windowCompaction, type Agent, type Budget, type CompactionSettings, type Message,
   type ModelParams, type PolicyConfig, type Pricing, type RunEvent as LoopEvent, type RunResult as LoopResult, type ToolSettings,
 } from 'reinloop';
 import { fromMessages, fromUsage } from './convert.ts';
@@ -78,6 +78,8 @@ export interface ReinloopOptions {
   tools?: ToolOptions;
 }
 
+const BUDGET_KEYS = ['maxTurns', 'maxToolCalls', 'maxInputTokens', 'maxOutputTokens', 'maxTotalTokens', 'maxCostUsd', 'maxDurationMs'] as const;
+
 /**
  * Budgets to enforce, or undefined to keep reinloop's default (`{ maxTurns: 50 }`). Only the configured ones are passed;
  * an unbounded one is left out, as reinloop reads absence as no limit.
@@ -85,11 +87,46 @@ export interface ReinloopOptions {
 function budgetOf(o?: BudgetOptions): Budget | undefined {
   if (!o) return undefined;
   const out: Budget = {};
-  for (const key of ['maxTurns', 'maxToolCalls', 'maxInputTokens', 'maxOutputTokens', 'maxTotalTokens', 'maxCostUsd', 'maxDurationMs'] as const) {
+  for (const key of BUDGET_KEYS) {
     if (o[key] === undefined) continue;
     const v = limitValue(LIMITS[key], o[key]);
     if (Number.isFinite(v)) out[key] = v;
   }
+  return out;
+}
+
+/**
+ * The agent's own budget, `ext["reinloop.budget"]`: an object of the runtime's budget limits (numbers, or `"unbounded"`
+ * for no limit). Anything else is a configuration error.
+ */
+function agentBudgetOf(spec: AgentSpec): Budget | undefined {
+  const raw = spec.ext?.['reinloop.budget'];
+  if (raw === undefined) return undefined;
+  const at = `agents.${spec.name}.ext["reinloop.budget"]`;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ConfigError([`${at}: must be an object of budget limits`]);
+  const errors: string[] = [];
+  const out: Budget = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!(BUDGET_KEYS as readonly string[]).includes(key)) { errors.push(`${at}.${key}: unknown budget limit (known: ${BUDGET_KEYS.join(', ')})`); continue; }
+    const k = key as (typeof BUDGET_KEYS)[number];
+    const problem = limitProblem(LIMITS[k], value);
+    if (problem) errors.push(`${at}.${key}: ${problem}`);
+    else if (value !== 'unbounded') out[k] = value as number;
+  }
+  if (errors.length) throw new ConfigError(errors);
+  return out;
+}
+
+/**
+ * Budget of one agent: the runtime's, tightened (smallest value per limit) by the agent's own. An agent budget over a
+ * runtime without `budget` starts from reinloop's default.
+ */
+function budgetFor(options: ReinloopOptions, spec: AgentSpec): Budget | undefined {
+  const base = budgetOf(options.budget);
+  const own = agentBudgetOf(spec);
+  if (!own) return base;
+  const out: Budget = { ...(base ?? DEFAULT_BUDGET) };
+  for (const key of BUDGET_KEYS) if (own[key] !== undefined) out[key] = Math.min(out[key] ?? Infinity, own[key]);
   return out;
 }
 
@@ -114,6 +151,7 @@ export function createReinloopRuntime(options: ReinloopOptions = {}, name = 'rei
   return {
     name,
     bind(stack, spec) {
+      agentBudgetOf(spec);
       const collect = async (input: RunInput, init: Partial<CallContext>, from?: Resume): Promise<RunResult> => {
         const events: RunEvent[] = [];
         const it = execute(stack, spec, input, stack.context({ ...init, agent: spec.name }), options, false, from);
@@ -195,6 +233,7 @@ async function* execute(stack: Stack, spec: AgentSpec, input: RunInput, ctx: Cal
     const parsed = typeof input === 'string' ? { system: [], messages: input } : fromMessages(input.messages);
     messages = parsed.messages;
     const approval = stack.ports.approval?.name;
+    const budget = budgetFor(options, spec);
     agent = {
       name: spec.name,
       model: {
@@ -204,7 +243,7 @@ async function* execute(stack: Stack, spec: AgentSpec, input: RunInput, ctx: Cal
       instructions: [spec.instructions, ...parsed.system].filter(Boolean).join('\n\n') || undefined,
       tools: specs.map((s) => governedTool(tools, s, run, control, approval)),
       policy: ALLOW_ALL,
-      ...(options.budget ? { budget: budgetOf(options.budget)! } : {}),
+      ...(budget ? { budget } : {}),
       ...(options.compaction ? { compaction: compaction(options.compaction) } : {}),
       toolSettings: toolSettingsOf(options.tools),
     };

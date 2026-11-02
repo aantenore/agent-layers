@@ -97,3 +97,18 @@ export async function stack(runtime: ReinloopOptions = {}, extra: Partial<StackC
   });
   return { s, records, spans: (name: string) => records.filter((r) => r.type === 'span' && r.name === name) };
 }
+
+/** Tool port whose only tool, `done`, ends the run: its result carries `ext["reinloop.stop"]`. */
+export const stopTool = defineAdapter<'ToolPort'>({
+  layer: 'tool', port: 'ToolPort', name: 'test-stop', direction: 'outbound', maps: { technology: 'test' },
+  portVersion: PORT_VERSIONS.ToolPort, tiers: ['prototype'],
+  create: (_o, ctx) => ({
+    name: ctx.name,
+    listTools: async () => [{ name: 'done', description: 'Records the outcome', params: { type: 'object', properties: { text: { type: 'string' } } }, risk: 'read' }],
+    callTool: async (_name, args) => ({ ok: true, text: `recorded ${String(args.text)}`, ext: { 'reinloop.stop': true } }),
+  }),
+});
+
+export const callReply = (parts: ModelReply['message']['parts']): ModelReply => ({
+  model: 'scripted', finish: 'tools', message: { role: 'assistant', parts }, usage: { inputTokens: 3, outputTokens: 2 },
+});

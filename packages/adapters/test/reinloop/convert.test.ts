@@ -92,3 +92,14 @@ test('reinloop events map to core run events and namespaced events', () => {
   assert.deepEqual(mapEvent(event('tool_decision', { callId: 'c', name: 't', allowed: true, reason: '' }), opts), []);
   assert.deepEqual(mapEvent(event('turn_start', { turn: 1 }), opts), []);
 });
+
+test('the thinking signature round-trips through ReasoningPart.ext["anthropic.signature"]', () => {
+  const signed = { type: 'reasoning', text: 'hmm', ext: { 'anthropic.signature': 'sig' } } as const;
+  const req = toModelRequest({
+    model: 'm', tools: [], messages: [{ role: 'assistant', parts: [{ type: 'thinking', text: 'hmm', signature: 'sig' }, { type: 'thinking', text: 'plain' }] }],
+  });
+  assert.deepEqual(req.messages[0]?.parts, [signed, { type: 'reasoning', text: 'plain' }]);
+  const reply: ModelReply = { model: 'm', finish: 'end', message: { role: 'assistant', parts: [signed, { type: 'reasoning', text: 'plain' }, { type: 'reasoning', text: 'x', ext: { 'anthropic.signature': 7 } }] } };
+  assert.deepEqual(fromModelReply(reply, 'm').message.parts, [{ type: 'thinking', text: 'hmm', signature: 'sig' }, { type: 'thinking', text: 'plain' }, { type: 'thinking', text: 'x' }]);
+  assert.deepEqual(fromMessages([{ role: 'assistant', parts: [signed] }]).messages, [{ role: 'assistant', parts: [{ type: 'thinking', text: 'hmm', signature: 'sig' }] }]);
+});

@@ -56,12 +56,27 @@ Telemetry the pipeline cannot see: `reinloop.compaction` and `reinloop.args_inva
 `harness` and `agent.name`, and their own attributes are in the `reinloop.` namespace. The adapter opens no model or
 tool spans of its own: the stack's `agent.model.call` and `agent.tool.call` already cover each call.
 
-`ext`: the adapter reads `ext["sdk.approval"]` of governed tool results and writes no `ext` keys; the stack adds
-`ext["sdk.approval"] = {id, by, tool}` to a waiting result.
+`ext`: the adapter reads `ext["sdk.approval"]` of governed tool results and `ext["reinloop.stop"]` (below), and writes
+`ext["anthropic.signature"]` on reasoning parts (below); the stack adds `ext["sdk.approval"] = {id, by, tool}` to a
+waiting result.
+
+- `ext["reinloop.stop"] === true` on a successful tool result ends the run after that tool's batch, without another
+  model turn: reinloop's tool result `{ stop: true }`. The run completes and its output is the result's `text` (the
+  first stopping call in the model's order wins). Use it for tools that record the outcome of the run, such as a
+  committed plan or a ballot. Ignored on a result with `ok: false`.
+- `ext["anthropic.signature"]` (string) on a `reasoning` part is the signature of reinloop's `thinking` part, in both
+  directions, so signed thinking is replayed with its tool calls on the next turn (providers reject it otherwise). A
+  model adapter that returns signed reasoning sets it on the reply's reasoning part. Streamed reasoning deltas carry
+  no `ext`, so a signature travels only on replies from `chat`.
 
 A waiting result carries the run's reinloop event log as its checkpoint (RuntimePort 1.3.0). `resume` (through
 `Stack.resume`) replays it: reinloop runs the tool calls without a result, the waiting one first, then the loop goes
 on; an input answer is added once those calls have run. Usage and cost are those of the resumed run only.
+
+`ext["reinloop.budget"]` on an agent is an object of the same budget limits as the `budget` option (numbers, or
+`"unbounded"` for no limit) and tightens the runtime budget for that agent only: each limit is the smaller of the two,
+so one stack can hold agents with different `maxTurns`. Without a runtime `budget` it is added to reinloop's default
+(`maxTurns: 50`). An unknown limit or an out-of-range value is a `ConfigError` when the agent is bound.
 
 Agent settings: `settings.temperature`, `settings.maxOutputTokens` and `settings.stop` go to the model.
 `ext["reinloop.retryMaxTokens"]` (number) makes reinloop repeat an answer cut at the token limit once with that limit.
