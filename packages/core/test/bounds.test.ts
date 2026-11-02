@@ -6,6 +6,12 @@ import {
 } from '../src/index.ts';
 import { fakeModel, fakeTools, recorder, reply, testAdapter } from './helpers.ts';
 
+// The deadline and abort timers are unref'd on purpose; a ref'd interval keeps the event loop (and the test runner) alive while a test awaits one.
+const alive = async <T>(pending: Promise<T>): Promise<T> => {
+  const keep = setInterval(() => {}, 1000);
+  try { return await pending; } finally { clearInterval(keep); }
+};
+
 const text = (t: string) => [{ role: 'user' as const, parts: [{ type: 'text' as const, text: t }] }];
 
 /** Calls the model `turns` times, then completes; a thrown error propagates to the host. */
@@ -120,7 +126,7 @@ test('model prices give the run its cost and enforce the cost budget', async () 
 
 test('the deadline aborts the run; the result says timeout, by the core deadline', async () => {
   const { stack, records } = await stackWith(waitingRuntime, { limits: { run: { timeoutMs: 30 }, delegation: { minRemainingMs: 0 } } });
-  const r = await (await stack.agent('a')).run('hi');
+  const r = await alive((await stack.agent('a')).run('hi'));
   assert.equal(r.status, 'stopped');
   assert.deepEqual(r.reason, { code: 'timeout', layer: 'harness', by: 'sdk.deadline' });
   assert.ok(records.some((x) => x.type === 'metric' && x.name === 'agent.bounds.stops' && x.attrs['agent.run.reason'] === 'timeout'));
@@ -128,7 +134,7 @@ test('the deadline aborts the run; the result says timeout, by the core deadline
 
 test('a caller abort stays an abort, not a deadline stop', async () => {
   const { stack } = await stackWith(waitingRuntime);
-  const r = await (await stack.agent('a')).run('hi', { signal: AbortSignal.timeout(10) });
+  const r = await alive((await stack.agent('a')).run('hi', { signal: AbortSignal.timeout(10) }));
   assert.equal(r.reason?.code, 'aborted');
 });
 
