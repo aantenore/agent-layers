@@ -3,6 +3,23 @@ import type { Ext } from './ports/base.ts';
 import type { GuardStage } from './ports/guard.ts';
 import type { RunStatus, StopReason } from './ports/runtime.ts';
 
+/**
+ * Brands an error class so `instanceof` also matches instances built by another copy of this module (an app that ends
+ * up with two installs of the package). The brand is a registry symbol on the prototype: a subclass instance carries
+ * its base's brand, a sibling class does not.
+ */
+function brand<T extends abstract new (...args: never[]) => Error>(cls: T, name: string): T {
+  const key = Symbol.for(`agent-layers.error.${name}`);
+  Object.defineProperty(cls.prototype, key, { value: true });
+  Object.defineProperty(cls, Symbol.hasInstance, {
+    configurable: true,
+    value(this: Function, x: unknown): boolean {
+      return (typeof x === 'object' && x !== null && (x as Record<symbol, unknown>)[key] === true) || Function.prototype[Symbol.hasInstance].call(this, x);
+    },
+  });
+  return cls;
+}
+
 /** Base class of every error raised by the core. */
 export class AgentLayersError extends Error {
   override name = 'AgentLayersError';
@@ -147,6 +164,18 @@ export class RunRefused extends AgentLayersError {
     this.kind = kind;
   }
 }
+
+// Every class is branded after its definition (a class's own brand also matches its subclasses).
+brand(AgentLayersError, 'AgentLayersError');
+brand(AdapterError, 'AdapterError');
+brand(ConfigError, 'ConfigError');
+brand(GuardrailBlocked, 'GuardrailBlocked');
+brand(ApprovalPending, 'ApprovalPending');
+brand(BoundsExceeded, 'BoundsExceeded');
+brand(MappingError, 'MappingError');
+brand(MissingLayerError, 'MissingLayerError');
+brand(InboundRejected, 'InboundRejected');
+brand(RunRefused, 'RunRefused');
 
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
