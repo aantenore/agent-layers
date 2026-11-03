@@ -2,6 +2,18 @@
 
 Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released with the same version. See [RELEASING.md](RELEASING.md).
 
+## 0.4.1 - 2026-11-03
+
+### Fixed
+
+- The error classes of `@agent-layers/core` (`GuardrailBlocked`, `ApprovalPending`, `BoundsExceeded`, `RunRefused`,
+  `ConfigError`, `AdapterError`, `MissingLayerError`, `InboundRejected`, `MappingError`, `AgentLayersError`) now match
+  with `instanceof` across duplicate installs of the package, for example a second copy nested under
+  `@agent-layers/adapters`. Each class carries a stable brand (`Symbol.for('agent-layers.error.<Name>')`) and answers
+  `Symbol.hasInstance` with it, so `stopReasonOf` and `runEndOf` keep ending a guard stop as `stopped` / `guard_block`
+  instead of `failed` / `error`. A subclass instance still matches its base class and never a sibling. Instances made
+  by a copy older than 0.4.1 carry no brand and still match only their own copy.
+
 ## 0.4.0 - 2026-11-02
 
 Every package moves to 0.4.0 together: the adapters ship in the new package `@agent-layers/adapters`, which the
