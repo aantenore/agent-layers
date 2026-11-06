@@ -6,12 +6,18 @@ const SHOWN: Record<string, string> = {
   [ATTR.runReason]: 'reason',
 };
 
+/** `rejected 401` or `error 500` for a span that answered an HTTP request with a 4xx or 5xx status; undefined otherwise. */
+const httpOutcome = (attrs: Record<string, unknown>): string | undefined => {
+  const code = attrs['http.response.status_code'];
+  return typeof code === 'number' && code >= 400 ? `${code >= 500 ? 'error' : 'rejected'} ${code}` : undefined;
+};
+
 /** One line per finished span: `[L5 tool] agent.tool.call 3ms ok`. Used by `dev` when no telemetry is configured. */
 export function traceTelemetry(write: (line: string) => void): TelemetryPort {
   return recordingTelemetry((r) => {
     if (r.type !== 'span') return;
     const extra = Object.entries(SHOWN).filter(([k]) => r.attrs[k] !== undefined).map(([k, label]) => `${label}=${String(r.attrs[k])}`).join(' ');
-    write(`  [${layerLabel(r.layer)}] ${r.name} ${r.durationMs}ms ${r.status}${extra ? ` ${extra}` : ''}`);
+    write(`  [${layerLabel(r.layer)}] ${r.name} ${r.durationMs}ms ${(r.status === 'ok' && httpOutcome(r.attrs)) || r.status}${extra ? ` ${extra}` : ''}`);
   }, 'trace');
 }
 

@@ -29,7 +29,8 @@ export async function gateway(io: Io, args: GatewayArgs, wait: () => Promise<voi
   const stack = await compose(p.config, { registry: p.registry, env: p.env, ...(trace ? { telemetry: [traceTelemetry(io.err)] } : {}) });
   try {
     const { inbound: _names, ...options } = p.config.gateway;
-    const gw = await serveStack(stack, { ...options, ...(port !== undefined ? { port } : {}), ...(args.host ? { host: args.host } : {}) });
+    const gw = await serveStack(stack, { ...options, ...(port !== undefined ? { port } : {}), ...(args.host ? { host: args.host } : {}) })
+      .catch((err: unknown) => { throw listenError(err) ?? err; });
     io.err(`gateway ${gw.url} · profile ${p.config.profile ?? '(base)'} · tier ${p.config.tier}`);
     for (const r of gw.routes) io.err(`  ${r}`);
     for (const w of gw.warnings) io.err(`  warning: ${w}`);
@@ -41,4 +42,18 @@ export async function gateway(io: Io, args: GatewayArgs, wait: () => Promise<voi
   } finally {
     await stack.close();
   }
+}
+
+const LISTEN_HINTS: Record<string, string> = {
+  EADDRINUSE: 'address already in use; pick another port with --port <n> or gateway.port in agent-layers.json',
+  EACCES: 'permission denied; pick a port above 1023 with --port <n> or gateway.port in agent-layers.json',
+  EADDRNOTAVAIL: 'address not available on this machine; pick another host with --host <name> or gateway.host in agent-layers.json',
+};
+
+/** A failed bind as one line naming the address and the fix; undefined for any other error. */
+function listenError(err: unknown): UsageError | undefined {
+  const e = err as NodeJS.ErrnoException & { address?: string; port?: number };
+  if (e?.syscall !== 'listen') return undefined;
+  const host = e.address?.includes(':') ? `[${e.address}]` : e.address ?? '?';
+  return new UsageError(`cannot listen on ${host}:${e.port ?? '?'}: ${(e.code && LISTEN_HINTS[e.code]) ?? e.message}`);
 }

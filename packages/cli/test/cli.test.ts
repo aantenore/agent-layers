@@ -10,6 +10,7 @@ import { gateway } from '../src/commands/gateway.ts';
 import { nodeVersionProblem } from '../src/commands/init.ts';
 import { referenceTests } from '../src/commands/test.ts';
 import { main } from '../src/main.ts';
+import { traceTelemetry } from '../src/trace.ts';
 import { captureIo, linkModules, tempProject } from './helpers.ts';
 
 let dir: string;
@@ -320,6 +321,30 @@ test('gateway hosts the profile on the network until stopped; production needs t
   const prod = captureIo(dir);
   assert.equal(await main(['gateway', '--config', 'hardened.json', '--profile', 'hardened'], prod.io), 1);
   assert.match(prod.errors(), /fails the readiness gate[\s\S]*prototype-only/);
+});
+
+test('gateway on a busy port fails with one line naming the address and the fix', async () => {
+  const busy = createServer();
+  await new Promise<void>((resolve) => busy.listen(0, '127.0.0.1', resolve));
+  const { port } = busy.address() as AddressInfo;
+  try {
+    const { io, errors } = captureIo(dir);
+    assert.equal(await main(['gateway', '--port', String(port), '--host', '127.0.0.1'], io), 1);
+    assert.equal(errors(), `agent-layers gateway: cannot listen on 127.0.0.1:${port}: address already in use; pick another port with --port <n> or gateway.port in agent-layers.json`);
+  } finally {
+    await new Promise((resolve) => busy.close(resolve));
+  }
+});
+
+test('the trace shows gateway requests answered with 4xx or 5xx as rejected or error', async () => {
+  const lines: string[] = [];
+  const t = traceTelemetry((l) => lines.push(l));
+  for (const code of [200, 401, 503]) {
+    await t.span('gateway.request', { 'agent.layer': 'interface' }, async (span) => { span.setAttributes({ 'http.response.status_code': code }); });
+  }
+  assert.match(lines[0]!, /gateway\.request \d+ms ok$/);
+  assert.match(lines[1]!, /gateway\.request \d+ms rejected 401$/);
+  assert.match(lines[2]!, /gateway\.request \d+ms error 503$/);
 });
 
 test('init refuses a Node.js older than the engines range, with what to install', () => {

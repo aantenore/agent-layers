@@ -2,6 +2,18 @@
 
 Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released with the same version. See [RELEASING.md](RELEASING.md).
 
+## Unreleased
+
+### Fixed
+
+- `agent-layers gateway` on a port that is taken, or that it may not bind, fails with one line naming the address and
+  the fix (`cannot listen on 127.0.0.1:8787: address already in use; pick another port with --port <n> or
+  gateway.port in agent-layers.json`) and exit code 1, instead of a Node.js stack trace.
+- The `dev`/`gateway` trace and the `console-telemetry` pretty format show a span that answered an HTTP request with
+  a 4xx or 5xx status as `rejected 401` or `error 500` instead of `ok`. Span status and attributes are unchanged.
+- The `minimal` template README says that `check --profile production` needs the secrets of `.env.example`
+  (`OIDC_CLIENT_SECRET`, `SESSION_SECRET`) set first, otherwise it stops at configuration validation.
+
 ## 0.4.2 - 2026-11-06
 
 ### Fixed

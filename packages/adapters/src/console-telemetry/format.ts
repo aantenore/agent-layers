@@ -22,9 +22,12 @@ export function formatPretty(record: TelemetryRecord, color: boolean): string {
   const label = paint(color, 'dim', `[${layerLabel(record.layer)}]`);
   let head: string;
   if (record.type === 'span') {
-    const status = record.status === 'ok'
-      ? paint(color, 'green', 'ok')
-      : paint(color, 'red', `error ${(record.error ?? 'failed').replace(/\s+/g, ' ')}`);
+    const code = record.attrs['http.response.status_code'];
+    const status = record.status !== 'ok'
+      ? paint(color, 'red', `error ${(record.error ?? 'failed').replace(/\s+/g, ' ')}`)
+      : typeof code === 'number' && code >= 400
+        ? paint(color, 'red', `${code >= 500 ? 'error' : 'rejected'} ${code}`)
+        : paint(color, 'green', 'ok');
     head = `${record.name} ${record.durationMs}ms ${status}`;
   } else if (record.type === 'event') head = `${record.name} event`;
   else head = `${record.name} metric ${record.value}`;

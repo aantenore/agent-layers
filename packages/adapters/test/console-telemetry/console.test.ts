@@ -22,6 +22,16 @@ test('error spans show the message and still rethrow', async () => {
   assert.match(lines[0]!, /^\[L5 tool\] tool\.call \d+ms error boom$/);
 });
 
+test('spans that answered an HTTP request with 4xx or 5xx show it instead of ok', async () => {
+  const { lines, port } = capture();
+  for (const code of [200, 401, 500]) {
+    await port.span('gateway.request', { 'agent.layer': 'interface' }, async (span) => { span.setAttributes({ 'http.response.status_code': code }); });
+  }
+  assert.match(lines[0]!, /^\[L\w+ interface\] gateway\.request \d+ms ok http\.response\.status_code=200$/);
+  assert.match(lines[1]!, /^\[L\w+ interface\] gateway\.request \d+ms rejected 401 http\.response\.status_code=401$/);
+  assert.match(lines[2]!, /^\[L\w+ interface\] gateway\.request \d+ms error 500 http\.response\.status_code=500$/);
+});
+
 test('events print by default, metrics only when enabled', async () => {
   const off = capture();
   off.port.event('guard.block', { 'agent.layer': 'guardrail', stage: 'input' });
