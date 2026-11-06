@@ -47,9 +47,12 @@ Mapped by adapters, not by the port:
 - Every call goes through the `governedTools` pipeline: prefixed names, local policy, approval, authorization,
   `tool_args` guards, the call with credentials bound to the caller, `tool_result` guards.
 - A tool that needs a token declares an audience; the stack obtains it for the caller. Agents and prompts never see it.
-- **Sandbox.** Tools that run code do it in an OCI container with the network off; gVisor is an optional stronger
-  boundary. See [security](../cross-cutting/security.md).
-- **Egress.** HTTP tools reach only allowed hosts.
+- **Sandbox.** Not provided: agent-layers ships no adapter that runs code. A tool that runs model-written code is
+  yours to isolate (an OCI container with the network off, gVisor for a stronger boundary), reached through `mcp` or
+  `http-tools`. See [security](../cross-cutting/security.md).
+- **Egress.** Enforced: `http-tools` and `openapi` keep each request on the origin and fixed path prefix of its URL
+  template and reject path values made only of dots (`http-tools/request.ts`, `openapi/request.ts`). Yours: which
+  hosts the process may reach at all (network policy, egress rules in `infra`); `mcp` servers make their own calls.
 
 ## How to swap
 

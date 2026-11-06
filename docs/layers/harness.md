@@ -201,7 +201,7 @@ sequenceDiagram
   caller's token. The gateway verifies the token on every call, so a token it rejects leaves the agent without
   model and tools.
 - **Try it.** Start the Python agent (`uv run agent-layers-pydantic-ai` in `runtimes/pydantic-ai`, with
-  `AGENT_FILE`), then `npx agent-layers gateway --profile polyglot` in `examples/minimal`. The end-to-end test runs
+  `AGENT_FILE`), then `npm run gateway -- --profile polyglot` in `examples/minimal`. The end-to-end test runs
   both: `node --test runtimes/pydantic-ai/test-e2e.mjs`.
 
 ## Reference adapters

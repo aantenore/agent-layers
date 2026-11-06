@@ -356,6 +356,8 @@ for (const file of markdown) {
     { re: /\bAnthropic\b(?! Messages|-compatible)/, msg: 'Anthropic outside the API name' },
     { re: /\bAI[- ]assistants?\b/i, msg: '"AI assistant"' },
     { re: /\bcoding[- ]agents?\b/i, msg: '"coding agent"' },
+    // The unscoped npm name and its binary belong to an unrelated package: commands go through npm scripts or the scope.
+    { re: /\bnpx agent-layers [a-z-]/, msg: '`npx agent-layers <command>` (use `npm run <script>` or `npx @agent-layers/cli <command>`)' },
   ];
   for (const file of texts) {
     lines(file).forEach((line, i) => {

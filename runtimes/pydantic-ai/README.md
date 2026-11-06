@@ -49,7 +49,7 @@ AGENT_FILE=../../examples/minimal/agents/assistant.md uv run agent-layers-pydant
 
 # another shell
 cd examples/minimal
-npx agent-layers gateway --profile polyglot
+npm run gateway -- --profile polyglot
 
 # a third shell: an A2A message to the gateway, answered by the Python agent
 curl -s localhost:8787/a2a/assistant -H 'Authorization: Bearer dev-token' -H 'Content-Type: application/json' \

@@ -109,7 +109,7 @@ The same claim, one slot at a time, is re-runnable: [the layer swap matrix](swap
 
 ## Results
 
-### After 1.0: hosted model and Pydantic AI faults
+### After spec language 1.0 (packages 0.1.x, 2026-10-31): hosted model and Pydantic AI faults
 
 Two runs on 2026-10-31, `KEYCLOAK_PORT=18080`, `OPENAPI_MCP_PORT=8091`, gateway on port 8799, tool question as alice,
 one run per cell. Run A: `node --env-file=.env --conditions=@agent-layers/source scripts/slice.mjs --only pilot,production --minimal
@@ -150,7 +150,7 @@ All four faults were attributed to the expected layer, as on reinloop. Checks in
 checks passed, `production-basic` refused by the readiness gate, no credential / foreign `Origin` / foreign `Host`
 401 / 403 / 403, and no caller token, gateway secret or hosted key in any process output or telemetry file.
 
-### After 1.0: minimal re-run
+### After spec language 1.0 (packages 0.1.x, 2026-10-31): minimal re-run
 
 `node --conditions=@agent-layers/source scripts/slice.mjs --only pilot,production --minimal`, 2026-10-31, model group `fast`
 (`lfm2.5:8b` on the host Ollama), `KEYCLOAK_PORT=18080`, `OPENAPI_MCP_PORT=8091`, gateway on port 8799, Keycloak
@@ -191,7 +191,7 @@ Faults, production, reinloop, one at a time:
 
 All four faults were attributed to the expected layer.
 
-### Before 1.0: full matrix
+### Before spec language 1.0: full matrix
 
 The smoke questions run as alice, one run each: **tool** "Convert 100 C to Fahrenheit." (expects 212), **knowledge**
 "When does the first Larkspur ferry leave Quillmere?" (expects 07:15, a fact found only in the knowledge folder),
@@ -232,7 +232,7 @@ Its tokens are still on the gateway's `chat` spans (1084 for the pilot tool run)
 Quality against latency: on the tool question, qwen3:4b (reasoning) took 44.5 s and 4128 tokens. lfm2.5:8b took
 6.8 s and 1451 tokens. Both answered correctly. The reasoning model is not needed for these questions.
 
-### Production gate and gateway mode (before 1.0)
+### Production gate and gateway mode (before spec language 1.0)
 
 | Check | Result |
 |---|---|
@@ -247,7 +247,7 @@ Quality against latency: on the tool question, qwen3:4b (reasoning) took 44.5 s 
 ## Failure injection and attribution
 
 Before 1.0: production, one fault at a time, on reinloop and on the Pydantic AI agent (the run after 1.0, on reinloop
-only, is under [Results](#after-10-minimal-re-run)). After each run the driver takes the
+only, is under [Results](#after-spec-language-10-packages-01x-2026-10-31-minimal-re-run)). After each run the driver takes the
 records of that run's trace from the gateway's telemetry file and scores them with `layer-signals`. The attributed
 layer is the worst-scored layer other than the harness; the harness is blamed only when nothing else is.
 
@@ -305,8 +305,8 @@ No judge model was run (`judge-eval`). It grades answers, not layers, and would 
 
 ## Not covered yet
 
-- Statistical weight: one run per question and per fault, three questions before 1.0, one after.
-- After 1.0 only minimal runs: no knowledge or plain question, no basic-runtime cell, no qwen3:4b comparison. Faults
+- Statistical weight: one run per question and per fault, three questions before spec language 1.0, one after.
+- After spec language 1.0 only minimal runs: no knowledge or plain question, no basic-runtime cell, no qwen3:4b comparison. Faults
   ran on reinloop and on Pydantic AI, each with the local model.
 - Prompt-injection detection: LLM Guard was not run, and Langfuse was skipped.
 - The hosted model: configured through `.env` (1 USD LiteLLM budget, `maxCostUsd` 0.05 per reinloop run as a second

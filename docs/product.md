@@ -31,8 +31,10 @@ which layer failed.
 - **One language, standards at the edges.** The data that crosses a port is written in one language owned by the
   project, so a model, a tool or a policy adapter never has to know another adapter's standard. Vocabularies and
   mappings are configuration; see [spec/language.md](../spec/language.md).
-- **Any runtime, any language.** The spec is language neutral (JSON Schemas and port pages). The runtime is an
-  adapter; a runtime in another language uses the gateway's standard endpoints or a remote runtime adapter.
+- **Any runtime; other languages over the gateway.** The SDK is TypeScript. The spec is language neutral (JSON
+  Schemas and port pages) and the runtime is an adapter, so a runtime or an app in another language reaches the stack
+  through the gateway's standard endpoints (OpenAI-compatible, MCP, A2A, CloudEvents) or runs behind the `a2a`
+  runtime adapter; [runtimes/pydantic-ai](../runtimes/pydantic-ai) is a Python example (not published).
 
 ## The developer journey
 
@@ -94,11 +96,17 @@ flowchart TB
 
 ## How it compares
 
-| | Scope | Runtime | Language |
-|---|---|---|---|
-| Frameworks with their own integration layers (LangChain, LlamaIndex, Haystack, Semantic Kernel / Agent Framework, Spring AI, Genkit) | Many integrations, mostly models, knowledge and tools | The framework owns the loop | One language each (two for some) |
-| Model gateways, MCP gateways | One or two layers (model access, or tool access) | Any | Any, over HTTP |
-| agent-layers | All eleven layers, with identity and guardrails applied to model and tool traffic | Replaceable adapter | Any, through a language-neutral spec |
+Neighbours as of 2026-11; their scope changes quickly, so check their own documentation before deciding.
 
-agent-layers can use all of these: a framework as a runtime adapter, a gateway behind the model port. What it adds
-is the composition across layers and the path from prototype to production without changing the agent.
+| | Scope | Runtime | Language | Pick it when |
+|---|---|---|---|---|
+| Frameworks with their own integration layers (LangChain, LlamaIndex, Haystack, Semantic Kernel / Agent Framework, Spring AI, Genkit) | Many integrations, mostly models, knowledge and tools | The framework owns the loop | One language each (two for some) | You want one framework end to end and its integrations are enough |
+| Agent SDKs (Mastra, VoltAgent, OpenAI Agents SDK, Google ADK) | The agent loop, tools, memory, tracing | The SDK owns the loop | TypeScript or Python | You want the fastest path to a working loop; with agent-layers they are runtime-adapter targets |
+| Llama Stack | One API per capability (inference, safety, memory, tools, eval) with provider plug-ins | Its own agents API | Server over HTTP, client SDKs in several languages | You want one server API and its provider ecosystem |
+| Amazon Bedrock AgentCore | Managed runtime, memory, identity, gateway and observability | Any framework, hosted | Any | You run on AWS and want the layers as managed services |
+| Traffic gateways (agentgateway, Traefik Hub, model gateways such as LiteLLM, MCP gateways) | One or two layers: model, tool or agent traffic, with policy on the wire | Any | Any, over HTTP | You govern traffic only; one can sit in front of or behind agent-layers as an adapter |
+| agent-layers | All eleven layers, with identity and guardrails applied to model and tool traffic, a profile ladder with a readiness gate, per-port conformance suites and evaluation attributed to a layer | Replaceable adapter | TypeScript SDK; other languages as runtimes or callers through the gateway (OpenAI-compatible, MCP, A2A, CloudEvents) | You want open, self-hosted composition and to move each layer from prototype to company systems in config |
+
+agent-layers can use all of these: a framework or an SDK as a runtime adapter, a gateway behind the model port or in
+front of the stack. What it adds is the composition across layers and the path from prototype to production without
+changing the agent.
