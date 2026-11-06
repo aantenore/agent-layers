@@ -20,7 +20,7 @@
   "dependencies": {
     "@agent-layers/core": "^{{version}}",
     "@agent-layers/adapters": "^{{version}}",
-    "reinloop": "^0.3.0"
+    "reinloop": "^0.3.2"
   },
   "devDependencies": {
     "@agent-layers/cli": "^{{version}}"

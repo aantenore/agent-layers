@@ -2,7 +2,7 @@
 
 Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released with the same version. See [RELEASING.md](RELEASING.md).
 
-## Unreleased
+## 0.4.2 - 2026-11-06
 
 ### Fixed
 
@@ -77,6 +77,13 @@ Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released w
   index (`docs/README.md`); a Troubleshooting section in the guide; a comparison with Llama Stack, Bedrock AgentCore,
   traffic gateways and agent SDKs, and no "any language" claim for the SDK. npm keywords for MCP, A2A,
   OpenTelemetry, guardrails and gateways on every package.
+
+### Changed
+
+- The `reinloop` runtime needs reinloop 0.3.2 (optional peer and development range `^0.3.2`; the `init` template and
+  `examples/minimal` follow). A runtime `budget` that does not set `maxTurns` now keeps reinloop's turn limit of 50
+  instead of lifting it, so a budget with only `maxCostUsd` still stops a model that never finishes, priced or not.
+  `budget.maxTurns: "unbounded"` lifts it: the adapter passes it to reinloop as no limit instead of leaving it out.
 
 ## 0.4.1 - 2026-11-03
 

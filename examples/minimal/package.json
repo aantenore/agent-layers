@@ -18,11 +18,11 @@
     "deploy": "agent-layers deploy --profile production"
   },
   "dependencies": {
-    "@agent-layers/core": "^0.4.1",
-    "@agent-layers/adapters": "^0.4.1",
-    "reinloop": "^0.3.0"
+    "@agent-layers/core": "^0.4.2",
+    "@agent-layers/adapters": "^0.4.2",
+    "reinloop": "^0.3.2"
   },
   "devDependencies": {
-    "@agent-layers/cli": "^0.4.1"
+    "@agent-layers/cli": "^0.4.2"
   }
 }
