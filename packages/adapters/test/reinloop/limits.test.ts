@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AdapterRegistry, compose, noMappings, noopTelemetry, resolveProfile, type CallContext, type StackConfig } from '@agent-layers/core';
+import { AdapterRegistry, compose, defineAdapter, noMappings, noopTelemetry, PORT_VERSIONS, resolveProfile, type CallContext, type ModelPort, type StackConfig } from '@agent-layers/core';
 import { adapter as functions, defineTool } from '@agent-layers/adapters/functions';
 import { adapter as mockModel } from '@agent-layers/adapters/mock-model';
 import { adapter, type ReinloopOptions } from '../../src/reinloop/index.ts';
+import { callReply, stack, textReply } from './helpers.ts';
 
 const actx = { name: 'runtime', env: {}, cwd: process.cwd(), telemetry: noopTelemetry };
 const add = defineTool({
@@ -26,7 +27,7 @@ async function run(runtime: ReinloopOptions, input = 'add 2 and 3') {
   try { return await (await s.agent('calc')).run(input); } finally { await s.close(); }
 }
 
-test('the defaults let a run complete; unbounded settings are left to reinloop as absent', async () => {
+test('the defaults let a run complete; unbounded settings lift the limits', async () => {
   assert.equal((await run({})).output, 'sum=5');
   const open = await run({ budget: { maxTurns: 'unbounded', maxCostUsd: 'unbounded' }, tools: { timeoutMs: 'unbounded', concurrency: 2 } });
   assert.equal(open.status, 'completed');
@@ -63,4 +64,34 @@ test('limits from ${env:...} are coerced to numbers; out-of-range values are rej
   await assert.rejects(make({ tools: { concurrency: 'unbounded' } }), /concurrency/);
   await assert.rejects(make({ tools: { concurrency: 0 } }), /concurrency/);
   await assert.rejects(make({ tools: { timeoutMs: 0 } }), /timeoutMs/);
+});
+
+/** Model that calls a tool on every turn, and answers only after `answerAfter` turns. */
+function loopingModel(answerAfter = Infinity) {
+  let turns = 0;
+  const model = defineAdapter<'ModelPort'>({
+    layer: 'llm', port: 'ModelPort', name: 'test-loop', direction: 'outbound', maps: { technology: 'test' },
+    portVersion: PORT_VERSIONS.ModelPort, tiers: ['prototype'],
+    create: (_o, ctx): ModelPort => ({
+      name: ctx.name,
+      chat: async () => (++turns > answerAfter ? textReply('done') : callReply([{ type: 'call', id: `c${turns}`, tool: 'math__add', args: { a: '1', b: '2' } }])),
+    }),
+  });
+  return { model, turns: () => turns };
+}
+
+async function loop(runtime: ReinloopOptions, answerAfter?: number) {
+  const { model, turns } = loopingModel(answerAfter);
+  const { s } = await stack(runtime, { layers: { model: { adapter: 'test-loop' } } }, { adapters: [model] });
+  try { return { result: await (await s.agent('calc')).run('loop'), turns: turns() }; } finally { await s.close(); }
+}
+
+test('a budget without maxTurns keeps the turn limit of 50; an unbounded maxTurns lifts it', async () => {
+  const capped = await loop({ budget: { maxCostUsd: 0.5 } });
+  assert.equal(capped.result.status, 'stopped');
+  assert.deepEqual(capped.result.reason, { code: 'limit', layer: 'harness', by: 'reinloop', detail: 'maxTurns' });
+  assert.equal(capped.turns, 50);
+  const open = await loop({ budget: { maxTurns: 'unbounded', maxCostUsd: 0.5 } }, 60);
+  assert.equal(open.result.status, 'completed');
+  assert.equal(open.turns, 61);
 });

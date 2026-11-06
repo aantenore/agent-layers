@@ -16,7 +16,7 @@ export { mapEvent } from './events.ts';
 
 /** Configurable limits; see docs/limits.md. Paths are nested objects of `options`, so the keys are short names. */
 export const LIMITS = defineLimits({
-  maxTurns: { path: 'options.budget.maxTurns', default: null, fallback: '50 when `budget` is absent (reinloop default), none otherwise', unit: 'count', min: 1, unbounded: 'fail', safe: { max: 100 } },
+  maxTurns: { path: 'options.budget.maxTurns', default: null, fallback: '50 (reinloop default), also under a `budget` that does not set it', unit: 'count', min: 1, unbounded: 'fail', safe: { max: 100 } },
   maxToolCalls: { path: 'options.budget.maxToolCalls', default: null, fallback: 'no limit', unit: 'count', min: 1, unbounded: 'warn' },
   maxInputTokens: { path: 'options.budget.maxInputTokens', default: null, fallback: 'no limit', unit: 'tokens', min: 1, unbounded: 'warn' },
   maxOutputTokens: { path: 'options.budget.maxOutputTokens', default: null, fallback: 'no limit', unit: 'tokens', min: 1, unbounded: 'warn' },
@@ -69,7 +69,7 @@ export interface ToolOptions {
 }
 
 export interface ReinloopOptions {
-  /** reinloop budgets; the run ends `stopped` with reason `{ code: 'limit', layer: 'harness', by: 'reinloop', detail: '<limit>' }`. Default `{ maxTurns: 50 }`, the others unbounded. */
+  /** reinloop budgets; the run ends `stopped` with reason `{ code: 'limit', layer: 'harness', by: 'reinloop', detail: '<limit>' }`. Default `{ maxTurns: 50 }`, the others unbounded; a budget without `maxTurns` keeps the 50. */
   budget?: BudgetOptions;
   compaction?: CompactionOptions;
   /** Prices per model id (USD per million tokens), over reinloop's built-in table; used for `costUsd` and `maxCostUsd`. */
@@ -81,8 +81,9 @@ export interface ReinloopOptions {
 const BUDGET_KEYS = ['maxTurns', 'maxToolCalls', 'maxInputTokens', 'maxOutputTokens', 'maxTotalTokens', 'maxCostUsd', 'maxDurationMs'] as const;
 
 /**
- * Budgets to enforce, or undefined to keep reinloop's default (`{ maxTurns: 50 }`). Only the configured ones are passed;
- * an unbounded one is left out, as reinloop reads absence as no limit.
+ * Budgets to enforce, or undefined to keep reinloop's default (`{ maxTurns: 50 }`). Only the configured ones are passed.
+ * reinloop keeps its turn limit when `maxTurns` is absent, so an unbounded `maxTurns` is passed as Infinity; any other
+ * unbounded limit is left out, as reinloop reads its absence as no limit.
  */
 function budgetOf(o?: BudgetOptions): Budget | undefined {
   if (!o) return undefined;
@@ -90,7 +91,7 @@ function budgetOf(o?: BudgetOptions): Budget | undefined {
   for (const key of BUDGET_KEYS) {
     if (o[key] === undefined) continue;
     const v = limitValue(LIMITS[key], o[key]);
-    if (Number.isFinite(v)) out[key] = v;
+    if (Number.isFinite(v) || key === 'maxTurns') out[key] = v;
   }
   return out;
 }

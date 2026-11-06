@@ -160,7 +160,7 @@ Ordered by layer. Set them under the adapter's `options`; an adapter not listed 
 
 | Setting | Default | Accepted | Safe range | On production | Why |
 |---|---|---|---|---|---|
-| `options.budget.maxTurns` | — | 1–∞ or unbounded | 1–100 | fail if unbounded; warn outside safe range | Stops an agent that keeps calling the model without finishing; reinloop applies 50 when `budget` is absent. |
+| `options.budget.maxTurns` | — | 1–∞ or unbounded | 1–100 | fail if unbounded; warn outside safe range | Stops an agent that keeps calling the model without finishing; reinloop applies 50 when `budget` is absent or does not set it. |
 | `options.budget.maxToolCalls` | — | 1–∞ or unbounded | — | warn if unbounded | Caps the tool calls of one run. |
 | `options.budget.maxInputTokens` | — | 1–∞ or unbounded | — | warn if unbounded | Caps the prompt tokens a run may spend. |
 | `options.budget.maxOutputTokens` | — | 1–∞ or unbounded | — | warn if unbounded | Caps the completion tokens a run may spend. |

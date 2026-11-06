@@ -87,14 +87,15 @@ model request.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `budget` | object | `{ maxTurns: 50 }` (extra limits on top of the stack's `limits.run`; the first reached stops the run) | `maxTurns`, `maxToolCalls`, `maxInputTokens`, `maxOutputTokens`, `maxTotalTokens`, `maxCostUsd`, `maxDurationMs`; the ones not listed have no limit |
+| `budget` | object | `{ maxTurns: 50 }` (extra limits on top of the stack's `limits.run`; the first reached stops the run) | `maxTurns`, `maxToolCalls`, `maxInputTokens`, `maxOutputTokens`, `maxTotalTokens`, `maxCostUsd`, `maxDurationMs`; the ones not listed have no limit, except `maxTurns`, which stays 50 |
 | `compaction` | object | none | `strategy` (`window` or `summarize`), `thresholdTokens` (required), `keepFirst`, `keepLast`, `maxTokens`, `prompt` |
 | `pricing` | object | built-in table | Per model id: `inputPerMTok`, `outputPerMTok`, `cacheReadPerMTok` (USD per million tokens) |
 | `tools` | object | reinloop defaults | `concurrency` (8), `timeoutMs` (none), `maxResultChars` (32000) |
 
 Limits accept `${env:NAME}`. The budgets, `tools.timeoutMs` and `tools.maxResultChars` also accept `"unbounded"`;
 `agent-layers check` fails it for `maxTurns` and `tools.maxResultChars` on the production tier and warns for the
-others. Without `budget`, reinloop's default `{ maxTurns: 50 }` applies; a `budget` limits only what it lists. Ranges and checks: [docs/limits.md](../../../../docs/limits.md).
+others. Without `budget`, reinloop's default `{ maxTurns: 50 }` applies; a `budget` that does not set `maxTurns`
+keeps it (reinloop 0.3.2 or later), and `maxTurns: "unbounded"` lifts it. Ranges and checks: [docs/limits.md](../../../../docs/limits.md).
 
 ```json
 {
@@ -110,7 +111,7 @@ others. Without `budget`, reinloop's default `{ maxTurns: 50 }` applies; a `budg
 }
 ```
 
-`reinloop` from npm (`^0.3.0`) is an optional peer dependency of `@agent-layers/adapters`: install it next to it
+`reinloop` from npm (`^0.3.2`) is an optional peer dependency of `@agent-layers/adapters`: install it next to it
 (`npm install reinloop`) to use this adapter.
 
 ## Tests
