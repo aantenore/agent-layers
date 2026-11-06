@@ -1,5 +1,5 @@
 import { assembleDeltas, callsOf, type CachePort, type ModelDelta, type ModelPort, type ModelReply, type ModelRequest, type RouterPort } from '@agent-layers/core';
-import { Checks, testContext } from '../check.ts';
+import { Checks, MODEL_TIMEOUT_LIMIT, testContext } from '../check.ts';
 import { conforms } from '../schemas.ts';
 
 export interface ModelFixtures {
@@ -9,6 +9,7 @@ export interface ModelFixtures {
   toolCall?: boolean;
   /** Check that an aborted signal rejects (default true). */
   abort?: boolean;
+  /** Time limit of each model call (default `limits.check.modelTimeoutMs`). */
   timeoutMs?: number;
 }
 
@@ -17,7 +18,9 @@ const userMessage = (text: string): ModelRequest['messages'][number] => ({ role:
 export async function checkModel(port: ModelPort, f: ModelFixtures = {}, c = new Checks()): Promise<Checks> {
   const model = f.model ?? 'test';
   const req: ModelRequest = { model, messages: [userMessage(f.prompt ?? 'Reply with the single word OK.')], settings: { maxOutputTokens: 64 } };
-  const res = await c.attempt('chat', () => port.chat(req, testContext()), f.timeoutMs);
+  // A model call waits for a model to answer: it gets the model time limit, and the signal that ends it when that runs out.
+  const timeoutMs = f.timeoutMs ?? c.modelTimeoutMs;
+  const res = await c.attempt('chat', (signal) => port.chat(req, testContext({ signal })), timeoutMs, MODEL_TIMEOUT_LIMIT);
   if (res) {
     c.all(conforms('model-reply', res), 'model reply');
     c.produced('chat', res);
@@ -26,11 +29,11 @@ export async function checkModel(port: ModelPort, f: ModelFixtures = {}, c = new
     c.expect((res.finish === 'tools') === parts.some((p) => p.type === 'call'), 'chat: finish must be "tools" exactly when the reply has call parts');
   }
   if (port.stream) {
-    const deltas = await c.attempt('stream', async () => {
+    const deltas = await c.attempt('stream', async (signal) => {
       const out: ModelDelta[] = [];
-      for await (const d of port.stream!(req, testContext())) out.push(d);
+      for await (const d of port.stream!(req, testContext({ signal }))) out.push(d);
       return out;
-    }, f.timeoutMs);
+    }, timeoutMs, MODEL_TIMEOUT_LIMIT);
     if (deltas) {
       c.expect(deltas.length > 0, 'stream: yielded no deltas');
       deltas.forEach((d, i) => c.all(conforms('model-delta', d), `stream delta[${i}]`));
@@ -41,11 +44,11 @@ export async function checkModel(port: ModelPort, f: ModelFixtures = {}, c = new
     }
   } else c.skip('stream: not implemented (optional)');
   if (f.toolCall) {
-    const tooled: ModelReply | undefined = await c.attempt('chat with tools', () => port.chat({
+    const tooled: ModelReply | undefined = await c.attempt('chat with tools', (signal) => port.chat({
       ...req, messages: [userMessage('What time is it? Use the tool.')],
       tools: [{ name: 'get_time', description: 'Current time', params: { type: 'object', properties: {} } }],
       toolMode: 'required',
-    }, testContext()), f.timeoutMs);
+    }, testContext({ signal })), timeoutMs, MODEL_TIMEOUT_LIMIT);
     if (tooled) {
       c.produced('chat with tools', tooled);
       const call = callsOf(tooled.message)[0];
@@ -69,7 +72,7 @@ export interface RouterFixtures { requests?: ModelRequest[]; expect?: string[] }
 export async function checkRouter(port: RouterPort, f: RouterFixtures = {}, c = new Checks()): Promise<Checks> {
   const reqs = f.requests ?? [{ model: 'default', messages: [userMessage('hello')] }];
   for (const [i, r] of reqs.entries()) {
-    const m = await c.attempt(`select #${i}`, () => port.select(r, testContext()));
+    const m = await c.attempt(`select #${i}`, (signal) => port.select(r, testContext({ signal })));
     if (m === undefined) continue;
     c.expect(typeof m === 'string' && m.length > 0, `select #${i}: must return a non-empty model id`);
     if (f.expect?.[i] !== undefined) c.expect(m === f.expect[i], `select #${i}: expected "${f.expect[i]}", got "${m}"`);

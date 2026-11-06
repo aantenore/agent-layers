@@ -73,7 +73,7 @@ the runtime with the caller's identity, so guards, authorization and telemetry a
 | `agents` | string[] | all | Agents served |
 | `defaultAgent` | string | first served | Agent of `/.well-known/agent-card.json` |
 | `descriptions` | object | `Agent <name>` | Description per agent in its card |
-| `version` | string | `0.1.0` | Agent version in the cards |
+| `version` | string | the package version | Agent version in the cards |
 | `provider` | `{ organization, url }` | none | Provider in the cards |
 | `maxTasksPerCaller` | integer | `100` | Tasks per caller (and of the anonymous pool); at most a quarter of `maxTasks` |
 | `maxTasks` | integer | `10000` | Tasks kept in total |
@@ -114,6 +114,14 @@ agent by):
 | `auth-required` | `waiting` | `needs_auth` |
 | `failed` | `failed` | `error` |
 | any other state | `failed` | `error`, the native state in `ext["a2a.state"]` |
+| no answer, an HTTP or JSON-RPC error | `failed` | `error`, detail `remote agent call failed`; the class of the failure in `ext["a2a.error"]` and on the span (`ECONNREFUSED`, `http_401`, `rpc_-32601`), never its text |
+
+Readiness: the instance exposes `probe()`, which `agent-layers check` runs before the conformance suite. It fetches
+the agent card without a credential: the one at `url` when `url` is a card, which must offer an interface for the
+configured version; otherwise (`url` is the endpoint, or `endpoint` is set) the host must answer a request for the
+card under the endpoint, with any status. It rejects with the host and the cause when nothing answers:
+`remote agent unreachable (agents.example.com): ECONNREFUSED`. On the production tier that fails the row; below it
+the row is skipped.
 
 Run bounds: each message carries the [bounds extension](../../../../spec/extensions/bounds-v1.md) (header
 `A2A-Extensions`, `message.extensions` and `message.metadata[<uri>]`) with what is left of the run's bounds, from
@@ -173,4 +181,4 @@ its tasks, so a stack calling another stack accounts for the remote run. Malform
 Trace and credentials: the `traceparent` and `tracestate` headers carry the active span's trace context (else the one
 the run started with) unchanged. The bearer token is requested for the caller of the run.
 
-`ext` keys written: `a2a.state` (declared in `ext.produces`).
+`ext` keys written: `a2a.state`, `a2a.error` (declared in `ext.produces`).

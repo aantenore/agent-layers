@@ -275,3 +275,36 @@ describe('single flight and failures', () => {
     assert.throws(() => createOidcCredentials({ tokenEndpoint: 'https://x', clientId: 'x', clientSecret: 'y', mode: 'auto' as 'self' }), /mode/);
   });
 });
+
+describe('readiness probe', () => {
+  test('discovers the token endpoint from the issuer, or reaches an explicit one without a credential', async () => {
+    const s = await server({ '/token': (req, res) => { res.writeHead(req.method === 'GET' ? 405 : 200, { 'content-type': 'application/json' }).end(JSON.stringify(req.method === 'GET' ? {} : { access_token: 'tok', token_type: 'Bearer', expires_in: 300 })); } });
+    s.routes['/r/.well-known/openid-configuration'] = json(200, { issuer: `${s.url}/r`, token_endpoint: `${s.url}/token` });
+    try {
+      const discovered = createOidcCredentials({ issuer: `${s.url}/r`, clientId: 'a', clientSecret: 'b', mode: 'self' });
+      await discovered.probe!();
+      assert.equal(s.count('/r/.well-known/openid-configuration'), 1);
+      assert.equal(s.count('/token'), 0, 'no token is requested');
+      await discovered.token('x');
+      assert.equal(s.count('/r/.well-known/openid-configuration'), 1, 'the endpoint the probe discovered is kept');
+      await createOidcCredentials(base(`${s.url}/token`)).probe!({ signal: new AbortController().signal });
+      assert.equal(s.requests.at(-1)?.method, 'GET', 'an explicit endpoint answers a request without a credential');
+    } finally {
+      await s.close();
+    }
+  });
+
+  test('names the provider host and the cause when it does not answer or answers a server error', async () => {
+    const gone = await server({});
+    const port = new URL(gone.url).port;
+    await gone.close();
+    await assert.rejects(createOidcCredentials(base(`http://127.0.0.1:${port}/token`, { timeoutMs: 2000 })).probe!(), { message: `127.0.0.1:${port}: token endpoint: request failed (ECONNREFUSED)` });
+    await assert.rejects(createOidcCredentials({ issuer: `http://127.0.0.1:${port}/r`, clientId: 'a', clientSecret: 'b', mode: 'on-behalf-of', timeoutMs: 2000 }).probe!(), { message: `127.0.0.1:${port}: OIDC discovery: request failed (ECONNREFUSED)` });
+    const down = await server({ '/token': (_req, res) => { res.writeHead(503).end(); } });
+    try {
+      await assert.rejects(createOidcCredentials(base(`${down.url}/token`)).probe!(), { message: `127.0.0.1:${new URL(down.url).port}: token endpoint: HTTP 503` });
+    } finally {
+      await down.close();
+    }
+  });
+});

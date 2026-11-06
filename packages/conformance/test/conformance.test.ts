@@ -151,6 +151,32 @@ test('an on-behalf-of credential adapter needs a caller and never falls back to 
   assert.ok(leaky.failures.some((f) => f.includes('token without a caller: expected a rejection')));
 });
 
+test('a probe that times out is aborted through its signal, and the message names the limit to raise', async () => {
+  let aborted = false;
+  const stuck: ModelPort = {
+    chat: (_req, ctx) => new Promise((_, reject) => ctx.signal?.addEventListener('abort', () => { aborted = true; reject(ctx.signal!.reason); }, { once: true })),
+  };
+  const started = Date.now();
+  const r = await conformance('ModelPort', stuck, { abort: false }, { modelTimeoutMs: 50 });
+  assert.ok(Date.now() - started < 1000, 'the suite returns with the timeout, not with the probe');
+  assert.ok(aborted, 'the probe saw its signal abort');
+  assert.deepEqual(r.failures, ['chat: threw timed out after 50 ms (raise limits.check.modelTimeoutMs)']);
+  const slow: KnowledgePort = { search: (q) => new Promise((resolve, reject) => { const t = setTimeout(() => resolve([]), 5000); q.signal?.addEventListener('abort', () => { clearTimeout(t); reject(q.signal!.reason); }); }) };
+  const k = await conformance('KnowledgePort', slow, {}, { timeoutMs: 30 });
+  assert.ok(k.failures.some((f) => f === 'search: threw timed out after 30 ms (raise limits.check.timeoutMs)'), k.failures.join('\n'));
+});
+
+test('a report counts the probes that reached the instance: rejections alone are not an exercise', async () => {
+  const idp: IdentityPort = { verify: async (c) => { if (c !== 'good') throw new Error('invalid'); return { id: 'alice', kind: 'user', roles: [], scopes: [], credential: c }; } };
+  const unexercised = await conformance('IdentityPort', idp);
+  assert.equal(unexercised.ok, true);
+  assert.equal(unexercised.attempts, 0);
+  assert.deepEqual(unexercised.skipped, ['verify valid: needs a caller token (--token)']);
+  const exercised = await conformance('IdentityPort', idp, { valid: 'good' });
+  assert.equal(exercised.attempts, 1);
+  assert.ok((await conformance('CachePort', goodCache())).attempts > 1);
+});
+
 test('identity: the caller validates without its credential and carries the expected id', async () => {
   const idp = (over: object = {}): IdentityPort => ({
     verify: async (c) => { if (c !== 'good') throw new Error('invalid'); return { id: 'alice', kind: 'user', roles: [], scopes: [], credential: c, ...over }; },

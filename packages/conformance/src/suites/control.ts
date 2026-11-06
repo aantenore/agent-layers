@@ -6,8 +6,9 @@ export interface IdentityFixtures { valid?: string; expectId?: string; invalid?:
 
 export async function checkIdentity(port: IdentityPort, f: IdentityFixtures = {}, c = new Checks()): Promise<Checks> {
   for (const bad of f.invalid ?? ['', 'not-a-credential']) await c.rejects(`verify(${JSON.stringify(bad)})`, () => port.verify(bad));
-  if (!f.valid) { c.skip('verify valid: needs a valid credential fixture'); return c; }
-  const caller = await c.attempt('verify valid', () => port.verify(f.valid!));
+  // Without a credential to verify, only the rejections above ran: the report then counts no attempt, so it is not an ok.
+  if (!f.valid) { c.skip(`verify valid: ${NEEDS_CALLER}`); return c; }
+  const caller = await c.attempt('verify valid', (signal) => port.verify(f.valid!, { signal }));
   if (caller) {
     const { credential: _credential, ...pub } = caller;
     c.all(conforms('caller', pub), 'caller');
@@ -34,7 +35,7 @@ export async function checkCredentials(port: CredentialPort, f: CredentialFixtur
     await c.rejects('token without a caller', () => port.token(audience));
     if (!f.caller?.credential) { c.skip(`token: ${NEEDS_CALLER}`); return c; }
   }
-  const token = await c.attempt('token', () => port.token(audience, f.caller ? { caller: f.caller } : {}));
+  const token = await c.attempt('token', (signal) => port.token(audience, { ...(f.caller ? { caller: f.caller } : {}), signal }));
   c.expect(typeof token === 'string' && token.length > 0, 'token: must resolve to a non-empty string');
   return c;
 }
@@ -50,23 +51,23 @@ export const sampleQuestion = (over: { tool?: string; risk?: 'read' | 'write' | 
 export interface AuthorizationFixtures { allow?: AccessQuestion[]; deny?: AccessQuestion[] }
 
 export async function checkAuthorization(port: AuthorizationPort, f: AuthorizationFixtures = {}, c = new Checks()): Promise<Checks> {
-  const sample = await c.attempt('evaluate', () => port.evaluate(sampleQuestion()));
+  const sample = await c.attempt('evaluate', (signal) => port.evaluate(sampleQuestion(), { signal }));
   if (sample) {
     c.all(conforms('access-decision', sample), 'decision');
     c.produced('evaluate', sample);
   }
   for (const [i, q] of (f.allow ?? []).entries()) {
-    const d = await c.attempt(`allow #${i}`, () => port.evaluate(q));
+    const d = await c.attempt(`allow #${i}`, (signal) => port.evaluate(q, { signal }));
     c.expect(d?.allowed === true, `allow #${i}: expected allowed true`);
     c.produced(`allow #${i}`, d);
   }
   for (const [i, q] of (f.deny ?? []).entries()) {
-    const d = await c.attempt(`deny #${i}`, () => port.evaluate(q));
+    const d = await c.attempt(`deny #${i}`, (signal) => port.evaluate(q, { signal }));
     c.expect(d?.allowed === false, `deny #${i}: expected allowed false`);
     c.produced(`deny #${i}`, d);
   }
   const anonymous: AccessQuestion = { ...sampleQuestion({ risk: 'read' }), caller: { kind: 'anonymous', id: 'anonymous', roles: [], scopes: [] } };
-  const decision = await c.attempt('evaluate anonymous', () => port.evaluate(anonymous));
+  const decision = await c.attempt('evaluate anonymous', (signal) => port.evaluate(anonymous, { signal }));
   if (decision) {
     c.expect(decision.allowed !== true, 'anonymous: an unauthenticated caller must be denied');
     c.produced('evaluate anonymous', decision);
@@ -167,7 +168,7 @@ export async function checkGuard(port: GuardPort, f: GuardFixtures = {}, c = new
   const stages = port.stages ?? GUARD_STAGES;
   c.expect(stages.every((s) => GUARD_STAGES.includes(s)), `stages: unknown stage in ${stages.join(', ')}`);
   const run = async (s: GuardSample) => {
-    const v = await c.attempt(`check ${s.stage} ${JSON.stringify(s.text.slice(0, 30))}`, () => port.check({ stage: s.stage, text: s.text, agent: 'conformance', runId: 'conformance-run' }));
+    const v = await c.attempt(`check ${s.stage} ${JSON.stringify(s.text.slice(0, 30))}`, (signal) => port.check({ stage: s.stage, text: s.text, agent: 'conformance', runId: 'conformance-run' }, { signal }));
     if (v) {
       c.all(validate(schema('guard-verdict'), v, 'verdict'), `verdict for ${s.stage}`);
       c.produced(`check ${s.stage}`, v);

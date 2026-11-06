@@ -9,6 +9,13 @@ export interface PortBase {
   native?(): unknown;
   /** Release connections, flush buffers. */
   close?(): Promise<void>;
+  /**
+   * Readiness: reaches the service the instance is configured for without changing anything there (an agent card, a
+   * discovery document and key set) and rejects when it does not answer. The message names the host and the cause
+   * class (`ECONNREFUSED`, an HTTP status), never a credential, a URL path or a response body. `agent-layers check`
+   * runs it under `limits.check.timeoutMs` before the conformance probes; absent on adapters with no remote service.
+   */
+  probe?(opts?: { signal?: AbortSignal }): Promise<void>;
 }
 
 /**

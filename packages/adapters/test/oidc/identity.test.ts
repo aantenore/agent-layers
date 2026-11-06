@@ -408,3 +408,39 @@ describe('JWKS cache', () => {
     }
   });
 });
+
+describe('readiness probe', () => {
+  test('reaches discovery and the key set, keeps the keys, and honours jwksUri', async () => {
+    const local = await idp([rs]);
+    try {
+      const v = createOidcIdentity({ issuer: local.issuer, audience: 'agent-runtime' });
+      await v.probe!();
+      assert.equal(local.count('/realms/test/.well-known/openid-configuration'), 1);
+      assert.equal(local.count('/jwks'), 1);
+      assert.equal((await v.verify(signJwt(rs, claims({ iss: local.issuer })))).id, 'u-alice');
+      assert.equal(local.count('/jwks'), 1, 'the keys the probe read serve the verification');
+      const direct = createOidcIdentity({ issuer: local.issuer, audience: 'agent-runtime', jwksUri: `${local.url}/jwks` });
+      await direct.probe!({ signal: new AbortController().signal });
+      assert.equal(local.count('/realms/test/.well-known/openid-configuration'), 1, 'with jwksUri no discovery document is read');
+      assert.equal(local.count('/jwks'), 2);
+    } finally {
+      await local.close();
+    }
+  });
+
+  test('names the issuer host and the cause when the provider does not answer; an abort passes through', async () => {
+    const s = await server({});
+    const port = new URL(s.url).port;
+    await s.close();
+    const unreachable = createOidcIdentity({ issuer: `http://127.0.0.1:${port}/realms/test`, audience: 'agent-runtime', timeoutMs: 2000 });
+    await assert.rejects(unreachable.probe!(), { message: `127.0.0.1:${port}: OIDC discovery: request failed (ECONNREFUSED)` });
+    const local = await idp([rs]);
+    try {
+      local.state.jwksStatus = 503;
+      await assert.rejects(createOidcIdentity({ issuer: local.issuer, audience: 'agent-runtime' }).probe!(), { message: `127.0.0.1:${new URL(local.url).port}: JWKS: HTTP 503` });
+      await assert.rejects(createOidcIdentity({ issuer: local.issuer, audience: 'agent-runtime' }).probe!({ signal: AbortSignal.abort() }), (err: Error) => err.name === 'AbortError');
+    } finally {
+      await local.close();
+    }
+  });
+});

@@ -1,5 +1,5 @@
 import { createMappings, limitValue, MappingError, type Actor, type Caller, type IdentityPort, type LimitValue, type MappingRule, type Mappings } from '@agent-layers/core';
-import { abortable, discover, OidcError, requestJson, secureUrl, type FetchLike, type HttpLimits } from './http.ts';
+import { abortable, discover, OidcError, probeFailure, requestJson, secureUrl, type FetchLike, type HttpLimits } from './http.ts';
 import { candidateKeys, checkAlgorithm, decodeJwt, importKey, verifySignature, type Jwk } from './jwt.ts';
 import { IDENTITY_LIMITS as LIMITS } from './limits.ts';
 
@@ -237,13 +237,13 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
   let inflight: Promise<void> | undefined;
   let jwksUri = opts.jwksUri;
 
-  const load = async () => {
+  const load = async (signal?: AbortSignal) => {
     if (!jwksUri) {
-      const doc = await discover(fetchImpl, opts.issuer, http, opts.allowHttp);
+      const doc = await discover(fetchImpl, opts.issuer, http, opts.allowHttp, signal);
       if (typeof doc.jwks_uri !== 'string') throw new OidcError('config', 'OIDC discovery: no "jwks_uri"');
       jwksUri = secureUrl(doc.jwks_uri, 'jwks_uri', opts.allowHttp).href;
     }
-    const body = await requestJson(fetchImpl, jwksUri, { method: 'GET', ...http, what: 'JWKS' });
+    const body = await requestJson(fetchImpl, jwksUri, { method: 'GET', ...http, what: 'JWKS', ...(signal ? { signal } : {}) });
     if (!Array.isArray(body.keys)) throw new OidcError('response', 'JWKS: no "keys" array');
     keys = (body.keys as unknown[]).filter((k): k is Jwk => !!k && typeof k === 'object' && !Array.isArray(k) && typeof (k as Jwk).kty === 'string');
     fetchedAt = now();
@@ -275,6 +275,14 @@ export function createOidcIdentity(opts: OidcIdentityOptions, hooks: OidcIdentit
   return {
     name,
     native: () => ({ refresh }),
+    /** Readiness: the discovery document (unless `jwksUri` is set) and the key set answer; the keys read are kept. */
+    async probe(popts = {}) {
+      try {
+        await load(popts.signal);
+      } catch (err) {
+        throw probeFailure(err, opts.jwksUri ?? opts.issuer);
+      }
+    },
     async verify(credential, vopts) {
       const jwt = decodeJwt(credential, maxTokenChars);
       const { alg, kid, crit, typ } = jwt.header;

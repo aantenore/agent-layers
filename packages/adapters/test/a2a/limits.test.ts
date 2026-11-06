@@ -47,6 +47,23 @@ test('timeoutMs ends a run whose remote agent does not answer', async () => {
   }
 });
 
+test('an abort during the wait between polls ends the run at once, not after the interval', async () => {
+  const remote = await remoteAgent((n, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(working)));
+  const client = await runtimeFor(remote.url, { pollMs: 10_000 });
+  try {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 50);
+    const started = Date.now();
+    const r = await (await client.agent('assistant')).run('hi', { signal: ac.signal });
+    assert.equal(r.status, 'stopped');
+    assert.equal(r.reason?.code, 'aborted');
+    assert.ok(Date.now() - started < 2000, 'the sleep of 10 s ended with the signal');
+  } finally {
+    await client.close();
+    remote.close();
+  }
+});
+
 test('pollMs sets the wait between GetTask calls', async () => {
   const remote = await remoteAgent((n, res) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(n < 3 ? working : completed('done'))));
   const client = await runtimeFor(remote.url, { pollMs: 10 });

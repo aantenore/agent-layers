@@ -186,6 +186,26 @@ export function isAbort(err: unknown): boolean {
 }
 
 /**
+ * The system error code of an error or of the causes behind it (`ECONNREFUSED`, `ENOTFOUND`, `UND_ERR_CONNECT_TIMEOUT`),
+ * undefined when none carries one. Safe to record where a message is not: it names a class of failure, never a host,
+ * a path or a credential.
+ */
+export function errorCode(err: unknown): string | undefined {
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [err];
+  while (queue.length) {
+    const e = queue.shift();
+    if (!(e instanceof Error) || seen.has(e)) continue;
+    seen.add(e);
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(code)) return code;
+    if (e instanceof AggregateError) queue.push(...e.errors);
+    queue.push(e.cause);
+  }
+  return undefined;
+}
+
+/**
  * The stop reason for an error that ended a run: a guard block, an abort, a timeout, otherwise `error`. `detail` is
  * the error name only, never its message (which can echo inspected content or a backend's credentials).
  */

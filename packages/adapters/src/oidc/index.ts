@@ -8,7 +8,7 @@ export { actorsOf, agentKind, CALLER_RULES, CLAIMS_KEY, clientOf, clientRolesOf,
 export type { OidcIdentityHooks, OidcIdentityOptions, OidcIdentityPort } from './identity.ts';
 export { createOidcCredentials, ACCESS_TOKEN_TYPE, TOKEN_EXCHANGE_GRANT } from './credentials.ts';
 export type { OidcCredentialsHooks, OidcCredentialsOptions, OidcCredentialPort } from './credentials.ts';
-export { OidcError, type FetchLike } from './http.ts';
+export { OidcError, type FetchLike, type OidcErrorCode } from './http.ts';
 export { JWS_ALGORITHMS } from './jwt.ts';
 export { CREDENTIAL_LIMITS, IDENTITY_LIMITS } from './limits.ts';
 

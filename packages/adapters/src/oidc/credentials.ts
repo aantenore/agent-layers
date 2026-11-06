@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { limitValue, type Caller, type CredentialPort, type LimitValue } from '@agent-layers/core';
-import { abortable, discover, OidcError, requestJson, secureUrl, type FetchLike, type HttpLimits } from './http.ts';
+import { abortable, discover, OidcError, probeFailure, reach, requestJson, secureUrl, type FetchLike, type HttpLimits } from './http.ts';
 import { EXP_KEY } from './identity.ts';
 import { unverifiedExpiry } from './jwt.ts';
 import { CREDENTIAL_LIMITS as LIMITS } from './limits.ts';
@@ -103,9 +103,9 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
   const inflight = new Map<string, Promise<Cached>>();
   let endpoint: Promise<string> | undefined = opts.tokenEndpoint ? Promise.resolve(opts.tokenEndpoint) : undefined;
 
-  const tokenEndpoint = () => {
+  const tokenEndpoint = (signal?: AbortSignal) => {
     if (!endpoint) {
-      const p = discover(fetchImpl, opts.issuer!, http, opts.allowHttp).then((doc) => {
+      const p = discover(fetchImpl, opts.issuer!, http, opts.allowHttp, signal).then((doc) => {
         if (typeof doc.token_endpoint !== 'string') throw new OidcError('config', 'OIDC discovery: no "token_endpoint"');
         return secureUrl(doc.token_endpoint, 'token_endpoint', opts.allowHttp).href;
       });
@@ -187,6 +187,18 @@ export function createOidcCredentials(opts: OidcCredentialsOptions, hooks: OidcC
     name,
     requiresCaller: opts.mode === 'on-behalf-of',
     native: () => ({ clear: () => cache.clear() }),
+    /**
+     * Readiness: the token endpoint is discovered from the issuer (and kept), or, when set explicitly, answers a
+     * request without a credential with any status but a server error. No token is requested.
+     */
+    async probe(popts = {}) {
+      try {
+        if (opts.tokenEndpoint) await reach(fetchImpl, opts.tokenEndpoint, { timeoutMs: http.timeoutMs, what: 'token endpoint', ...(popts.signal ? { signal: popts.signal } : {}) });
+        else await tokenEndpoint(popts.signal);
+      } catch (err) {
+        throw probeFailure(err, opts.tokenEndpoint ?? opts.issuer!);
+      }
+    },
     async close() { cache.clear(); },
     async token(audience, topts = {}) {
       if (typeof audience !== 'string' || !audience) throw new OidcError('credentials', 'oidc credentials: audience is required');

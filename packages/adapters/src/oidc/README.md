@@ -113,11 +113,22 @@ Limits accept `${env:NAME}`. `timeoutMs`, `maxTokenChars`, `maxResponseBytes` an
 `"unbounded"`, which `agent-layers check` fails on the production tier; `jwksMinRefreshMs` and `jwksMaxAgeMs` outside their
 safe range are a warning there. Ranges and checks: [docs/limits.md](../../../../docs/limits.md).
 
+## Readiness
+
+Both instances expose `probe()`, which `agent-layers check` runs before the conformance suite, under
+`limits.check.timeoutMs`. The identity instance fetches the discovery document (unless `jwksUri` is set) and the key
+set, and keeps the keys it read; the credentials instance discovers the token endpoint from `issuer` (and keeps it),
+or, with an explicit `tokenEndpoint`, sends it a request without a credential and accepts any answer but a server
+error. No token is verified or requested. A provider that does not answer rejects with its host and the cause
+(`idp.example.com: OIDC discovery: request failed (ECONNREFUSED)`), which fails the row on the production tier and
+skips it below. Without a caller token (`--token`) the identity suite verifies nothing, so its row is `skip`, not `ok`.
+
 ## Transport rules
 
 HTTPS is required except on loopback hosts (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`) or with `allowHttp`.
 URLs with embedded credentials are refused, redirects are never followed, and every response is capped at `maxResponseBytes` (1 MB).
-Errors never contain tokens or the client secret; provider error descriptions are scrubbed of token-like strings.
+Errors never contain tokens or the client secret; provider error descriptions are scrubbed of token-like strings. A
+request that gets no answer reports the class of the failure (`request failed (ECONNREFUSED)`, `timed out after 5000ms`).
 
 ### Migrating rules and policies
 

@@ -3,7 +3,7 @@ import {
   type AgentSpec, type AttrFilter, type CallContext, type Caller, type Document, type IngestionPort, type KnowledgePort, type MemoryPort, type RunEvent, type RunnableAgent,
   type RunResult, type RuntimePort, type Stack, type StatePort, type ToolPort,
 } from '@agent-layers/core';
-import { Checks, testContext } from '../check.ts';
+import { Checks, MODEL_TIMEOUT_LIMIT, testContext } from '../check.ts';
 import { conforms } from '../schemas.ts';
 
 export interface RuntimeFixtures {
@@ -60,11 +60,17 @@ function probeStack(stack: Stack, contexts: CallContext[], pending: boolean, exc
   });
 }
 
+/**
+ * A run of the agent under the model time limit (a run waits for a model), with the signal that ends it when the limit
+ * runs out.
+ */
+const runAttempt = <T>(c: Checks, label: string, fn: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> => c.attempt(label, fn, c.modelTimeoutMs, MODEL_TIMEOUT_LIMIT);
+
 /** The events of a streamed run, or undefined when it threw (recorded as a failure). */
 async function collect(c: Checks, agent: RunnableAgent, input: string, ctx: Partial<CallContext>): Promise<RunEvent[] | undefined> {
-  return c.attempt('stream', async () => {
+  return runAttempt(c, 'stream', async (signal) => {
     const events: RunEvent[] = [];
-    for await (const e of agent.stream!(input, ctx)) events.push(e);
+    for await (const e of agent.stream!(input, { ...ctx, signal })) events.push(e);
     return events;
   });
 }
@@ -96,7 +102,7 @@ async function checkRunBehaviour(port: RuntimePort, f: RuntimeFixtures, agent: R
   const contexts: CallContext[] = [];
   const probed = await c.attempt('bind (probe)', () => port.bind(probeStack(f.stack!, contexts, false), f.agent!));
   if (probed) {
-    await c.attempt('run with a caller', () => probed.run(input, testContext({ agent: name, caller: CONFORMANCE_CALLER })));
+    await runAttempt(c, 'run with a caller', (signal) => probed.run(input, testContext({ agent: name, caller: CONFORMANCE_CALLER, signal })));
     if (!contexts.length) c.skip('caller: the run made no model or tool call through the stack');
     else c.expect(contexts.every((x) => x.caller?.id === CONFORMANCE_CALLER.id), 'caller: a model or tool call of the run did not carry the run caller');
   }
@@ -108,8 +114,8 @@ async function checkRunBehaviour(port: RuntimePort, f: RuntimeFixtures, agent: R
   if (!pending) return;
   let waiting: RunResult | undefined;
   let thrown: unknown;
-  await c.attempt('run (pending approval)', async () => {
-    try { waiting = await pending.run(f.toolInput!, testContext({ agent: name })); } catch (err) { thrown = err; }
+  await runAttempt(c, 'run (pending approval)', async (signal) => {
+    try { waiting = await pending.run(f.toolInput!, testContext({ agent: name, signal })); } catch (err) { thrown = err; }
   });
   if (thrown !== undefined) c.expect(thrown instanceof ApprovalPending, `approval: the run threw ${thrown instanceof Error ? thrown.name : String(thrown)}`);
   else if (waiting) {
@@ -130,7 +136,7 @@ async function checkRunBounds(port: RuntimePort, f: RuntimeFixtures, c: Checks):
   const probed = await c.attempt('bind (bounds)', () => port.bind(probeStack(f.stack!, contexts, false), f.agent!));
   if (probed) {
     const { ledger } = startRun({ runId: 'conformance-run' }, runLimits({}));
-    await c.attempt('run with bounds', () => probed.run(input, testContext({ agent: name, bounds: ledger.view })));
+    await runAttempt(c, 'run with bounds', (signal) => probed.run(input, testContext({ agent: name, bounds: ledger.view, signal })));
     if (!contexts.length) c.skip('bounds: the run made no model or tool call through the stack');
     else c.expect(contexts.every((x) => x.bounds?.deadlineAt === ledger.view.deadlineAt && x.bounds?.maxHops === ledger.view.maxHops), 'bounds: a model or tool call of the run did not carry the run bounds');
   }
@@ -139,8 +145,8 @@ async function checkRunBounds(port: RuntimePort, f: RuntimeFixtures, c: Checks):
   if (!spent) return;
   let stopped: RunResult | undefined;
   let thrown: unknown;
-  await c.attempt('run (budget spent)', async () => {
-    try { stopped = await spent.run(input, testContext({ agent: name })); } catch (err) { thrown = err; }
+  await runAttempt(c, 'run (budget spent)', async (signal) => {
+    try { stopped = await spent.run(input, testContext({ agent: name, signal })); } catch (err) { thrown = err; }
   });
   if (!refused.length) { c.skip('bounds: the run made no model call through the stack'); return; }
   if (thrown !== undefined) c.expect(thrown instanceof BoundsExceeded, `bounds: the run threw ${thrown instanceof Error ? thrown.name : String(thrown)}`);
@@ -153,7 +159,7 @@ export async function checkRuntime(port: RuntimePort, f: RuntimeFixtures = {}, c
   const agent = await c.attempt('bind', () => port.bind(f.stack!, f.agent!));
   if (!agent) return c;
   c.expect(agent.name === f.agent.name, 'bind: agent name must match the spec');
-  const result = await c.attempt('run', () => agent.run(f.input ?? 'hello', testContext({ agent: f.agent!.name })));
+  const result = await runAttempt(c, 'run', (signal) => agent.run(f.input ?? 'hello', testContext({ agent: f.agent!.name, signal })));
   if (result) {
     c.all(conforms('run-result', result), 'run result');
     if (result.status !== 'completed') c.expect(typeof result.reason?.code === 'string' && result.reason.code.length > 0, `run: status ${result.status} needs a reason with a code`);
@@ -199,8 +205,8 @@ async function checkRunResume(port: RuntimePort, f: RuntimeFixtures, c: Checks):
   if (!agent?.resume) return;
   const runId = `conformance-resume-${Date.now()}`;
   let first: RunResult | undefined;
-  await c.attempt('run (resume)', async () => {
-    try { first = await agent.run(f.toolInput!, testContext({ agent: name, runId })); } catch (err) {
+  await runAttempt(c, 'run (resume)', async (signal) => {
+    try { first = await agent.run(f.toolInput!, testContext({ agent: name, runId, signal })); } catch (err) {
       if (!(err instanceof ApprovalPending)) throw err;
     }
   });
@@ -211,7 +217,7 @@ async function checkRunResume(port: RuntimePort, f: RuntimeFixtures, c: Checks):
   const pending = calls[0]!;
   const before = calls.length;
   const checkpoint = JSON.parse(JSON.stringify(first.checkpoint));
-  const resumed = await c.attempt('resume', () => agent.resume!(checkpoint, { approval: { id: 'conformance-approval', approved: true } }, testContext({ agent: name, runId })));
+  const resumed = await runAttempt(c, 'resume', (signal) => agent.resume!(checkpoint, { approval: { id: 'conformance-approval', approved: true } }, testContext({ agent: name, runId, signal })));
   if (!resumed) return;
   c.all(conforms('run-result', resumed), 'resumed result');
   c.produced('resume', resumed);
@@ -245,17 +251,17 @@ export interface KnowledgeFixtures {
 
 export async function checkKnowledge(port: KnowledgePort, f: KnowledgeFixtures = {}, c = new Checks()): Promise<Checks> {
   const text = f.query ?? 'test';
-  const all = await c.attempt('search', () => port.search({ text, k: 5 }));
+  const all = await c.attempt('search', (signal) => port.search({ text, k: 5, signal }));
   if (!all) return c;
   if (!c.expect(Array.isArray(all), 'search: must resolve to an array')) return c;
   all.forEach((p, i) => c.all(conforms('passage', p), `passage[${i}]`));
   c.produced('search', all);
   c.expect(all.length <= 5, `search: returned ${all.length} passages for k=5`);
-  const one = await c.attempt('search k=1', () => port.search({ text, k: 1 }));
+  const one = await c.attempt('search k=1', (signal) => port.search({ text, k: 1, signal }));
   c.expect(!one || one.length <= 1, 'search: must respect k');
   if (f.expectText) c.expect(all.some((p) => p.text.includes(f.expectText!)), `search: no passage contains "${f.expectText}"`);
   if (f.filter) {
-    const narrowed = await c.attempt('search with filter', () => port.search({ text, k: 5, filter: f.filter }));
+    const narrowed = await c.attempt('search with filter', (signal) => port.search({ text, k: 5, filter: f.filter, signal }));
     c.expect(!narrowed || narrowed.length < all.length || all.length === 0, 'filter: returned as many passages as without it');
   }
   return c;
@@ -265,15 +271,15 @@ export async function checkMemory(port: MemoryPort, _f: unknown = {}, c = new Ch
   const scope = { caller: `conformance-${Date.now()}`, agent: 'conformance' };
   const ids = await c.attempt('remember', () => port.remember([{ text: 'The conformance parrot is called Quillby.' }], scope));
   c.expect(ids?.length === 1, 'remember: must return one id per item');
-  const hits = await c.attempt('recall', () => port.recall({ text: 'parrot Quillby', scope }));
+  const hits = await c.attempt('recall', (signal) => port.recall({ text: 'parrot Quillby', scope, signal }));
   c.expect(hits?.some((p) => p.text.includes('Quillby')), 'recall: remembered item not found');
   hits?.forEach((p, i) => c.all(conforms('passage', p), `recall passage[${i}]`));
   c.produced('recall', hits);
-  const other = await c.attempt('recall other caller', () => port.recall({ text: 'parrot Quillby', scope: { ...scope, caller: `${scope.caller}-other` } }));
+  const other = await c.attempt('recall other caller', (signal) => port.recall({ text: 'parrot Quillby', scope: { ...scope, caller: `${scope.caller}-other` }, signal }));
   c.expect(!other?.some((p) => p.text.includes('Quillby')), 'recall: leaked across callers');
   if (ids?.length) {
     await c.attempt('forget', () => port.forget(ids, scope));
-    const after = await c.attempt('recall after forget', () => port.recall({ text: 'parrot Quillby', scope }));
+    const after = await c.attempt('recall after forget', (signal) => port.recall({ text: 'parrot Quillby', scope, signal }));
     c.expect(!after?.some((p) => p.text.includes('Quillby')), 'forget: item still recalled');
   }
   return c;
@@ -282,9 +288,9 @@ export async function checkMemory(port: MemoryPort, _f: unknown = {}, c = new Ch
 export async function checkIngestion(port: IngestionPort, f: { docs?: Document[] } = {}, c = new Checks()): Promise<Checks> {
   const docs = f.docs ?? [{ id: `conformance-${Date.now()}`, text: 'Conformance document.' }];
   docs.forEach((d, i) => c.all(conforms('document', d), `fixture doc[${i}]`));
-  const ids = await c.attempt('ingest', () => port.ingest(docs));
+  const ids = await c.attempt('ingest', (signal) => port.ingest(docs, { signal }));
   c.expect(ids?.length === docs.length, 'ingest: must return one id per document');
-  if (ids) await c.attempt('delete', () => port.delete(ids));
+  if (ids) await c.attempt('delete', (signal) => port.delete(ids, { signal }));
   return c;
 }
 
@@ -300,17 +306,17 @@ export interface ToolFixtures {
 }
 
 export async function checkTools(port: ToolPort, f: ToolFixtures = {}, c = new Checks()): Promise<Checks> {
-  const specs = await c.attempt('listTools', () => port.listTools(testContext()));
+  const specs = await c.attempt('listTools', (signal) => port.listTools(testContext({ signal })));
   if (specs) {
     specs.forEach((s, i) => c.all(conforms('tool-spec', s), `tool[${i}]`));
     c.expect(new Set(specs.map((s) => s.name)).size === specs.length, 'listTools: names must be unique');
     c.produced('listTools', specs);
   }
-  const unknown = await c.attempt('callTool unknown', () => port.callTool('__conformance_missing__', {}, testContext()));
+  const unknown = await c.attempt('callTool unknown', (signal) => port.callTool('__conformance_missing__', {}, testContext({ signal })));
   c.expect(unknown?.ok === false, 'callTool: an unknown tool must return ok: false, not throw');
   c.produced('callTool unknown', unknown);
   for (const call of f.calls ?? []) {
-    const out = await c.attempt(`callTool ${call.name}`, () => port.callTool(call.name, call.args, testContext()));
+    const out = await c.attempt(`callTool ${call.name}`, (signal) => port.callTool(call.name, call.args, testContext({ signal })));
     if (!out) continue;
     c.all(conforms('tool-result', out), `result of ${call.name}`);
     c.produced(`callTool ${call.name}`, out);

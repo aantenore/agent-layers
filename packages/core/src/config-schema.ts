@@ -190,6 +190,7 @@ const limits: JsonSchema = {
       description: 'agent-layers check: time limits of the conformance probes.',
       properties: {
         timeoutMs: lim(CHECK_LIMITS.timeoutMs, 'Time limit of one conformance probe'),
+        modelTimeoutMs: lim(CHECK_LIMITS.modelTimeoutMs, 'Time limit of one model or runtime probe, which waits for a model to answer'),
         deployTimeoutMs: lim(CHECK_LIMITS.deployTimeoutMs, 'Time limit of the deploy probes (up, down)'),
         listToolsTimeoutMs: lim(CHECK_LIMITS.listToolsTimeoutMs, 'Time limit of listing tools to find a probe audience'),
       },

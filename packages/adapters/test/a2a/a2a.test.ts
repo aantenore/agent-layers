@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
-import { compose, resolveProfile, type Stack, type StackConfig } from '@agent-layers/core';
+import { AdapterRegistry, compose, noopTelemetry, resolveProfile, type Stack, type StackConfig } from '@agent-layers/core';
 import { checkAdapter, inboundFetch } from '@agent-layers/conformance';
 import { serveStack, type GatewayHandle } from '@agent-layers/gateway';
 import { adapter as basicRuntime } from '@agent-layers/adapters/basic-runtime';
 import { adapter as mockModel } from '@agent-layers/adapters/mock-model';
 import { credentialAdapter, identityAdapter } from '@agent-layers/adapters/static-identity';
 import { BOUNDS_URI, channelAdapter, runtimeAdapter } from '../../src/a2a/index.ts';
+import { PACKAGE_VERSION } from '../../src/version.ts';
 
 let stack: Stack;
 let gw: GatewayHandle;
@@ -59,6 +60,7 @@ test('agent cards are public and describe the JSON-RPC interface of A2A 1.0 and 
   assert.deepEqual(card.skills.map((s: { id: string }) => s.id), ['assistant']);
   assert.ok(card.securitySchemes.bearer);
   for (const k of ['version', 'defaultInputModes', 'defaultOutputModes']) assert.ok(card[k], k);
+  assert.equal(card.version, PACKAGE_VERSION, 'the card version defaults to the package version');
   const own = await fetch(`${gw.url}/a2a/assistant/.well-known/agent-card.json`);
   assert.equal(own.status, 200);
   assert.equal((await fetch(`${gw.url}/a2a/private/.well-known/agent-card.json`)).status, 404, 'agents not served have no card');
@@ -144,7 +146,7 @@ test('a remote A2A agent is the runtime of another stack, with the caller creden
   }
 });
 
-test('a refused or unreachable remote agent is a failed run with a fixed reason', async () => {
+test('a refused or unreachable remote agent is a failed run with a fixed reason and the failure class in ext', async () => {
   const client = await compose(resolveProfile({
     agents: { assistant: { instructions: '', model: 'remote' } },
     layers: {
@@ -156,10 +158,50 @@ test('a refused or unreachable remote agent is a failed run with a fixed reason'
     const r = await (await client.agent('assistant')).run('ping');
     assert.equal(r.status, 'failed');
     assert.deepEqual(r.reason, { code: 'error', layer: 'harness', by: 'assistant', detail: 'remote agent call failed' });
+    assert.deepEqual(r.ext, { 'a2a.error': 'http_401' }, 'the HTTP status is the class of the failure');
     assert.ok(!JSON.stringify(r).includes('wrong-secret-token'));
   } finally {
     await client.close();
   }
+  const port = await closedPort();
+  const dead = await compose(resolveProfile({
+    agents: { assistant: { instructions: '', model: 'remote' } },
+    layers: { runtime: { adapter: 'a2a', options: { url: `http://127.0.0.1:${port}/a2a/assistant` } } },
+  }), { adapters: [runtimeAdapter] });
+  try {
+    const r = await (await dead.agent('assistant')).run('ping');
+    assert.equal(r.status, 'failed');
+    assert.equal(r.reason?.detail, 'remote agent call failed');
+    assert.deepEqual(r.ext, { 'a2a.error': 'ECONNREFUSED' }, 'the system error code is the class of the failure');
+    assert.ok(!JSON.stringify(r).includes(String(port)), 'the result carries no host or port');
+  } finally {
+    await dead.close();
+  }
+});
+
+/** A port nothing listens on: bound and released, so connecting to it is refused. */
+async function closedPort(): Promise<number> {
+  const s = createServer();
+  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
+  const port = (s.address() as AddressInfo).port;
+  await new Promise<void>((r) => s.close(() => r()));
+  return port;
+}
+
+const runtimeOf = (options: Record<string, unknown>) => new AdapterRegistry().register(runtimeAdapter).create('RuntimePort', 'a2a', { url: endpoint(), ...options }, { name: 'a2a', env: {}, cwd: process.cwd(), telemetry: noopTelemetry });
+
+test('the readiness probe reaches the agent card, and names the host and the cause when nothing answers', async () => {
+  // The card at url, the endpoint itself (its card is read under .well-known), and an explicit endpoint.
+  for (const options of [{ url: `${gw.url}/.well-known/agent-card.json` }, { url: endpoint() }, { url: `${gw.url}/elsewhere`, endpoint: endpoint() }]) {
+    await (await runtimeOf(options)).probe!({});
+  }
+  const port = await closedPort();
+  for (const options of [{ url: `http://127.0.0.1:${port}/.well-known/agent-card.json` }, { url: `http://127.0.0.1:${port}/a2a/assistant` }]) {
+    await assert.rejects((await runtimeOf(options)).probe!(), { message: `remote agent unreachable (127.0.0.1:${port}): ECONNREFUSED` });
+  }
+  // A card that is missing; the probe honours its signal, so an aborted one ends at once.
+  await assert.rejects((await runtimeOf({ url: `${gw.url}/a2a/private/.well-known/agent-card.json` })).probe!(), { message: `agent card HTTP 404 (${new URL(gw.url).host})` });
+  await assert.rejects((await runtimeOf({ url: endpoint() })).probe!({ signal: AbortSignal.abort() }), (err: Error) => err.name === 'AbortError');
 });
 
 test('conformance: the runtime and the mounted channel', async () => {

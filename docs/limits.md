@@ -76,7 +76,8 @@ for every caller. On a production profile with knowledge sources and a cache, `a
 
 | Setting | Default | Accepted | Safe range | On production | Why |
 |---|---|---|---|---|---|
-| `limits.check.timeoutMs` | `30000` ms | 1–∞ | — | — | Time limit of one conformance probe of `agent-layers check`. |
+| `limits.check.timeoutMs` | `30000` ms | 1–∞ | — | — | Time limit of one conformance probe of `agent-layers check`, readiness probes included; a probe that runs out is aborted through its signal, and the failure names this setting. |
+| `limits.check.modelTimeoutMs` | `120000` ms | 1–∞ | — | — | Time limit of one model or runtime probe, which waits for a model to answer; longer than `timeoutMs` because a local model can take a while on its first call. |
 | `limits.check.deployTimeoutMs` | `300000` ms | 1–∞ | — | — | Time limit of the deploy probes, which start and stop services. |
 | `limits.check.listToolsTimeoutMs` | `5000` ms | 1–∞ | — | — | Time limit of listing tools while looking for an audience for the credentials probe. |
 | `limits.extBytes` | `16384` bytes | 256–1048576 | 256–65536 | warn outside safe range | Largest `ext` bag the core keeps on a shape it passes on; a larger one is dropped and an `agent.ext.dropped` event is emitted, so adapters cannot smuggle bulk data through the extension bags. |

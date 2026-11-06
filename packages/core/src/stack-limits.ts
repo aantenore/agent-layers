@@ -26,6 +26,7 @@ export const PIPELINE_LIMITS = defineLimits({
 /** Limits of `agent-layers check` (`limits.check` block). */
 export const CHECK_LIMITS = defineLimits({
   timeoutMs: { path: 'limits.check.timeoutMs', default: 30_000, unit: 'ms', min: 1 },
+  modelTimeoutMs: { path: 'limits.check.modelTimeoutMs', default: 120_000, unit: 'ms', min: 1 },
   deployTimeoutMs: { path: 'limits.check.deployTimeoutMs', default: 300_000, unit: 'ms', min: 1 },
   listToolsTimeoutMs: { path: 'limits.check.listToolsTimeoutMs', default: 5000, unit: 'ms', min: 1 },
 });

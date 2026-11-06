@@ -1,8 +1,8 @@
 import { defineAdapter, limitProperties, PORT_VERSIONS } from '@agent-layers/core';
-import { createA2ARuntime, RUNTIME_LIMITS, type A2ARuntimeOptions } from './client.ts';
+import { createA2ARuntime, ERROR_KEY, RUNTIME_LIMITS, type A2ARuntimeOptions } from './client.ts';
 import { createA2AServerChannel, SERVER_LIMITS, type A2AServerOptions } from './server.ts';
 
-export { isPrivateHost } from './client.ts';
+export { ERROR_KEY, errorClass, isPrivateHost } from './client.ts';
 export { createA2ARuntime, createA2AServerChannel, RUNTIME_LIMITS, SERVER_LIMITS, type A2ARuntimeOptions, type A2AServerOptions };
 export {
   A2A_VERSION, BOUNDS_ALIAS_URI, BOUNDS_URI, BOUNDS_URIS, LEGACY_VERSION, partsText, readResult, stateOf, type BoundsReport, type TaskState, type WireVersion,
@@ -86,8 +86,9 @@ export const runtimeAdapter = defineAdapter<'RuntimePort', A2ARuntimeOptions>({
     additionalProperties: false,
   },
   limits: RUNTIME_LIMITS,
-  // `a2a.state`: the remote task state the adapter does not know (the run is then failed).
-  ext: { produces: ['a2a.state'] },
+  // `a2a.state`: the remote task state the adapter does not know (the run is then failed). `a2a.error`: the class of
+  // the failure behind a failed call (`ECONNREFUSED`, `http_401`, `rpc_-32601`), whose text stays out of the result.
+  ext: { produces: ['a2a.state', ERROR_KEY] },
   mappingDefaults: { in: { shape: 'RunResult' } },
   create: (options, ctx) => createA2ARuntime(options, ctx.name, ctx.mappings),
 });

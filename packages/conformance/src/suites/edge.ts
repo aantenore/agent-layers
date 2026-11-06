@@ -1,5 +1,5 @@
 import { findRoute, lastUserText, PORT_VERSIONS, versionAtLeast, type CallContext, type Delegation, type ChannelHandle, type ChannelHost, type ChannelPort, type DeployPort, type InboundContext, type InboundMount, type SecretPort, type ServiceSpec, type Trigger, type TriggerPort, type TriggerSink } from '@agent-layers/core';
-import { Checks } from '../check.ts';
+import { Checks, DEPLOY_TIMEOUT_LIMIT } from '../check.ts';
 import { conforms } from '../schemas.ts';
 
 export interface DeployFixtures { services?: ServiceSpec[]; /** Also run up and down (default false). */ live?: boolean }
@@ -15,10 +15,10 @@ export async function checkDeploy(port: DeployPort, f: DeployFixtures = {}, c = 
     c.expect(!JSON.stringify(plan).includes('change-me'), 'plan: must not inline secret values');
   }
   if (!f.live) { c.skip('up/down: live fixture not set'); return c; }
-  const endpoints = await c.attempt('up', () => port.up(services), c.deployTimeoutMs);
+  const endpoints = await c.attempt('up', (signal) => port.up(services, { signal }), c.deployTimeoutMs, DEPLOY_TIMEOUT_LIMIT);
   c.expect(Array.isArray(endpoints), 'up: must resolve to endpoints');
   c.produced('up', endpoints);
-  await c.attempt('down', () => port.down(services), c.deployTimeoutMs);
+  await c.attempt('down', (signal) => port.down(services, { signal }), c.deployTimeoutMs, DEPLOY_TIMEOUT_LIMIT);
   return c;
 }
 

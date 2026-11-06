@@ -4,9 +4,16 @@ import { CHECK_LIMITS, extWriteProblems, limitValue, type CallContext } from '@a
 export interface CheckLimits {
   /** Time limit of one probe (default 30000 ms). */
   timeoutMs?: number;
+  /** Time limit of one model or runtime probe, which waits for a model to answer (default 120000 ms). */
+  modelTimeoutMs?: number;
   /** Time limit of the deploy probes, which start and stop services (default 300000 ms). */
   deployTimeoutMs?: number;
 }
+
+/** The setting a model or runtime probe that times out tells the operator to raise. */
+export const MODEL_TIMEOUT_LIMIT = CHECK_LIMITS.modelTimeoutMs.path;
+/** The setting a deploy probe that times out tells the operator to raise. */
+export const DEPLOY_TIMEOUT_LIMIT = CHECK_LIMITS.deployTimeoutMs.path;
 
 /**
  * What the adapter under test declared about `ext` (its descriptor's name and `ext` block). Without a declaration only
@@ -24,13 +31,17 @@ export interface ExtDeclarationCheck {
 export class Checks {
   readonly failures: string[] = [];
   readonly skipped: string[] = [];
+  /** Probes that called the instance expecting an answer (`attempt`); a suite that ran none did not exercise it. */
+  attempts = 0;
   readonly timeoutMs: number;
+  readonly modelTimeoutMs: number;
   readonly deployTimeoutMs: number;
   readonly ext?: ExtDeclarationCheck;
 
   constructor(limits: CheckLimits = {}, ext?: ExtDeclarationCheck) {
     this.ext = ext;
     this.timeoutMs = limitValue(CHECK_LIMITS.timeoutMs, limits.timeoutMs);
+    this.modelTimeoutMs = limitValue(CHECK_LIMITS.modelTimeoutMs, limits.modelTimeoutMs);
     this.deployTimeoutMs = limitValue(CHECK_LIMITS.deployTimeoutMs, limits.deployTimeoutMs);
   }
 
@@ -56,19 +67,32 @@ export class Checks {
     this.skipped.push(message);
   }
 
-  /** Runs `fn`; a throw becomes a failure and resolves to undefined. */
-  async attempt<T>(label: string, fn: () => Promise<T> | T, timeoutMs = this.timeoutMs): Promise<T | undefined> {
+  /**
+   * Runs `fn`; a throw becomes a failure and resolves to undefined. The signal aborts when `timeoutMs` elapses, and
+   * once the probe is over, so a probe that honours it stops instead of running on under the next one. `limit` is the
+   * setting the timeout message tells the operator to raise.
+   */
+  async attempt<T>(label: string, fn: (signal: AbortSignal) => Promise<T> | T, timeoutMs = this.timeoutMs, limit = CHECK_LIMITS.timeoutMs.path): Promise<T | undefined> {
+    const ac = new AbortController();
     let timer: NodeJS.Timeout | undefined;
+    this.attempts++;
     try {
       return await Promise.race([
-        Promise.resolve().then(fn),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs); }),
+        Promise.resolve().then(() => fn(ac.signal)),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            const err = new DOMException(`timed out after ${timeoutMs} ms (raise ${limit})`, 'TimeoutError');
+            ac.abort(err);
+            reject(err);
+          }, timeoutMs);
+        }),
       ]);
     } catch (err) {
       this.failures.push(`${label}: threw ${err instanceof Error ? err.message : String(err)}`);
       return undefined;
     } finally {
       clearTimeout(timer);
+      if (!ac.signal.aborted) ac.abort();
     }
   }
 

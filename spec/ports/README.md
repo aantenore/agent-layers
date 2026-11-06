@@ -66,6 +66,7 @@ Every port instance may expose these members, whatever the port:
 | `name?: String` | Instance name, for example the configuration key of a knowledge source. |
 | `native?() → Any` | Escape hatch for operations: the underlying client or technology-specific API, for features the port does not cover. |
 | `close?() → ()` | Release connections and flush buffers. Called once when the stack stops. |
+| `probe?(opts?: { signal?: Signal }) → ()` | Readiness: reaches the service the instance is configured for without changing anything there (an agent card, a discovery document and key set) and rejects when it does not answer. The message names the host and the cause class (`ECONNREFUSED`, an HTTP status), never a credential, a URL path or a response body. Absent on adapters with no remote service. `agent-layers check` runs it before the conformance probes, under `limits.check.timeoutMs`. |
 
 `CallContext` is passed to the ports that act inside a run (ModelPort, RouterPort, ToolPort, KnowledgePort through its query):
 

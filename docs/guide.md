@@ -8,24 +8,27 @@ to production. Concepts are in [architecture.md](architecture.md).
 ```bash
 npx @agent-layers/cli init my-agent    # --template minimal|rag, --runtime <adapter>, --name, --agent, --force
 cd my-agent && npm install
-npx agent-layers check                  # config, adapters, readiness gate, conformance (prototype profile)
-npx agent-layers dev                    # talk to the agent, one trace line per layer
+npm run check                           # config, adapters, readiness gate, conformance (prototype profile)
+npm run dev                             # talk to the agent, one trace line per layer
 npm test                                # the smoke dataset, offline, with a scripted model
-npx agent-layers eval evals/smoke.jsonl --agent assistant
-npx agent-layers dev --profile local    # same stack with a real model on this machine
-npx agent-layers layers                 # every layer, its ports, the adapter in use and those installed
-npx agent-layers gateway                # the same stack on http://127.0.0.1:8787 for any language (Bearer dev-token)
+npm run test:live                       # adds the local model (or AGENT_LAYERS_LIVE=1 npm test)
+npm run eval                            # evals/smoke.jsonl against the agent
+npm run dev -- --profile local          # same stack with a real model on this machine
+npm run layers                          # every layer, its ports, the adapter in use and those installed
+npm run gateway                         # the same stack on http://127.0.0.1:8787 for any language (Bearer dev-token)
 ```
 
 `init` writes a project with all eleven layers wired: `agent-layers.json` (profiles `prototype`, `test`, `local`,
 `pilot`, `production`), the agent in `agents/<name>.md`, a function tool in `tools/`, Markdown pages in `knowledge/`,
 `evals/smoke.jsonl`, `tests/agent.test.ts`, `.env.example` and a README that maps every layer to its adapter per
-profile. The prototype profile uses only zero-dependency adapters, so it runs anywhere. `examples/minimal` is the
-same template, generated.
+profile. The prototype profile uses only zero-dependency adapters, so it runs anywhere. `examples/minimal` starts
+from the same template and adds the `polyglot` profiles (the agent on Pydantic AI over A2A).
 
-Run `init` through the scoped package name: the unscoped `agent-layers` name on npm is an unrelated package. After
-`npm install` the CLI is a dev dependency of the project, so `npx agent-layers` runs the local binary. Inside this
-repository, use `node --conditions=@agent-layers/source packages/cli/src/cli.ts <command>` instead of `npx`.
+Run commands through the project's npm scripts (`npm run check`, `npm run diff -- pilot production`), or through the
+scoped package name (`npx @agent-layers/cli <command>`): the unscoped `agent-layers` name on npm is an unrelated
+package with a binary of the same name, so a bare `npx agent-layers` is safe only after `npm install`, inside the
+project, where it runs the local binary. Inside this repository, use
+`node --conditions=@agent-layers/source packages/cli/src/cli.ts <command>` instead of `npx`.
 
 ## Concepts in one paragraph each
 
@@ -94,6 +97,9 @@ Rules:
 - Errors that the model should see are results (`ok: false`, `block`), not exceptions; authorization fails closed.
 - Never put tokens or secrets in errors, logs or telemetry attributes.
 - Put technology-specific data in `ext` (keys `<adapter>.<name>`) and operations behind `native()`.
+- An adapter with a remote service exposes `probe()`: reach the service without changing anything there and reject
+  with the host and the cause class, never a credential. `agent-layers check` runs it before the conformance
+  probes ([spec/ports/README.md](../spec/ports/README.md), common members).
 - `portVersion` is `1.0.0` for every port.
 - `tiers: ['prototype']` for in-memory, scripted or development-only adapters; `production` when backed by a real
   system that can run in production.
@@ -244,8 +250,12 @@ Slots under `layers`:
 | `feedback` | FeedbackPort | single |
 
 Each entry is `{ "adapter": "<name>", "options": { ... } }`. Strings may use `${env:NAME}` and
-`${env:NAME:-default}` (resolved for the selected profile only; the CLI also reads `.env`) and `${secret:NAME}`
-(resolved through the `secrets` slot when the stack is composed).
+`${env:NAME:-default}` (resolved for the selected profile only, in layer options, agents, `gateway`, `pipeline`,
+`limits` and `sessions`; the CLI also reads `.env`) and `${secret:NAME}` (resolved through the `secrets` slot when the
+stack is composed). A variable without a default that is not set stops the command, except for the commands that
+only describe a profile (`deploy --dry-run`, `layers`, `diff`): they list it instead. In code,
+`parseConfig(text, { deferredEnv: new Set() })` collects those names and leaves their references in place; a limit
+left as a reference is not range-checked until the variable is set.
 
 ## From prototype to production
 
@@ -275,7 +285,15 @@ profile uses a prototype-only adapter, or lacks a required slot. The required se
 the default for the production tier is identity, authorization, guardrails, telemetry and state. It also fails a
 limit set to `"unbounded"` where that is unsafe (request bodies, responses, timeouts, sessions) and warns for values
 outside the safe range; see [limits.md](limits.md).
-Conformance probes run against the live services. A credentials adapter that issues tokens only on behalf of a caller
+Conformance probes run against the live services. Adapters with a remote service (the `a2a` runtime, the `oidc`
+identity and credentials adapters) first answer a readiness probe: the agent card, or the discovery document and key
+set, is fetched without a credential under `limits.check.timeoutMs`. A service that does not answer fails the row on
+the production tier, with the host and the cause (`remote agent unreachable (agents.example.com): ECONNREFUSED`), and
+skips it below. A row is `ok` only when a probe reached the adapter: what a suite skipped (a check that needs a
+fixture, an optional feature the adapter lacks) is listed under the row as `skip: ...`, and a suite that ran nothing
+live, such as the identity suite without a caller token, is reported `skip`. Model and runtime probes wait for a model
+and run under `limits.check.modelTimeoutMs`; a probe that runs out of time is aborted and the failure names the
+setting to raise ([limits.md](limits.md)). A credentials adapter that issues tokens only on behalf of a caller
 (`oidc` in `on-behalf-of` mode) needs one: pass `--token <caller token>` (or `AGENT_LAYERS_TOKEN`); the token is verified
 through the identity adapter and the probe exchanges it. Without a caller the probe is reported as `skip`, not as a failure.
 The probe asks for the first audience a tool declares (`auth.audience`) or an adapter's `auth.audience` option. When
@@ -290,21 +308,33 @@ corporate model gateway through an OpenAI-compatible URL. Then `agent-layers dep
 
 | Command | What it does |
 |---|---|
-| `init [dir]` | Scaffold a project (`--template minimal\|rag`; `tools` and `multi-agent` are planned) |
-| `dev` | Compose the profile, start reference services through the deploy slot if needed, talk to the agent; `--message` runs once |
-| `check [--token t]` | Validate config, resolve adapters, readiness gate, conformance on every configured adapter (as the caller `t` where a probe needs one) |
+| `init [dir]` | Scaffold a project (`--template minimal\|rag`; `tools` and `multi-agent` are planned); stops with a message when Node.js is older than the `engines` range (22.18) |
+| `dev` | Compose the profile, start reference services through the deploy slot if needed, talk to the agent; `--message` runs once. A knowledge source that fails, a failed tool call, a span that throws and a failed run are printed on stderr whatever telemetry the profile configures (`--quiet` hides them); `--trace` adds one line per span |
+| `check [--token t]` | Validate config, resolve adapters, readiness gate, conformance on every configured adapter (as the caller `t` where a probe needs one); the probe runs reach no configured telemetry, so only the table is printed, unless `--verbose` |
 | `test [--layer id]` | `check`, then the reference live tests (`reference/<id>/test`) and the project's `tests/` |
-| `eval <dataset> --agent X` | Run and score a JSON Lines dataset (`--out`, `--min`) |
-| `deploy` / `up` / `down` | Plan, start and stop services through the deploy slot (`--dry-run`) |
+| `eval <dataset> [--agent X]` | Run and score a JSON Lines dataset (`--agent` defaults to the first agent; `--out <file>`; `--min <0..1>` exits 1 when the pass rate is below it, otherwise the exit code is 0 and a hint says so) |
+| `deploy` / `up` / `down` | Plan, start and stop services through the deploy slot (`--dry-run`). The plan says how many steps it runs, or `nothing to deploy` when the deploy adapter has nothing to start (with `compose-deploy`: no compose file for any layer and no image service in `layers.services`). A dry run needs no secret: a variable without a default that is not set is listed as `would need: ...` instead of failing |
 | `diff <a> <b>` | Per slot: same, changed, added, removed |
-| `layers` | The eleven layers by plane: ports and versions, adapter in use, installed adapters (standard and native) |
+| `layers` | The eleven layers by plane: ports and versions, adapter in use, installed adapters (standard and native); like a dry run, it lists the unset variables the profile would need instead of failing |
 | `gateway` | Host the profile on the network ([gateway.md](gateway.md)): mounted channels and triggers on one address, every request authenticated through the identity slot; `--port`, `--host`; a production-tier profile must pass the readiness gate |
+| `version` | The versions of the cli and of the `@agent-layers/core` it resolves (also `--version`, `-v`); they differ when a project has more than one copy installed |
 
 `dev`, `eval` and `test` run as an authenticated caller. The credential comes from `--token <t>`, then the
 `AGENT_LAYERS_TOKEN` environment variable, then (prototype-tier profiles only) the first token of the `static-identity`
 adapter in the identity slot. It is verified through the identity slot and passed to every run; a rejected credential
 stops the command with no run, and the credential is never printed. Without an identity adapter or a credential the run is
 anonymous, which rules-based authorization denies.
+
+## Troubleshooting
+
+The first errors most projects meet, as the gateway and the CLI print them.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `401` with `{"error":{"message":"authentication required","type":"authentication_error"}}` from the gateway | Every request is authenticated through the identity slot; the request carried no `Authorization` header | Send `Authorization: Bearer <token>`; on the prototype profile the `static-identity` token is `dev-token` |
+| `404` with `"code":"model_not_found"` and ``The model `assistant` does not exist`` on `/v1/chat/completions` | Agents are exposed as models named `agent:<name>`; a bare agent name is not a model id | Use `"model": "agent:assistant"`; `GET /v1/models` lists the ids (model aliases and `agent:<name>`) |
+| `invalid configuration` with `environment variable OIDC_CLIENT_SECRET is not set (profile production)` | A `${env:NAME}` without a default is required on the profile being resolved (pilot and production name real services) | Set the variables (copy `.env.example` to `.env`), or list them first with `npm run deploy -- --dry-run` or `npm run layers -- --profile production` |
+| `npx agent-layers <command>` runs something else, or asks to install an unrelated package | The unscoped `agent-layers` name on npm belongs to an unrelated package with a binary of the same name | Use the project's scripts (`npm run check`) or the scope (`npx @agent-layers/cli <command>`); a bare `npx agent-layers` is safe only inside a project after `npm install` |
 
 ## Extension rules
 

@@ -7,7 +7,7 @@ import { checkStore } from './suites/store.ts';
 import { checkEvaluator, checkFeedback, checkTelemetry } from './suites/insight.ts';
 import { checkCache, checkModel, checkRouter } from './suites/model.ts';
 
-export { Checks, testContext, type CheckLimits, type ExtDeclarationCheck } from './check.ts';
+export { Checks, DEPLOY_TIMEOUT_LIMIT, MODEL_TIMEOUT_LIMIT, testContext, type CheckLimits, type ExtDeclarationCheck } from './check.ts';
 export { roundTrip, type RoundTripOptions } from './round-trip.ts';
 export { conforms, schema } from './schemas.ts';
 export { NEEDS_CALLER, sampleQuestion } from './suites/control.ts';
@@ -38,6 +38,8 @@ export interface ConformanceReport {
   ok: boolean;
   failures: string[];
   skipped: string[];
+  /** Probes that called the instance expecting an answer. `ok` with none means nothing was exercised, only refused. */
+  attempts: number;
 }
 
 /**
@@ -51,7 +53,7 @@ export async function conformance<P extends PortName>(port: P, impl: PortTypes[P
   if (!suite) c.expect(false, `no conformance suite for ${String(port)}`);
   else if (!impl || typeof impl !== 'object') c.expect(false, `${port}: instance must be an object`);
   else await suite(impl, fixtures ?? {}, c).catch((err: unknown) => c.expect(false, `suite crashed: ${String(err)}`));
-  return { port, ok: c.failures.length === 0, failures: c.failures, skipped: c.skipped };
+  return { port, ok: c.failures.length === 0, failures: c.failures, skipped: c.skipped, attempts: c.attempts };
 }
 
 /** The declaration conformance checks written `ext` keys against: the adapter's name and its descriptor's `ext` block. */
@@ -105,7 +107,7 @@ export async function checkAdapter(d: AnyAdapter, opts: CheckAdapterOptions = {}
   } catch (err) {
     failures.push(`create: ${err instanceof Error ? err.message : String(err)}`);
   }
-  if (!instance) return { port: d.port, adapter: d.name, ok: false, failures, skipped: [] };
+  if (!instance) return { port: d.port, adapter: d.name, ok: false, failures, skipped: [], attempts: 0 };
   // Suites whose checks depend on the port version (RuntimePort, ChannelPort, ApprovalPort) read the one the descriptor declares.
   const fixtures = VERSIONED.includes(d.port) ? { portVersion: d.portVersion, ...(opts.fixtures ?? {}) } : opts.fixtures;
   const report = await conformance(d.port, instance as never, fixtures, opts.limits, declarationOf(d));

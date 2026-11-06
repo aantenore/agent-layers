@@ -183,7 +183,7 @@ test('a state the adapter does not know is a failed run with the native state in
 });
 
 test('the channel and the runtime descriptors declare what they write', () => {
-  assert.deepEqual(runtimeAdapter.ext?.produces, ['a2a.state']);
+  assert.deepEqual(runtimeAdapter.ext?.produces, ['a2a.state', 'a2a.error']);
   assert.equal(runtimeAdapter.mappingDefaults?.in?.shape, 'RunResult');
   assert.equal(channelAdapter.mappingDefaults, undefined);
 });

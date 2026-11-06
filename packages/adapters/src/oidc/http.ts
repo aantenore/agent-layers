@@ -1,13 +1,27 @@
-import { anySignal, timeoutSignal } from '@agent-layers/core';
+import { anySignal, errorCode, isAbort, timeoutSignal } from '@agent-layers/core';
+
+export type OidcErrorCode = 'config' | 'unreachable' | 'response' | 'invalid_token' | 'credentials';
 
 /** Failure of the OIDC adapter. Messages never contain tokens or client secrets. */
 export class OidcError extends Error {
   override name = 'OidcError';
-  readonly code: string;
-  constructor(code: 'config' | 'unreachable' | 'response' | 'invalid_token' | 'credentials', message: string, options?: ErrorOptions) {
+  readonly code: OidcErrorCode;
+  constructor(code: OidcErrorCode, message: string, options?: ErrorOptions) {
     super(message, options);
     this.code = code;
   }
+}
+
+/** Why a request got no answer, safe to show: the system error code (`ECONNREFUSED`, `ENOTFOUND`), else `network error`. */
+const failureClass = (err: unknown): string => errorCode(err) ?? 'network error';
+
+/**
+ * The failure of a readiness probe, with the provider host first, so an operator reads which service did not answer.
+ * An abort passes through unchanged.
+ */
+export function probeFailure(err: unknown, url: string): unknown {
+  if (isAbort(err) || !(err instanceof OidcError)) return err;
+  return new OidcError(err.code, `${new URL(url).host}: ${err.message}`, { cause: err });
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -107,7 +121,7 @@ export async function requestJson(fetchImpl: FetchLike, url: string, o: RequestO
   } catch (err) {
     if (o.signal?.aborted) throw o.signal.reason;
     if (err instanceof OidcError) throw err;
-    throw new OidcError('unreachable', `${o.what}: request failed (${timeout?.aborted ? `timed out after ${o.timeoutMs}ms` : 'network error'})`);
+    throw new OidcError('unreachable', `${o.what}: request failed (${timeout?.aborted ? `timed out after ${o.timeoutMs}ms` : failureClass(err)})`);
   }
   let body: unknown;
   try {
@@ -125,11 +139,30 @@ export async function requestJson(fetchImpl: FetchLike, url: string, o: RequestO
   return obj;
 }
 
+/**
+ * Reaches `url` without a credential (a GET, redirects not followed): resolves with the HTTP status, whatever it is,
+ * since any answer proves the host serves; rejects when nothing answers or the answer is a server error.
+ */
+export async function reach(fetchImpl: FetchLike, url: string, o: { timeoutMs: number; what: string; signal?: AbortSignal }): Promise<number> {
+  const timeout = timeoutSignal(o.timeoutMs);
+  const signal = anySignal(o.signal, timeout);
+  let res: Response;
+  try {
+    res = await fetchImpl(url, { method: 'GET', headers: { accept: 'application/json' }, redirect: 'manual', signal });
+  } catch (err) {
+    if (o.signal?.aborted) throw o.signal.reason;
+    throw new OidcError('unreachable', `${o.what}: request failed (${timeout?.aborted ? `timed out after ${o.timeoutMs}ms` : failureClass(err)})`);
+  }
+  await res.body?.cancel().catch(() => {});
+  if (res.status >= 500) throw new OidcError('response', `${o.what}: HTTP ${res.status}`);
+  return res.status;
+}
+
 /** Fetches an OpenID Provider configuration (OpenID Connect Discovery 1.0) and checks that it names `issuer`. */
-export async function discover(fetchImpl: FetchLike, issuer: string, limits: HttpLimits, allowHttp?: boolean): Promise<Record<string, unknown>> {
+export async function discover(fetchImpl: FetchLike, issuer: string, limits: HttpLimits, allowHttp?: boolean, signal?: AbortSignal): Promise<Record<string, unknown>> {
   secureUrl(issuer, 'issuer', allowHttp);
   const url = `${issuer.replace(/\/+$/, '')}/.well-known/openid-configuration`;
-  const doc = await requestJson(fetchImpl, url, { method: 'GET', ...limits, what: 'OIDC discovery' });
+  const doc = await requestJson(fetchImpl, url, { method: 'GET', ...limits, what: 'OIDC discovery', ...(signal ? { signal } : {}) });
   // Mix-up defence: the document must be the one of the expected issuer.
   if (doc.issuer !== issuer) throw new OidcError('config', 'OIDC discovery: the document names a different issuer');
   return doc;

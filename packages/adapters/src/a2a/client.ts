@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import {
-  activeTrace, anySignal, ATTR, BOUNDS_STOP, BoundsExceeded, defineLimits, isAbort, limitValue, messageText, noMappings, outboundBounds, RunRefused, timeoutSignal,
+  activeTrace, anySignal, ATTR, BOUNDS_STOP, BoundsExceeded, defineLimits, errorCode, isAbort, limitValue, messageText, noMappings, outboundBounds, RunRefused, timeoutSignal,
   type CallContext, type JsonValue, type LimitValue, type Mappings, type OutboundCall, type RunInput, type RunResult, type RuntimePort, type Stack, type StopReason, type Usage,
 } from '@agent-layers/core';
 import {
@@ -45,6 +46,27 @@ export const RUNTIME_LIMITS = defineLimits({
 });
 
 const RUN_FAILED = 'remote agent call failed';
+
+/** `ext` key of a failed run: the class of the failure (`ECONNREFUSED`, `http_401`, `rpc_-32601`), never its text. */
+export const ERROR_KEY = 'a2a.error';
+
+/** An error this adapter raised itself: its message names the problem (and the host), its class is known. */
+interface ClassifiedError extends Error { a2aClass: string }
+const classified = (message: string, a2aClass: string): ClassifiedError => Object.assign(new Error(message), { a2aClass });
+const isClassified = (err: unknown): err is ClassifiedError => err instanceof Error && typeof (err as ClassifiedError).a2aClass === 'string';
+
+/**
+ * The class of a failed call, safe to record where its text is not: this adapter's own classes (`http_<status>`,
+ * `rpc_<code>`, `card`), the system error code behind a network failure (`ECONNREFUSED`, `ENOTFOUND`), `aborted`,
+ * else `error`.
+ */
+export function errorClass(err: unknown): string {
+  if (isClassified(err)) return err.a2aClass;
+  if (isAbort(err)) return 'aborted';
+  return errorCode(err) ?? 'error';
+}
+
+const isCardUrl = (url: URL) => /agent-card\.json$|agent\.json$/.test(url.pathname);
 
 /** Loopback, private, link-local and unspecified addresses, and `localhost` names, written literally in a URL. */
 export function isPrivateHost(hostname: string): boolean {
@@ -107,6 +129,17 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
     return url;
   }
 
+  /** Fetches the agent card (no credential) and returns the JSON-RPC endpoint it offers for this version. */
+  async function readCard(cardUrl: URL, signal: AbortSignal): Promise<string> {
+    const res = await fetch(cardUrl, { headers: { accept: 'application/json', ...options.headers }, signal, redirect: 'error' });
+    if (!res.ok) throw classified(`agent card HTTP ${res.status} (${cardUrl.host})`, `http_${res.status}`);
+    const card = await res.json() as { url?: string; supportedInterfaces?: { url?: string; protocolBinding?: string; protocolVersion?: string }[] };
+    const match = (card.supportedInterfaces ?? []).find((i) => i.protocolBinding === 'JSONRPC' && (i.protocolVersion ?? '').startsWith(version));
+    const found = match?.url ?? (version === LEGACY_VERSION ? card.url : undefined);
+    if (typeof found !== 'string') throw classified(`the agent card of ${cardUrl.host} offers no JSON-RPC interface for A2A ${version}`, 'card');
+    return found;
+  }
+
   /**
    * The JSON-RPC endpoint: `endpoint`, the URL itself, or the interface of the agent card for this version. A card may
    * point only to its own origin or to `allowedEndpoints`: a card cannot send the caller's credentials elsewhere.
@@ -114,14 +147,8 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
   async function resolveEndpoint(signal: AbortSignal): Promise<string> {
     if (options.endpoint) return checkTarget(options.endpoint, 'endpoint').href;
     const cardUrl = checkTarget(options.url, 'url');
-    if (!/agent-card\.json$|agent\.json$/.test(cardUrl.pathname)) return cardUrl.href;
-    const res = await fetch(cardUrl, { headers: { accept: 'application/json', ...options.headers }, signal, redirect: 'error' });
-    if (!res.ok) throw new Error(`agent card HTTP ${res.status}`);
-    const card = await res.json() as { url?: string; supportedInterfaces?: { url?: string; protocolBinding?: string; protocolVersion?: string }[] };
-    const match = (card.supportedInterfaces ?? []).find((i) => i.protocolBinding === 'JSONRPC' && (i.protocolVersion ?? '').startsWith(version));
-    const found = match?.url ?? (version === LEGACY_VERSION ? card.url : undefined);
-    if (typeof found !== 'string') throw new Error(`the agent card offers no JSON-RPC interface for A2A ${version}`);
-    const target = checkTarget(found, 'the endpoint of the agent card');
+    if (!isCardUrl(cardUrl)) return cardUrl.href;
+    const target = checkTarget(await readCard(cardUrl, signal), 'the endpoint of the agent card');
     const allowed = target.origin === cardUrl.origin
       || (options.allowedEndpoints ?? []).some((e) => e === target.href || e === target.origin || new URL(e).origin === target.origin && target.href.startsWith(e));
     if (!allowed) throw new Error('the agent card points to an endpoint outside its origin and allowedEndpoints');
@@ -130,6 +157,26 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
 
   return {
     name,
+    /**
+     * Readiness: the agent card answers (the one at `url`, with an interface for this version), or, with an explicit
+     * endpoint, the host answers a request for the card under it (any status: its card may live elsewhere). Fetched
+     * without a credential. Rejects with the host and the cause class.
+     */
+    async probe(popts = {}) {
+      const signal = popts.signal ?? new AbortController().signal;
+      const url = options.endpoint ? checkTarget(options.endpoint, 'endpoint') : checkTarget(options.url, 'url');
+      try {
+        if (!options.endpoint && isCardUrl(url)) await readCard(url, signal);
+        else {
+          const card = new URL(`${url.pathname.replace(/\/$/, '')}/.well-known/agent-card.json`, url.origin);
+          const res = await fetch(card, { headers: { accept: 'application/json', ...options.headers }, signal, redirect: 'manual' });
+          await res.body?.cancel().catch(() => {});
+        }
+      } catch (err) {
+        if (isAbort(err) || isClassified(err)) throw err;
+        throw new Error(`remote agent unreachable (${url.host}): ${errorClass(err)}`, { cause: err });
+      }
+    },
     bind(stack: Stack, agent) {
       async function headers(ctx: CallContext, extensions = false): Promise<Record<string, string>> {
         // The remote agent joins the run's trace: the active span's context, else the one the run started with.
@@ -156,9 +203,9 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
         const target = await endpoint;
         const res = await fetch(target, { method: 'POST', headers: await headers(ctx, extensions), body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params }), signal, redirect: 'error' });
         // The body is not read on errors: it could echo the token.
-        if (!res.ok) throw new Error(`A2A HTTP ${res.status}`);
+        if (!res.ok) throw classified(`A2A HTTP ${res.status}`, `http_${res.status}`);
         const body = await res.json() as { result?: unknown; error?: { code?: number } };
-        if (body.error) throw new Error(`A2A error ${body.error.code ?? ''}`.trim());
+        if (body.error) throw classified(`A2A error ${body.error.code ?? ''}`.trim(), `rpc_${body.error.code ?? 'unknown'}`);
         return body.result;
       }
 
@@ -178,8 +225,8 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
       async function send(input: RunInput, init: Partial<CallContext>, followUp?: RemoteTask): Promise<RunResult> {
         const ctx = stack.context({ ...init, agent: agent.name });
         const by = agent.name;
-        const ended = (reason: Omit<StopReason, 'layer' | 'by'>, status: RunResult['status'] = 'failed'): RunResult =>
-          ({ runId: ctx.runId, status, output: '', reason: { ...reason, layer: 'harness', by } });
+        const ended = (reason: Omit<StopReason, 'layer' | 'by'>, status: RunResult['status'] = 'failed', ext?: Record<string, string>): RunResult =>
+          ({ runId: ctx.runId, status, output: '', reason: { ...reason, layer: 'harness', by }, ...(ext ? { ext } : {}) });
         // What is left of the run's bounds goes to the remote agent; a call that would break them is refused here,
         // without a network call. The run's signal already aborts at its deadline; this adapter's own limit caps it.
         let outbound: OutboundCall | undefined;
@@ -203,8 +250,8 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
             if (read.message !== undefined) return mappings.in(read.raw, { runId: ctx.runId, status: 'completed', output: read.message } satisfies RunResult);
             while (read.task && !TERMINAL.includes(read.task.state) && !INTERRUPTED.includes(read.task.state)) {
               taskId = read.task.id;
-              await new Promise((r) => setTimeout(r, pollMs));
-              signal.throwIfAborted();
+              // The wait ends with the run's signal, not after it: an aborted run does not wait a poll interval out.
+              await sleep(pollMs, undefined, { signal });
               read = readResult(await call(METHOD_OF[version].get, { id: read.task.id }, ctx, signal));
             }
             taskId = undefined;
@@ -236,8 +283,11 @@ export function createA2ARuntime(options: A2ARuntimeOptions, name = 'a2a', mappi
             // A task still working on the remote side is canceled there too; a failed cancel does not change the result.
             if (taskId && signal.aborted) await cancel(taskId, ctx);
             if (ctx.signal?.aborted) return ended({ code: 'aborted' }, 'stopped');
-            // A fixed detail: error text can carry URLs or credentials.
-            return isAbort(err) ? ended({ code: 'timeout', detail: 'remote agent timed out' }) : ended({ code: 'error', detail: RUN_FAILED });
+            // A fixed detail: error text can carry URLs or credentials. The class of the failure (a system error code,
+            // an HTTP status, a JSON-RPC code) is kept for the operator, on the span and on the result.
+            const cls = errorClass(err);
+            span.setAttributes({ [ERROR_KEY]: cls });
+            return isAbort(err) ? ended({ code: 'timeout', detail: 'remote agent timed out' }) : ended({ code: 'error', detail: RUN_FAILED }, 'failed', { [ERROR_KEY]: cls });
           } finally {
             // Settled with what the remote run reported; an unreported spend keeps its whole reservation.
             outbound?.reservation.settle(reported);
