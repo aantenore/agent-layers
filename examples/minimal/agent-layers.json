@@ -141,7 +141,10 @@
       "description": "Enterprise systems for identity, authorization, guardrails, state and model access. Responses are cached by the model gateway (LiteLLM with Valkey) behind openai-compatible, so no in-process cache.",
       "extends": "pilot",
       "tier": "production",
-      "gateway": { "host": "0.0.0.0" },
+      "gateway": { "host": "0.0.0.0", "publicOrigin": "${env:GATEWAY_PUBLIC_ORIGIN:-http://localhost:8787}" },
+      "sessions": { "secret": "${env:SESSION_SECRET}" },
+      "limits": { "run": { "maxTokens": "${env:RUN_MAX_TOKENS:-200000}", "maxCostUsd": "${env:RUN_MAX_COST_USD:-5}" } },
+      "pipeline": { "pricing": { "default": { "inputPerMTok": 3, "outputPerMTok": 15 } } },
       "layers": {
         "model": {
           "adapter": "openai-compatible",
@@ -149,7 +152,7 @@
         },
         "router": null,
         "cache": null,
-        "runtime": { "adapter": "reinloop" },
+        "runtime": { "adapter": "reinloop", "options": { "tools": { "timeoutMs": "${env:TOOL_TIMEOUT_MS:-60000}" } } },
         "state": { "adapter": "sqlite-state", "options": { "path": ".agent-layers/state.db" } },
         "identity": { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER:-http://localhost:8080/realms/agents}", "audience": "${env:OIDC_AUDIENCE:-agent-runtime}" } },
         "credentials": {

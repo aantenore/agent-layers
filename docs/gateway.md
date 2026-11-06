@@ -240,6 +240,14 @@ profile, refuses to start a production-tier profile that fails the readiness gat
 stops gracefully on SIGINT or SIGTERM. `agent-layers dev` keeps using only the channels that serve themselves (the
 terminal), so the same profile works in both.
 
+`publicOrigin` is the address clients reach the gateway at; the A2A agent card advertises its interfaces under it, and
+the Host check accepts its host next to `allowedHosts` (a gateway on a non-loopback host checks `Host` only when
+`allowedHosts` is set). Without it the origin comes from `host` and `port`, and a gateway listening on
+every interface (`0.0.0.0` or `::`) advertises `http://localhost:<port>`, which no remote client can call. Set it
+whenever the host is not a loopback address and an `a2a` channel is mounted, and whenever a proxy, a load balancer or
+a TLS terminator stands in front of the gateway. The production profile of the `init` template reads it from
+`GATEWAY_PUBLIC_ORIGIN` (default `http://localhost:8787`).
+
 ## A runtime in another language
 
 Point the runtime's model client and tool client at the gateway, and give it a credential the identity layer accepts.

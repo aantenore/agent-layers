@@ -22,3 +22,12 @@ LLM_GUARD_URL=http://localhost:8000
 LLM_GUARD_TOKEN=change-me
 GATEWAY_URL=http://localhost:4000/v1
 GATEWAY_KEY=change-me
+# production gateway: the public address clients reach (the A2A agent card advertises it); the gateway listens
+# on 0.0.0.0, so set it to the load balancer or DNS name in front of it. GATEWAY_URL above is the model gateway.
+GATEWAY_PUBLIC_ORIGIN=http://localhost:8787
+# production: key of the session-id digest. Generate one, never commit it: openssl rand -hex 32
+SESSION_SECRET=
+# production: run budget and the tool time limit of the reinloop runtime (defaults shown)
+RUN_MAX_TOKENS=200000
+RUN_MAX_COST_USD=5
+TOOL_TIMEOUT_MS=60000

@@ -18,10 +18,29 @@ const RENAMES: Record<string, string> = { _gitignore: '.gitignore', '_env.exampl
 
 export interface InitArgs { dir?: string; template?: string; runtime?: string; name?: string; agent?: string; force?: boolean; yes?: boolean }
 
-const version = () => (JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string }).version;
+const manifest = () => JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string; engines?: { node?: string } };
+const version = () => manifest().version;
+
+/**
+ * Why `node` cannot run a generated project (its tests and tools are TypeScript files run through Node's type
+ * stripping), or undefined when it can. Only a `>=x.y.z` range is checked; any other form is left to npm.
+ */
+export function nodeVersionProblem(node: string, range: string | undefined): string | undefined {
+  const min = range && /^\s*>=\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?\s*$/.exec(range);
+  if (!min) return undefined;
+  const have = node.replace(/^v/, '').split('.').map((n) => Number.parseInt(n, 10) || 0);
+  const need = [1, 2, 3].map((i) => Number(min[i] ?? 0));
+  for (let i = 0; i < 3; i++) {
+    if ((have[i] ?? 0) > need[i]!) return undefined;
+    if ((have[i] ?? 0) < need[i]!) return `Node.js ${node} is too old for an agent-layers project, which needs ${range.trim()} (its tests and tools are TypeScript files run by Node itself); install a newer Node.js and run init again`;
+  }
+  return undefined;
+}
 
 /** Scaffolds an agent project with all eleven layers wired. Refuses a non-empty folder without --force. */
 export async function init(io: Io, args: InitArgs): Promise<number> {
+  const tooOld = nodeVersionProblem(process.versions.node, manifest().engines?.node);
+  if (tooOld) throw new UsageError(tooOld);
   const template = args.template ?? 'minimal';
   const layers = TEMPLATES[template];
   if (!layers) throw new UsageError(`unknown template "${template}" (available: ${Object.keys(TEMPLATES).filter((t) => TEMPLATES[t] !== 'planned').join(', ')})`);
@@ -48,7 +67,7 @@ export async function init(io: Io, args: InitArgs): Promise<number> {
     written.push(relative(dir, target) || rel);
   }
   io.out(`Created ${name} (${template}) in ${dir}: ${written.length} files, all eleven layers wired.`);
-  io.out(`Next:\n  cd ${relative(io.cwd, dir) || '.'}\n  npm install\n  npx agent-layers check\n  npx agent-layers dev`);
+  io.out(`Next:\n  cd ${relative(io.cwd, dir) || '.'}\n  npm install\n  npm run check\n  npm run dev`);
   return 0;
 }
 

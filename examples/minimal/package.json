@@ -9,7 +9,12 @@
     "dev": "agent-layers dev",
     "check": "agent-layers check",
     "test": "node --test \"tests/**/*.test.ts\"",
+    "test:live": "node --test \"tests/**/*.test.ts\"",
+    "test:stack": "agent-layers test",
     "eval": "agent-layers eval evals/smoke.jsonl --agent assistant",
+    "layers": "agent-layers layers",
+    "diff": "agent-layers diff",
+    "gateway": "agent-layers gateway",
     "deploy": "agent-layers deploy --profile production"
   },
   "dependencies": {

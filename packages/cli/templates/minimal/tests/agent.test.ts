@@ -33,7 +33,11 @@ test('smoke dataset passes offline with the scripted model', async () => {
   }
 });
 
+/** The live test runs only when asked: `npm run test:live`, or AGENT_LAYERS_LIVE=1. `npm test` stays offline. */
+const live = process.env.AGENT_LAYERS_LIVE === '1' || process.env.npm_lifecycle_event === 'test:live';
+
 test('the agent answers through the local model', { timeout: 180_000 }, async (t) => {
+  if (!live) return t.skip('set AGENT_LAYERS_LIVE=1 (or run npm run test:live) to run the local model');
   const base = (process.env.LLM_BASE_URL ?? 'http://localhost:11434/v1').replace(/\/$/, '');
   const model = process.env.LLM_MODEL ?? 'qwen3:4b';
   try {
