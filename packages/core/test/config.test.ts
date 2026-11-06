@@ -124,3 +124,32 @@ test('tool source names may not extend another source name with the separator', 
   assert.doesNotThrow(() => resolveProfile({ layers: { tools: tools(['crm', 'crm2', 'crm_admin']) } }));
   assert.throws(() => resolveProfile({ layers: { tools: tools(['a']) }, profiles: { p: { layers: { tools: tools(['a__b']) } } } }, 'p'), /\(profile p\)/);
 });
+
+test('deferredEnv collects the variables that are not set and keeps their references; sessions are interpolated', () => {
+  const text = JSON.stringify({
+    sessions: { secret: '${env:SESSION_SECRET}' },
+    layers: { model: { adapter: 'm', options: { url: '${env:URL:-http://x}', key: '${env:KEY}' } } },
+  });
+  const deferred = new Set<string>();
+  const loose = parseConfig(text, { env: {}, deferredEnv: deferred });
+  assert.deepEqual([...deferred].sort(), ['KEY', 'SESSION_SECRET']);
+  assert.deepEqual(loose.layers.model?.options, { url: 'http://x', key: '${env:KEY}' });
+  assert.equal(loose.sessions?.secret, '${env:SESSION_SECRET}');
+  assert.throws(() => parseConfig(text, { env: { KEY: 'k' } }), /\$\.sessions\.secret: environment variable SESSION_SECRET is not set/);
+  assert.equal(parseConfig(text, { env: { KEY: 'k', SESSION_SECRET: 's3' } }).sessions?.secret, 's3');
+});
+
+test('deferredEnv leaves a limit that is an unset reference unchecked; once set it is coerced and range-checked', () => {
+  const text = JSON.stringify({
+    layers: { model: { adapter: 'm' } },
+    limits: { run: { maxTokens: '${env:RUN_MAX_TOKENS}' }, check: { timeoutMs: '${env:CHECK_TIMEOUT_MS:-30000}' } },
+  });
+  const deferred = new Set<string>();
+  const loose = parseConfig(text, { env: {}, deferredEnv: deferred });
+  assert.deepEqual([...deferred], ['RUN_MAX_TOKENS']);
+  assert.equal(loose.limits.run?.maxTokens, '${env:RUN_MAX_TOKENS}');
+  assert.equal(loose.limits.check?.timeoutMs, 30000);
+  assert.throws(() => parseConfig(text, { env: {} }), /\$\.limits\.run\.maxTokens: environment variable RUN_MAX_TOKENS is not set/);
+  assert.throws(() => parseConfig(text, { env: { RUN_MAX_TOKENS: 'lots' }, deferredEnv: new Set() }), /\$\.limits\.run\.maxTokens: must be an integer/);
+  assert.equal(parseConfig(text, { env: { RUN_MAX_TOKENS: '1000' } }).limits.run?.maxTokens, 1000);
+});

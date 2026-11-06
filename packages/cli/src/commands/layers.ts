@@ -4,12 +4,16 @@ import { resolve } from 'node:path';
 import type { Io } from '../io.ts';
 import { CONFIG_FILE, installedAdapters, openProject } from '../project.ts';
 
-/** Prints the eleven layers by plane: ports and versions, the adapter each slot uses, installed adapters. */
+/**
+ * Prints the eleven layers by plane: ports and versions, the adapter each slot uses, installed adapters. Needs no
+ * secret: the variables the profile would need and are not set are listed instead.
+ */
 export async function layers(io: Io, args: { config?: string; profile?: string }): Promise<number> {
   const hasConfig = existsSync(resolve(io.cwd, args.config ?? CONFIG_FILE));
-  const project = hasConfig ? await openProject(io, args) : undefined;
+  const project = hasConfig ? await openProject(io, { ...args, deferEnv: true }) : undefined;
   const installed = await installedAdapters(project?.dir ?? io.cwd);
   if (project) io.out(`profile ${project.config.profile ?? '(base)'} · tier ${project.config.tier}`);
+  if (project?.missingEnv.length) io.out(`would need: ${project.missingEnv.join(', ')} (not set)`);
   for (const plane of PLANES) {
     io.out(`\n${plane.name}`);
     for (const l of LAYERS.filter((x) => x.plane === plane.plane)) {

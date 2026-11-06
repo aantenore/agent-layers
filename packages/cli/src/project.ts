@@ -17,6 +17,8 @@ export interface Project {
   registry: AdapterRegistry;
   /** Process environment over the project's .env file. */
   env: Record<string, string | undefined>;
+  /** With `deferEnv`: the variables the profile needs that are not set (their references stay in `config`). */
+  missingEnv: string[];
 }
 
 export function configPath(io: Io, flag?: string): string {
@@ -25,13 +27,18 @@ export function configPath(io: Io, flag?: string): string {
   return file;
 }
 
-/** Loads the config with one profile applied and a registry that finds the adapters of @agent-layers/adapters and plugins. */
-export async function openProject(io: Io, opts: { config?: string; profile?: string }): Promise<Project> {
+/**
+ * Loads the config with one profile applied and a registry that finds the adapters of @agent-layers/adapters and plugins.
+ * With `deferEnv` (commands that only describe a profile), a variable that is not set is listed in `missingEnv`
+ * instead of failing.
+ */
+export async function openProject(io: Io, opts: { config?: string; profile?: string; deferEnv?: boolean }): Promise<Project> {
   const file = configPath(io, opts.config);
   const dir = dirname(file);
   const raw = await readRawConfig(file);
   const env = { ...dotenv(dir), ...io.env };
-  const config = parseConfig(await readFile(file, 'utf8'), { file, dir, env, ...(opts.profile ? { profile: opts.profile } : {}) });
+  const deferred = opts.deferEnv ? new Set<string>() : undefined;
+  const config = parseConfig(await readFile(file, 'utf8'), { file, dir, env, ...(opts.profile ? { profile: opts.profile } : {}), ...(deferred ? { deferredEnv: deferred } : {}) });
   const registry = new AdapterRegistry({ loader: packageLoader(dir) });
   for (const plugin of config.plugins) {
     try {
@@ -40,7 +47,7 @@ export async function openProject(io: Io, opts: { config?: string; profile?: str
       throw new ConfigError([`plugins: "${plugin}" failed to load: ${err instanceof Error ? err.message : String(err)}`], file);
     }
   }
-  return { file, dir, raw, config, registry, env };
+  return { file, dir, raw, config, registry, env, missingEnv: [...(deferred ?? [])].sort() };
 }
 
 /** Values from `<dir>/.env`; the process environment wins over them. */

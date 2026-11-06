@@ -51,7 +51,7 @@ export interface ModelPrice { inputPerMTok?: number; outputPerMTok?: number }
 
 /** Limits that belong to no single layer (see docs/limits.md). */
 export interface LimitsConfig {
-  check?: { timeoutMs?: number; deployTimeoutMs?: number; listToolsTimeoutMs?: number };
+  check?: { timeoutMs?: number; modelTimeoutMs?: number; deployTimeoutMs?: number; listToolsTimeoutMs?: number };
   /** Largest `ext` bag kept on a shape the core passes on (default 16384 bytes). */
   extBytes?: number;
   /** Bounds of every run; see docs/limits.md. */
@@ -235,19 +235,36 @@ function languageProblems(block: Record<string, unknown>, prefix: string, base?:
 
 const ENV_REF = /\$\{env:([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
-/** Replaces `${env:X}` and `${env:X:-default}` in every string. Missing variables without a default are errors. */
-export function interpolate<T>(value: T, env: Record<string, string | undefined>, errors: string[] = [], path = '$'): T {
+/**
+ * Replaces `${env:X}` and `${env:X:-default}` in every string. Missing variables without a default are errors, or,
+ * with `deferred`, are added to it and their reference is left in place.
+ */
+export function interpolate<T>(value: T, env: Record<string, string | undefined>, errors: string[] = [], path = '$', deferred?: Set<string>): T {
   if (typeof value === 'string') {
-    return value.replace(ENV_REF, (_m, name: string, fallback: string | undefined) => {
+    return value.replace(ENV_REF, (ref, name: string, fallback: string | undefined) => {
       const v = env[name];
       if (v !== undefined && v !== '') return v;
       if (fallback !== undefined) return fallback;
+      if (deferred) {
+        deferred.add(name);
+        return ref;
+      }
       errors.push(`${path}: environment variable ${name} is not set`);
       return '';
     }) as T;
   }
-  if (Array.isArray(value)) return value.map((v, i) => interpolate(v, env, errors, `${path}[${i}]`)) as T;
-  if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, interpolate(v, env, errors, `${path}.${k}`)])) as T;
+  if (Array.isArray(value)) return value.map((v, i) => interpolate(v, env, errors, `${path}[${i}]`, deferred)) as T;
+  if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, interpolate(v, env, errors, `${path}.${k}`, deferred)])) as T;
+  return value;
+}
+
+const HAS_ENV_REF = new RegExp(ENV_REF.source);
+
+/** `value` without the strings that still hold a `${env:X}` reference (deferred): they have no value to check yet. */
+function withoutEnvRefs<T>(value: T): T {
+  if (typeof value === 'string') return (HAS_ENV_REF.test(value) ? undefined : value) as T;
+  if (Array.isArray(value)) return value.map(withoutEnvRefs) as T;
+  if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, withoutEnvRefs(v)])) as T;
   return value;
 }
 
@@ -335,6 +352,12 @@ function toolSourceNames(layers: LayersConfig): string[] {
 export interface LoadOptions {
   profile?: string;
   env?: Record<string, string | undefined>;
+  /**
+   * Collects the variables that are not set and have no default instead of failing: their `${env:X}` references stay
+   * in the resolved config. For commands that only describe a profile (a deploy dry run, `layers`), never for one
+   * that runs it.
+   */
+  deferredEnv?: Set<string>;
 }
 
 /** Parses, validates, applies the profile and interpolates environment variables. */
@@ -356,17 +379,20 @@ export function parseConfig(text: string, opts: LoadOptions & { file?: string; d
     throw err;
   }
   const envErrors: string[] = [];
-  const layers = interpolate(resolved.layers, env, envErrors, '$.layers');
-  const agents = interpolate(resolved.agents, env, envErrors, '$.agents');
+  const deferred = opts.deferredEnv;
+  const layers = interpolate(resolved.layers, env, envErrors, '$.layers', deferred);
+  const agents = interpolate(resolved.agents, env, envErrors, '$.agents', deferred);
+  const sessions = resolved.sessions ? { sessions: interpolate(resolved.sessions, env, envErrors, '$.sessions', deferred) } : {};
   // Limits may come from ${env:...}: interpolated strings become numbers, then their ranges are checked again.
   const sections = coerceLimits(STACK_LIMITS, {
-    gateway: interpolate(resolved.gateway, env, envErrors, '$.gateway'),
-    pipeline: interpolate(resolved.pipeline, env, envErrors, '$.pipeline'),
-    limits: interpolate(resolved.limits, env, envErrors, '$.limits'),
+    gateway: interpolate(resolved.gateway, env, envErrors, '$.gateway', deferred),
+    pipeline: interpolate(resolved.pipeline, env, envErrors, '$.pipeline', deferred),
+    limits: interpolate(resolved.limits, env, envErrors, '$.limits', deferred),
   });
-  if (!envErrors.length) envErrors.push(...validateLimits(STACK_LIMITS, sections, '$.'));
+  // A limit left as a deferred reference is not range-checked: it has no value until the variable is set.
+  if (!envErrors.length) envErrors.push(...validateLimits(STACK_LIMITS, deferred ? withoutEnvRefs(sections) : sections, '$.'));
   if (envErrors.length) throw new ConfigError(envErrors.map((e) => profile ? `${e} (profile ${profile})` : e), opts.file);
-  return { ...resolved, layers, agents, ...sections };
+  return { ...resolved, layers, agents, ...sessions, ...sections };
 }
 
 export async function loadConfig(file: string, opts: LoadOptions = {}): Promise<ResolvedConfig> {
