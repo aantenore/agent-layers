@@ -6,6 +6,7 @@ import { checkAdapter, inboundFetch } from '@agent-layers/conformance';
 import { serveStack, type GatewayHandle } from '@agent-layers/gateway';
 import { credentialAdapter, identityAdapter } from '@agent-layers/adapters/static-identity';
 import { channelAdapter, createMcpServerChannel } from '../../src/mcp/index.ts';
+import { PACKAGE_VERSION } from '../../src/version.ts';
 
 const seen: { tool: string; subject?: string; token?: string }[] = [];
 
@@ -48,9 +49,10 @@ async function initialize(token = 'dev-token'): Promise<string> {
     body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } } }),
   });
   assert.equal(res.status, 200);
-  const body = await res.json() as { result: { protocolVersion: string; capabilities: { tools: unknown } } };
+  const body = await res.json() as { result: { protocolVersion: string; capabilities: { tools: unknown }; serverInfo: { name: string; version: string } } };
   assert.equal(body.result.protocolVersion, '2025-06-18');
   assert.ok(body.result.capabilities.tools);
+  assert.deepEqual(body.result.serverInfo, { name: 'agent-layers', version: PACKAGE_VERSION }, 'serverInfo reports the package version');
   const id = res.headers.get('mcp-session-id');
   assert.ok(id);
   await fetch(url(), { method: 'POST', headers: headers(token, id), body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) });
@@ -215,7 +217,7 @@ test('modern server/discover lists the served revisions and names the server, wi
   assert.equal(r.resultType, 'complete');
   assert.deepEqual(r.supportedVersions, [MODERN, '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']);
   assert.ok(r.capabilities.tools);
-  assert.equal(r._meta['io.modelcontextprotocol/serverInfo'].name, 'agent-layers');
+  assert.deepEqual(r._meta['io.modelcontextprotocol/serverInfo'], { name: 'agent-layers', version: PACKAGE_VERSION });
   assert.equal(typeof r.ttlMs, 'number');
   assert.equal(r.cacheScope, 'private');
 });

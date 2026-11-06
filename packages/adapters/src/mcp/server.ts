@@ -4,6 +4,7 @@ import {
   type ToolSpec,
 } from '@agent-layers/core';
 
+import { PACKAGE_VERSION } from '../version.ts';
 import { SERVER_LIMITS } from './limits.ts';
 
 /** Options of the inbound descriptor. */
@@ -55,7 +56,8 @@ export const MCP_SERVER_VERSIONS = {
   legacy: ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'],
 } as const;
 
-const SERVER_VERSION = '0.1.0';
+/** What `serverInfo` reports: the version of this package. */
+const SERVER_VERSION = PACKAGE_VERSION;
 const LATEST_LEGACY = MCP_SERVER_VERSIONS.legacy[0];
 const ALL_VERSIONS: readonly string[] = [...MCP_SERVER_VERSIONS.modern, ...MCP_SERVER_VERSIONS.legacy];
 const isLegacy = (v: string) => (MCP_SERVER_VERSIONS.legacy as readonly string[]).includes(v);

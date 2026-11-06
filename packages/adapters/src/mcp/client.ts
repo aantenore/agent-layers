@@ -1,4 +1,5 @@
 import { activeTrace, limitValue, type BoundCredentials, type LimitValue, type TelemetryPort } from '@agent-layers/core';
+import { PACKAGE_VERSION } from '../version.ts';
 import { CONNECTION_LIMITS, TOOLS_LIMITS } from './limits.ts';
 import { HttpTransport, McpHttpError, StdioTransport, type HeaderMap, type McpServerOptions, type Transport, type TransportLimits } from './transport.ts';
 
@@ -6,7 +7,8 @@ export const MCP_PROTOCOL_VERSION = '2025-06-18';
 
 /** What a connection needs besides its config: environment, connection credentials, and telemetry for trace context. */
 export interface McpConnectDeps { env?: Record<string, string | undefined>; credentials?: BoundCredentials; telemetry?: TelemetryPort }
-const CLIENT_INFO = { name: 'agent-layers-mcp', version: '0.1.0' };
+/** What `initialize` sends as `clientInfo`: the version of this package. */
+const CLIENT_INFO = { name: 'agent-layers-mcp', version: PACKAGE_VERSION };
 
 export interface McpToolInfo {
   name: string;

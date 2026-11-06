@@ -7,6 +7,7 @@ import {
   A2A_VERSION, BOUNDS_STOPS, BOUNDS_URI, BOUNDS_URIS, ERRORS, getResult, LEGACY_VERSION, METHODS, partsText, sendResult, streamEvent, TERMINAL,
   type BoundsReport, type TaskRunMetadata, type TaskState, type TaskValue, type WireVersion,
 } from './wire.ts';
+import { PACKAGE_VERSION } from '../version.ts';
 
 /** Options of the inbound descriptor. */
 export interface A2AServerOptions {
@@ -18,7 +19,7 @@ export interface A2AServerOptions {
   defaultAgent?: string;
   /** Description per agent in its card. */
   descriptions?: Record<string, string>;
-  /** Version of the agents in their cards (default `0.1.0`). */
+  /** Version of the agents in their cards (default: the version of this package). */
   version?: string;
   /** `provider` of the cards. */
   provider?: { organization: string; url: string };
@@ -169,7 +170,7 @@ export function createA2AServerChannel(options: A2AServerOptions = {}, name = 'a
         return {
           name: agent,
           description: options.descriptions?.[agent] ?? `Agent ${agent}`,
-          version: options.version ?? '0.1.0',
+          version: options.version ?? PACKAGE_VERSION,
           supportedInterfaces: [
             { url, protocolBinding: 'JSONRPC', protocolVersion: A2A_VERSION },
             { url, protocolBinding: 'JSONRPC', protocolVersion: LEGACY_VERSION },
