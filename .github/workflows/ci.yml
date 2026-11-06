@@ -1,12 +1,16 @@
 # On push and pull request: the `checks` job (build, typecheck, package tests, docs, swap matrix without services).
 # The other jobs are manual: trigger them from the Actions tab or with
 #   gh workflow run ci.yml -f layers='["knowledge"]'
+# The `python` job (runtimes/pydantic-ai tests, with uv) runs weekly and on dispatch, never on push.
+# Actions are pinned to commit SHAs (the comment names the release).
 name: ci
 
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 5 * * 1' # Mondays 05:17 UTC: the python job only
   workflow_dispatch:
     inputs:
       layers:
@@ -15,6 +19,10 @@ on:
         default: '["llm","knowledge","tool","guardrail","cache","telemetry"]'
       run_layer_tests:
         description: Run the per-layer live tests (starts containers)
+        type: boolean
+        default: true
+      run_python:
+        description: Run the Pydantic AI runtime tests (runtimes/pydantic-ai, with uv)
         type: boolean
         default: true
       release:
@@ -36,11 +44,12 @@ concurrency:
 
 jobs:
   checks:
+    if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -54,6 +63,8 @@ jobs:
         run: npm run test:packages
       - name: Docs check
         run: npm run docs:check
+      - name: Script tests (release tag check, telemetry settle)
+        run: node --test "scripts/test/*.test.mjs"
       # Cells with needs (Docker services, uv, a real model) are skipped without --with.
       - name: Swap matrix (cells that need no external service)
         run: node scripts/swap-matrix.mjs
@@ -63,8 +74,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - name: Syntax check (node --check)
@@ -88,6 +99,22 @@ jobs:
       - name: OpenTofu fmt and validate (pinned container image)
         run: make tofu-validate
 
+  python:
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_python) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: runtimes/pydantic-ai
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      # uv installs the Python of .python-version; the lockfile must match pyproject.toml.
+      - name: Lockfile up to date
+        run: uv lock --check
+      - name: Tests (in process, no gateway)
+        run: uv run --frozen pytest -q
+
   layer-tests:
     if: ${{ inputs.run_layer_tests }}
     needs: lint
@@ -98,8 +125,8 @@ jobs:
       matrix:
         layer: ${{ fromJSON(inputs.layers) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - name: Install dependencies
@@ -130,7 +157,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment: ${{ inputs.promote_to }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Promotion plan
         run: |
           echo "Promote to ${{ inputs.promote_to }} from ${GITHUB_SHA}"
