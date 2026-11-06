@@ -52,8 +52,10 @@ The `test` profile is prototype with telemetry written to `.agent-layers/telemet
 The `local` profile is prototype with a real model. Every adapter named in pilot and production is a dependency of
 this project, so `npm run check -- --profile production` only reports what is genuinely missing: the services those
 adapters reach (identity provider, OPA, Presidio, LLM Guard, the model gateway, Qdrant, the OTLP collector) when they
-are not running. Production keeps session state in a SQLite file (`sqlite-state`, single node) and has no in-process
-cache: the model gateway behind `openai-compatible` caches responses (LiteLLM with Valkey).
+are not running. Set the secrets listed in `.env.example` (`OIDC_CLIENT_SECRET`, `SESSION_SECRET`) first: without
+them the check stops at configuration validation. Production keeps session state in a SQLite file (`sqlite-state`,
+single node) and has no in-process cache: the model gateway behind `openai-compatible` caches responses (LiteLLM with
+Valkey).
 
 Pilot needs, besides the local model: an OTLP collector at `OTEL_EXPORTER_OTLP_ENDPOINT`, a Qdrant server at
 `QDRANT_URL`, and `uv` on the PATH (the knowledge slot starts `mcp-server-qdrant` through `uvx`, which downloads it
