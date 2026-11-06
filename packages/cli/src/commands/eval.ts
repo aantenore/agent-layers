@@ -7,9 +7,13 @@ import { openProject } from '../project.ts';
 
 export interface EvalArgs { config?: string; profile?: string; dataset?: string; agent?: string; out?: string; min?: string; token?: string }
 
-/** Runs every case of a JSON Lines dataset through an agent and scores it with the configured evaluators. */
+/**
+ * Runs every case of a JSON Lines dataset through an agent and scores it with the configured evaluators. Exit code 1
+ * when the pass rate is below `--min`; without `--min` the exit code is 0 whatever the scores, and a hint says so.
+ */
 export async function evaluate(io: Io, args: EvalArgs): Promise<number> {
   if (!args.dataset) throw new UsageError('usage: agent-layers eval <dataset.jsonl> --agent <name>');
+  const min = parseMin(args.min);
   const p = await openProject(io, args);
   const cases = (await readFile(resolve(io.cwd, args.dataset), 'utf8')).split('\n').filter((l) => l.trim()).map((l, i) => {
     try { return JSON.parse(l) as EvalCase; } catch { throw new UsageError(`${args.dataset}:${i + 1}: not valid JSON`); }
@@ -42,5 +46,14 @@ export async function evaluate(io: Io, args: EvalArgs): Promise<number> {
   else for (const l of lines) io.out(l);
   const rate = total ? passed / total : 0;
   io.err(`${passed}/${total} scores passed (${Math.round(rate * 100)}%)`);
-  return args.min !== undefined && rate < Number(args.min) ? 1 : 0;
+  if (min === undefined && rate < 1) io.err('hint: the exit code is 0 without --min; pass --min 1 to fail the command when a score fails');
+  return min !== undefined && rate < min ? 1 : 0;
+}
+
+/** `--min` as a pass rate in [0, 1]. Anything else is a usage error, not a threshold that never fails. */
+function parseMin(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = raw.trim() === '' ? NaN : Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 1) throw new UsageError('--min must be a number between 0 and 1');
+  return n;
 }
