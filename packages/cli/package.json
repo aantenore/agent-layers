@@ -2,7 +2,7 @@
   "name": "@agent-layers/cli",
   "version": "0.4.1",
   "description": "agent-layers command line: init, dev, check, test, eval, deploy, gateway",
-  "keywords": ["agent-layers", "cli", "agents", "scaffold"],
+  "keywords": ["agent-layers", "cli", "agents", "scaffold", "llm", "ai-agents", "mcp", "a2a", "opentelemetry", "guardrails", "ai-gateway", "openai-compatible", "cloudevents"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/cli#readme",
   "bugs": {
     "url": "https://github.com/aantenore/agent-layers/issues"
@@ -37,7 +37,8 @@
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --conditions=@agent-layers/source --test \"test/**/*.test.ts\"",
-    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs && node ../../scripts/pack-manifest.mjs strip",
+    "postpack": "node ../../scripts/pack-manifest.mjs restore"
   },
   "dependencies": {
     "@agent-layers/conformance": "^0.4.1",

@@ -2,7 +2,7 @@
   "name": "@agent-layers/core",
   "version": "0.4.1",
   "description": "Ports, adapter registry, composition pipelines and stack config for agent-layers",
-  "keywords": ["agent-layers", "agents", "llm", "ports-and-adapters", "composition", "sdk"],
+  "keywords": ["agent-layers", "agents", "llm", "ports-and-adapters", "composition", "sdk", "ai-agents", "mcp", "a2a", "opentelemetry", "guardrails", "ai-gateway", "openai-compatible", "cloudevents"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/core#readme",
   "bugs": {
     "url": "https://github.com/aantenore/agent-layers/issues"
@@ -36,7 +36,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "gen:schema": "node --conditions=@agent-layers/source scripts/gen-schema.ts",
     "test": "node --conditions=@agent-layers/source --test \"test/**/*.test.ts\"",
-    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs && node ../../scripts/pack-manifest.mjs strip",
+    "postpack": "node ../../scripts/pack-manifest.mjs restore"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

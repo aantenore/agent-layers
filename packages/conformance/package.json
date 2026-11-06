@@ -2,7 +2,7 @@
   "name": "@agent-layers/conformance",
   "version": "0.4.1",
   "description": "Conformance suites for agent-layers ports: prove an adapter behaves",
-  "keywords": ["agent-layers", "conformance", "testing", "adapters"],
+  "keywords": ["agent-layers", "conformance", "testing", "adapters", "agents", "ai-agents", "mcp", "a2a", "opentelemetry", "guardrails", "ai-gateway", "openai-compatible", "cloudevents"],
   "homepage": "https://github.com/aantenore/agent-layers/tree/main/packages/conformance#readme",
   "bugs": {
     "url": "https://github.com/aantenore/agent-layers/issues"
@@ -34,7 +34,8 @@
     "build": "tsc -p tsconfig.build.json && node scripts/copy-schemas.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --conditions=@agent-layers/source --test \"test/**/*.test.ts\"",
-    "prepack": "npm run build && node ../../scripts/copy-license.mjs"
+    "prepack": "npm run build && node ../../scripts/copy-license.mjs && node ../../scripts/pack-manifest.mjs strip",
+    "postpack": "node ../../scripts/pack-manifest.mjs restore"
   },
   "dependencies": {
     "@agent-layers/core": "^0.4.1"

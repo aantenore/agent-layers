@@ -21,8 +21,10 @@ dist/
 __pycache__/
 .pytest_cache/
 
-# package build output (LICENSE is copied in by prepack, schemas by the conformance build)
+# package build output (LICENSE is copied in by prepack, schemas by the conformance build; package.json.orig is the
+# manifest prepack keeps until postpack)
 packages/*/LICENSE
+packages/*/package.json.orig
 examples/adapter-package/LICENSE
 packages/conformance/schemas/
 *.tgz

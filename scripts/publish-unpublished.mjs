@@ -4,16 +4,20 @@
 //   node scripts/publish-unpublished.mjs --list         print what is missing and exit
 //   node scripts/publish-unpublished.mjs --provenance   any other flag is passed to `npm publish`
 //   node scripts/publish-unpublished.mjs --pause=<seconds>  wait between publishes (default 0)
+//   node scripts/publish-unpublished.mjs --allow-untagged   publish although the annotated tag v<version> is not at HEAD
+// A version is published only from the commit its annotated tag v<version> names (see RELEASING.md).
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { npm, readJson, ROOT, workspaces } from './lib/common.mjs';
+import { tagProblem } from './lib/release-tag.mjs';
 
 const args = process.argv.slice(2);
 const list = args.includes('--list');
 const pauseArg = args.find((a) => a.startsWith('--pause='));
 const pauseSec = Number(pauseArg?.slice('--pause='.length) ?? 0);
 if (!Number.isFinite(pauseSec) || pauseSec < 0) throw new Error(`invalid ${pauseArg}: expected seconds >= 0`);
-const publishArgs = args.filter((a) => a !== '--list' && !a.startsWith('--pause='));
+const allowUntagged = args.includes('--allow-untagged');
+const publishArgs = args.filter((a) => a !== '--list' && a !== '--allow-untagged' && !a.startsWith('--pause='));
 
 /** True when `name@version` is already on the registry; a 404 (package or version unknown) is false. */
 function published(name, version) {
@@ -32,6 +36,14 @@ if (list || missing.length === 0) {
   for (const { pkg } of missing) console.log(`${pkg.name}@${pkg.version}`);
   console.log(`${missing.length} package(s) not on the registry`);
   process.exit(0);
+}
+if (!allowUntagged) {
+  const problems = [...new Set(missing.map(({ pkg }) => pkg.version))].map((v) => tagProblem(v, ROOT)).filter(Boolean);
+  if (problems.length) {
+    for (const p of problems) console.error(`refusing to publish: ${p}`);
+    console.error('(--allow-untagged publishes anyway)');
+    process.exit(1);
+  }
 }
 for (const [i, { dir, pkg }] of missing.entries()) {
   if (i > 0 && pauseSec > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pauseSec * 1000);

@@ -1,5 +1,6 @@
 # Manual release: publishes every public workspace package not yet on npm, with provenance. Nothing runs on push.
-#   gh workflow run release.yml -f dry_run=true
+#   gh workflow run release.yml --ref v<version> -f dry_run=true
+# Actions are pinned to commit SHAs (the comment names the release).
 # Needs the repository secret NPM_TOKEN (npm granular access token, read and write on @agent-layers). See RELEASING.md.
 name: release
 
@@ -24,8 +25,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Tags too: the publish step refuses a version whose annotated tag v<version> is not at the checked-out commit.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-tags: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
