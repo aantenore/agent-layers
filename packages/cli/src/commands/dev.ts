@@ -3,14 +3,15 @@ import { createInterface } from 'node:readline';
 import { UsageError, type Io } from '../io.ts';
 import { openProject } from '../project.ts';
 import { authenticate, callerContext, reasonLine } from '../identity.ts';
-import { traceTelemetry } from '../trace.ts';
+import { errorTelemetry, traceTelemetry } from '../trace.ts';
 import { servicesOf } from './deploy.ts';
 
-export interface DevArgs { config?: string; profile?: string; agent?: string; message?: string; noDeploy?: boolean; trace?: boolean; token?: string }
+export interface DevArgs { config?: string; profile?: string; agent?: string; message?: string; noDeploy?: boolean; trace?: boolean; quiet?: boolean; token?: string }
 
 /**
  * Composes the stack for a profile, starts reference services through the deploy slot (if any are needed),
  * then talks to the agent: through the configured channels, or a built-in terminal loop. `--message` runs once.
+ * Failures (a knowledge source, a tool, a run) are printed on stderr whatever telemetry is configured, unless `--quiet`.
  */
 export async function dev(io: Io, args: DevArgs): Promise<number> {
   const p = await openProject(io, args);
@@ -18,7 +19,8 @@ export async function dev(io: Io, args: DevArgs): Promise<number> {
   const missing = ready.problems.filter((x) => x.kind === 'not-installed' || x.kind === 'load-failed');
   if (missing.length) throw new UsageError(missing.map((m) => m.message).join('\n'));
   const trace = args.trace ?? !(p.config.layers.telemetry as unknown[] | undefined)?.length;
-  const stack = await compose(p.config, { registry: p.registry, env: p.env, ...(trace ? { telemetry: [traceTelemetry(io.err)] } : {}) });
+  const extra = [...(trace ? [traceTelemetry(io.err)] : []), ...(args.quiet ? [] : [errorTelemetry(io.err)])];
+  const stack = await compose(p.config, { registry: p.registry, env: p.env, ...(extra.length ? { telemetry: extra } : {}) });
   try {
     if (p.config.layers.deploy && !args.noDeploy) {
       const services = (await servicesOf(p)).filter((s) => s.image);

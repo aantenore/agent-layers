@@ -319,3 +319,20 @@ test('a redirect is refused: the prompt and the key never reach the redirect tar
   assert.equal(target.seen.length, 0);
   await target.close();
 });
+
+test('a backend that does not answer: the error names the URL and the cause class, never the API key', async () => {
+  const { createServer } = await import('node:net');
+  const server = createServer();
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as { port: number };
+  await new Promise<void>((r) => server.close(() => r()));
+  const model = createOpenAICompatibleModel({ baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'k-secret' });
+  for (const call of [() => model.chat(req, ctx), async () => { for await (const _ of model.stream!(req, ctx)) { /* drain */ } }]) {
+    await assert.rejects(call(), (err: Error) => {
+      assert.match(err.message, new RegExp(`^request to http://127\\.0\\.0\\.1:${port}/v1/chat/completions failed: ECONNREFUSED$`));
+      assert.ok(!err.message.includes('k-secret'));
+      assert.ok(err.cause instanceof Error);
+      return true;
+    });
+  }
+});

@@ -1,5 +1,5 @@
 import {
-  activeTrace, anySignal, defineAdapter, defineLimits, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal, type CallContext, type LimitValue, type ModelDelta,
+  activeTrace, anySignal, defineAdapter, defineLimits, errorCode, isAbort, limitProperties, limitValue, PORT_VERSIONS, timeoutSignal, type CallContext, type LimitValue, type ModelDelta,
   type ModelPort, type ModelReply, type ModelRequest,
 } from '@agent-layers/core';
 import { createOpenAICompatibleChannel, type OpenAICompatibleChannelOptions } from './inbound.ts';
@@ -74,6 +74,11 @@ export function createOpenAICompatibleModel(options: OpenAICompatibleOptions, na
       signal: anySignal(timeoutSignal(timeoutMs), ctx.signal),
       // The body carries the prompt and the headers the API key: a redirect is refused, never followed.
       redirect: 'manual',
+    }).catch((err: unknown) => {
+      // `fetch failed` names neither the service nor the reason: say which URL did not answer and the class of the
+      // failure (`ECONNREFUSED`, `ENOTFOUND`), never the headers. Aborts and timeouts pass through unchanged.
+      if (isAbort(err)) throw err;
+      throw new Error(scrub(`request to ${url} failed: ${errorCode(err) ?? 'network error'}`), { cause: err });
     });
     if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
       await res.body?.cancel().catch(() => {});
