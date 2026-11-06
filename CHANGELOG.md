@@ -2,6 +2,82 @@
 
 Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released with the same version. See [RELEASING.md](RELEASING.md).
 
+## Unreleased
+
+### Fixed
+
+- `agent-layers check` no longer reports `ok` for a remote service that does not answer. The `a2a` runtime and the
+  `oidc` identity and credentials adapters expose a readiness probe (`probe()` on the instance, an optional member of
+  every port): the agent card, or the discovery document and key set, is fetched without a credential under
+  `limits.check.timeoutMs` before the suite runs. A service that does not answer fails the row on the production tier,
+  with the host and the cause class (`remote agent unreachable (agents.example.com): ECONNREFUSED`), and skips it on
+  other tiers. A `check` that passed against a dead A2A endpoint or OIDC issuer now fails there.
+- `check` prints what a suite skipped under the row (`skip: verify valid: needs a caller token (--token)`), and a row
+  whose suite ran no live probe (the identity suite without a caller token only refuses two malformed credentials) is
+  reported `skip`, not `ok`. `ConformanceReport` carries `attempts`, the probes that reached the instance.
+- A conformance probe that runs out of time is now aborted: `Checks.attempt` passes an `AbortSignal` to the probe and
+  every suite forwards it to the model, runtime, knowledge, tool, identity, credential, authorization and guard calls,
+  so a slow probe no longer keeps running under the next one. The timeout message names the setting to raise
+  (`timed out after 30000 ms (raise limits.check.timeoutMs)`).
+- The `a2a` runtime keeps the cause of a failed call: a failed result carries `ext["a2a.error"]` (`ECONNREFUSED`,
+  `http_401`, `rpc_-32601`; never the error text) and the `a2a.send` span the same attribute; the fixed detail
+  `remote agent call failed` is unchanged. The wait between two `GetTask` polls ends with the run's signal instead of
+  running the interval out after an abort.
+- `agent-layers eval` refuses a `--min` that is not a number between 0 and 1 (`--min abc` used to exit 0 as if the
+  threshold had passed) and, without `--min`, prints a hint when a score fails, since the exit code is then 0.
+- The MCP server (`serverInfo`), the MCP client (`clientInfo`) and the A2A agent cards report the version of
+  `@agent-layers/adapters` instead of a fixed `0.1.0`.
+- `agent-layers dev` prints on stderr a knowledge source that failed, a failed tool call, a span that threw and a
+  failed run, whatever telemetry the profile configures: with `otlp` or `jsonl-telemetry` a dead knowledge source
+  used to show nothing and the agent answered without its passages. `--quiet` hides these lines.
+- `agent-layers check` runs its probes without the configured telemetry, so the table is no longer preceded by
+  console-telemetry lines and no probe span reaches a collector; `--verbose` keeps the telemetry.
+- The `openai-compatible` model names the URL and the cause class when a request gets no answer
+  (`request to http://gateway:4000/v1/chat/completions failed: ECONNREFUSED`) instead of `fetch failed`.
+- `sessions.secret` accepts `${env:NAME}` as documented: the reference was used as the literal key.
+- `deploy --dry-run` counts the steps the plan runs and says `nothing to deploy` when the deploy adapter has nothing
+  to start, instead of announcing every layer as a service.
+- `deploy --dry-run`, `layers` and `diff` need no secret: an unset variable without a default is listed
+  (`would need: OIDC_CLIENT_SECRET, SESSION_SECRET`) instead of stopping the command; a limit left as a reference is
+  not range-checked until the variable is set. `diff` now applies the defaults of `${env:NAME:-default}` instead of
+  printing the reference.
+- The generated `npm test` is offline again: the test that runs the local model is skipped unless
+  `AGENT_LAYERS_LIVE=1` or `npm run test:live`. A project that relied on the automatic live run sets the variable.
+- `init` prints `npm run check` and `npm run dev`, and the docs and the template README use the project's scripts
+  or `npx @agent-layers/cli`: the unscoped `agent-layers` name on npm is an unrelated package with a binary of the
+  same name. The documentation check rejects the bare form.
+- The production profile of the `init` template passes the readiness gate without warnings: `sessions.secret` from
+  `SESSION_SECRET`, `limits.run.maxTokens` and `limits.run.maxCostUsd` (`RUN_MAX_TOKENS`, `RUN_MAX_COST_USD`) with
+  prices for the model `default` in `pipeline.pricing`, and the `reinloop` tool time limit (`TOOL_TIMEOUT_MS`). It
+  sets `gateway.publicOrigin` from `GATEWAY_PUBLIC_ORIGIN`, so the A2A agent card no longer advertises `localhost`
+  when the gateway listens on `0.0.0.0`.
+- The published `package.json` of every package no longer carries the `@agent-layers/source` export condition, which
+  pointed at `src/` files the tarball does not ship; the repository keeps it (`prepack` strips it, `postpack` restores
+  it).
+- The security page and the tool layer page no longer present a code sandbox, gVisor, OpenBao secret injection,
+  egress allow-lists or gateway quotas as provided: every mitigation is split into what agent-layers enforces (with
+  the adapter and file) and what is the operator's or planned.
+
+### Added
+
+- `limits.check.modelTimeoutMs` (default 120000 ms): the time limit of the model and runtime probes of `check`, which
+  wait for a model to answer; `limits.check.timeoutMs` keeps bounding every other probe.
+- `agent-layers version` (also `--version`, `-v`) prints the cli version and the version of the `@agent-layers/core`
+  it resolves.
+- `init` checks the Node.js version against the `engines` range and stops with what to install.
+- Template scripts `test:live`, `test:stack`, `layers`, `diff` and `gateway`.
+- `parseConfig` and `loadConfig` take `deferredEnv` (a `Set`), which collects the variables that are not set and
+  keeps their references instead of failing.
+- `scripts/publish-unpublished.mjs` refuses to publish a version whose annotated tag `v<version>` is missing,
+  lightweight or not at `HEAD`; `--allow-untagged` overrides it. RELEASING.md lists the order: version, CHANGELOG,
+  `release: x.y.z` commit, tag, publish, GitHub release.
+- CI: actions pinned to commit SHAs, and a `python` job that runs the `runtimes/pydantic-ai` tests with uv, weekly
+  and on dispatch.
+- Docs: a README first screen with install, a config sample, the gateway and the project status; a documentation
+  index (`docs/README.md`); a Troubleshooting section in the guide; a comparison with Llama Stack, Bedrock AgentCore,
+  traffic gateways and agent SDKs, and no "any language" claim for the SDK. npm keywords for MCP, A2A,
+  OpenTelemetry, guardrails and gateways on every package.
+
 ## 0.4.1 - 2026-11-03
 
 ### Fixed
