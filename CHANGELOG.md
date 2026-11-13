@@ -15,6 +15,9 @@ Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released w
 
 ### Changed
 
+- The README leads with the claim it can show: the same agent on the `prototype` and `production` profiles, governance
+  enforced in the gateway, and `check` and `diff` naming what production still needs. The layer table lives in
+  [docs/stack.md](docs/stack.md) and the licence table moved to [docs/licenses.md](docs/licenses.md).
 - One vocabulary for layers, slots and ports. `LAYERS` (`@agent-layers/core`) now lists the slots of each layer, and
   `slotsOf(layer)` returns them with their ports; a core test and `npm run docs:check` keep code and
   [docs/stack.md](docs/stack.md#layers-slots-and-ports) in step. The model is described everywhere as eleven layers,

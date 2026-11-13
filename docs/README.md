@@ -32,6 +32,7 @@ Every page, grouped by what you are doing. The project overview is the [reposito
 - [The language-neutral spec](../spec/README.md), [the SDK language](../spec/language.md),
   [versioning](../spec/VERSIONING.md).
 - [Vertical slice](slice.md) and [layer swap matrix](swap.md): what was run end to end, and how to re-run it.
+- [Licences of the reference technologies](licenses.md), and the note on model weights.
 
 ## Decisions
 

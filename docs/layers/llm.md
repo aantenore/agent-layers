@@ -79,7 +79,7 @@ Metal acceleration. Variables: `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` (defau
 [contracts.md](../contracts.md#host-ports-and-environment)).
 
 Model weights are licensed separately from the tools that serve them. Not every popular small model is OSI-licensed,
-so check the license of any model you swap in; see the [license note](../../README.md#licenses-of-the-reference-technologies).
+so check the license of any model you swap in; see the [license note](../licenses.md).
 
 ```bash
 make test LAYER=llm

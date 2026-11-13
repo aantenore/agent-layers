@@ -5,20 +5,85 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![node >= 22.18](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](package.json)
 
-**One config for the eleven layers of an agent, each one a swappable adapter, from a laptop prototype to production.**
+**One config takes the same agent from a laptop prototype to production, with identity, policy and guardrails enforced in a gateway outside the agent.**
 
-For teams that build an agent and have to run it against the company's identity, observability, model gateway and
-policy systems. Unlike an agent framework, agent-layers owns neither the loop nor the integrations: the core defines a
-port per layer, adapters map an open standard or a technology onto a port, and a stack config picks one adapter per
-port, per profile. The runtime is an adapter too. Moving a layer to production is a config change that
-`npm run check` proves: a readiness gate refuses a production profile on prototype adapters.
+## What it proves
+
+One agent, two profiles of the same `agent-layers.json`:
+
+- `prototype` runs offline on zero-dependency adapters.
+- `production` names your identity provider, policy engine, guardrail services and model gateway.
+
+The agent files do not change between the two. Identity, authorization, guardrails and telemetry run in the gateway,
+outside the agent's process, so they apply to an agent in any language and do not depend on its code. Before anything is deployed,
+`check` and `diff` say exactly what the production profile changes and what it still lacks.
+
+## In 60 seconds
+
+Requirements: Node >= 22.18. No key, no Docker, no network after the install.
 
 ```bash
 npx @agent-layers/cli init my-agent && cd my-agent
 npm install
-npm run dev        # talk to the agent offline, one trace line per layer
-npm run gateway    # the same stack over HTTP for any language
+npm run check                          # config, adapters, readiness gate, conformance: ends with "check passed"
+npm run dev                            # talk to the agent, one trace line per layer
+npm run diff -- prototype production   # what production changes, and what it still needs
 ```
+
+`diff` prints one line per slot, then the missing pieces (abridged here, and the last line wrapped):
+
+```text
+prototype → production
+  model          changed  mock-model → openai-compatible
+  runtime        changed  basic-runtime → reinloop
+  tools          same     util=functions
+  identity       changed  static-identity → oidc
+  authorization  changed  rules-authorization → opa
+  guardrails     changed  regex-guard → presidio, llm-guard
+  telemetry      changed  console-telemetry → otlp
+would need: GATEWAY_PUBLIC_ORIGIN, GATEWAY_URL, LLM_GUARD_URL, OIDC_AUDIENCE, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET,
+            OIDC_ISSUER, OPA_URL, PRESIDIO_ANALYZER_URL, PRESIDIO_ANONYMIZER_URL, SESSION_SECRET (not set)
+```
+
+- `changed`, `same`, `removed`: the adapter each slot uses in the two profiles. The agent, its tools and its
+  knowledge are the same files in both.
+- `would need: ...`: the environment variables the production profile reads that are not set. None has a localhost
+  fallback, so nothing points at a development service by accident.
+- `npm run check -- --profile production` fails on each of them by name until it is set. Then the readiness gate
+  runs: a production-tier profile is refused on prototype-only adapters, or without identity, authorization,
+  guardrails, telemetry and state. `npm run gateway -- --profile production` refuses to start a profile that fails it.
+
+The first run answers from a scripted model (`mock-model`), which is why it needs no key. `npm run dev -- --profile
+local` runs the same stack on a model served on your machine through an OpenAI-compatible endpoint (`.env.example`
+in the project); runs recorded on real models, with their gaps, are in [docs/slice.md](docs/slice.md).
+
+Always use the scoped name with `npx` (`npx @agent-layers/cli <command>`): the unscoped `agent-layers` name on npm
+belongs to an unrelated package.
+
+## Where to go next
+
+- **Start a project, write an adapter, go to production:** [docs/guide.md](docs/guide.md)
+- **Host a stack for any language (OpenAI-compatible, MCP, A2A, CloudEvents):** [docs/gateway.md](docs/gateway.md)
+- **Threats, and what agent-layers enforces versus what is yours:** [docs/cross-cutting/security.md](docs/cross-cutting/security.md)
+- **Every limit, its default and safe range:** [docs/limits.md](docs/limits.md)
+- **The layers, slots and ports on one page:** [docs/stack.md](docs/stack.md)
+- **Adapters, status and maturity:** [docs/adapters.md](docs/adapters.md)
+- **Why it exists and how it compares:** [docs/product.md](docs/product.md)
+- **How it works:** [docs/architecture.md](docs/architecture.md)
+- **The vertical slice, results and open gaps:** [docs/slice.md](docs/slice.md)
+- **Replace one layer by configuration alone, as a re-runnable matrix:** [docs/swap.md](docs/swap.md)
+- **Every diagram, and the colour conventions:** [docs/diagrams.md](docs/diagrams.md)
+- **The language-neutral spec:** [spec/](spec/README.md), and **the SDK language** (shapes, vocabularies, `ext`,
+  mappings): [spec/language.md](spec/language.md)
+- **Licences of the reference technologies:** [docs/licenses.md](docs/licenses.md)
+- **Every documentation page, grouped:** [docs/README.md](docs/README.md)
+
+## How it works
+
+For teams that build an agent and have to run it against the company's identity, observability, model gateway and
+policy systems. Unlike an agent framework, agent-layers owns neither the loop nor the integrations: the core defines
+ports, adapters map an open standard or a technology onto a port, and a stack config picks one adapter per slot, per
+profile. The runtime is an adapter too, so it can be replaced like anything else.
 
 The stack config, abridged (`agent-layers.json`; the full file is what `init` writes):
 
@@ -41,38 +106,27 @@ The stack config, abridged (`agent-layers.json`; the full file is what `init` wr
 }
 ```
 
-**The gateway** hosts the same stack on the network, so a runtime or an app in any language reaches every layer
-through four standards: OpenAI-compatible chat completions, MCP (streamable HTTP), A2A and CloudEvents. Identity,
-authorization, guardrails and telemetry run in the gateway, outside the agent's process. See
-[docs/gateway.md](docs/gateway.md).
+**The gateway** (`npm run gateway`) hosts the same stack on the network, so a runtime or an app in any language
+reaches it through four standards: OpenAI-compatible chat completions, MCP (streamable HTTP), A2A and CloudEvents.
+It authenticates every request, caps concurrency and rate, and applies authorization, guardrails and telemetry
+outside the agent's process. See [docs/gateway.md](docs/gateway.md).
 
 **Status.** 0.x: the API can change between minor versions (see [CHANGELOG.md](CHANGELOG.md)). Adapters are
 experimental unless [docs/adapters.md](docs/adapters.md) says otherwise. Deploy is Docker Compose today
 (`compose-deploy`); Helm and OpenTofu files under `reference/infra` are references, not a deploy adapter.
 
+## The eleven layers
+
 ![The agent-layers stack: eleven layers in six planes, one question per layer](docs/assets/stack-overview.svg)
 
-agent-layers composes the eleven layers an agent needs, from a laptop prototype to production: infrastructure,
-models, model routing and cache, runtime, knowledge, tools, identity, guardrails, interfaces, telemetry and evaluation.
+Eleven layers, each made of one or more slots (22 in total): infrastructure, models, model routing and cache, runtime,
+knowledge, tools, identity, guardrails, interfaces, telemetry and evaluation. A slot is a key under `layers` in the
+config and fills one port. agent-layers implements none of them: it composes adapters for them.
 
-It does not implement any of them. The core defines a port for each layer; adapters map an open standard, or a
-technology's native API, onto a port; a stack config picks one adapter per port, per profile. The agent runtime is
-an adapter too, so it can be replaced like anything else.
+The tables are in [docs/stack.md](docs/stack.md): [layers by plane](docs/stack.md#layers-by-plane), with the question
+each one answers, its ports and reference adapters, and [layers, slots and ports](docs/stack.md#layers-slots-and-ports).
 
-- **Every documentation page, grouped:** [docs/README.md](docs/README.md)
-- **Why it exists and how it compares:** [docs/product.md](docs/product.md)
-- **How it works:** [docs/architecture.md](docs/architecture.md)
-- **The layers on one page:** [docs/stack.md](docs/stack.md)
-- **Every diagram, and the colour conventions:** [docs/diagrams.md](docs/diagrams.md)
-- **Start a project, write an adapter, go to production:** [docs/guide.md](docs/guide.md)
-- **Host a stack for any language (OpenAI-compatible, MCP, A2A, CloudEvents):** [docs/gateway.md](docs/gateway.md)
-- **Adapters, status and maturity:** [docs/adapters.md](docs/adapters.md)
-- **Every limit, its default and safe range:** [docs/limits.md](docs/limits.md)
-- **Threats, and what agent-layers enforces versus what is yours:** [docs/cross-cutting/security.md](docs/cross-cutting/security.md)
-- **The vertical slice, results and open gaps:** [docs/slice.md](docs/slice.md)
-- **Replace one layer by configuration alone, as a re-runnable matrix:** [docs/swap.md](docs/swap.md)
-- **The language-neutral spec:** [spec/](spec/README.md)
-- **The SDK language (shapes, vocabularies, `ext`, mappings):** [spec/language.md](spec/language.md)
+Four ports (`SecretPort`, `MemoryPort`, `IngestionPort`, `FeedbackPort`) are drafts with no reference adapter yet; see [docs/adapters.md](docs/adapters.md).
 
 ## Principle
 
@@ -81,29 +135,6 @@ call. The data that crosses a port is written in one language owned by this proj
 versioned as described in [spec/VERSIONING.md](spec/VERSIONING.md)); standards and technologies appear only as adapters, which translate to it at the edges. Vocabularies and
 boundary mappings are configurable, shapes are not; extra data goes in namespaced `ext`. A new technology is an
 adapter plus its conformance test, never a core change.
-
-## The eleven layers
-
-Eleven layers, each made of one or more slots (22 in total): a slot is a key under `layers` in the config and fills
-one port. The mapping from layer to slots to ports is in [docs/stack.md](docs/stack.md#layers-slots-and-ports).
-
-| Plane | L | Layer (id) | The question it answers |
-|---|---|---|---|
-| Foundation | L0 | Infrastructure & delivery (`infra`) | Where does it run and how does it get there? |
-| Model | L1 | Models (`llm`) | Who thinks? |
-| Model | L2 | Model routing & cache (`cache`) | Which model, at what cost and latency? |
-| Agent | L3 | Agent runtime (`harness`) | How does the agent loop run and keep state? |
-| Agent | L4 | Knowledge & memory (`knowledge`) | What does it know? |
-| Agent | L5 | Tools (`tool`) | What can it do? |
-| Control | L6 | Identity & access (`identity`) | Who is it, on whose behalf, and what is allowed? |
-| Control | L7 | Guardrails (`guardrail`) | Is this content acceptable? |
-| Experience | L8 | Interfaces, channels & triggers (`interface`) | Who talks to it and what starts it? |
-| Insight | L9 | Telemetry & observability (`telemetry`) | What happened? |
-| Insight | L10 | Evaluation & improvement (`eval`) | Was it good, and if not, which layer failed? |
-
-Ports per layer, reference adapters and the request flow are in [docs/stack.md](docs/stack.md).
-
-Four ports (`SecretPort`, `MemoryPort`, `IngestionPort`, `FeedbackPort`) are drafts with no reference adapter yet; see [docs/adapters.md](docs/adapters.md).
 
 ## Request through the stack
 
@@ -144,10 +175,9 @@ flowchart TB
   classDef external fill:#ffffff,stroke:#57606a,color:#1f2328,stroke-dasharray:4 3
 ```
 
-## Quickstart
+## From a clone
 
-Requirements: Node >= 22.18. Docker and a local model server are optional (the `local` profile and the reference
-setups use them).
+To work on the repository itself, or to run the example without the published packages:
 
 ```bash
 git clone https://github.com/aantenore/agent-layers && cd agent-layers
@@ -160,12 +190,10 @@ node --conditions=@agent-layers/source --test "tests/**/*.test.ts"              
 node --conditions=@agent-layers/source ../../packages/cli/src/cli.ts diff prototype production
 ```
 
-Outside the repository, start from the published packages: `npx @agent-layers/cli init my-agent`, `npm install`,
-then `npm run check`, `npm run dev`, `npm test`, `npm run eval` and `npm run deploy` (the project's scripts; the
-unscoped `agent-layers` name on npm belongs to an unrelated package). `examples/minimal` starts
-from the `init` template (all eleven layers wired, a prototype profile on zero-dependency adapters, pilot and
-production profiles that name the reference adapters) and adds the `polyglot` and `polyglot-local` profiles, which run
-the agent on Pydantic AI over A2A.
+`examples/minimal` starts from the `init` template (all eleven layers wired, a prototype profile on zero-dependency
+adapters, pilot and production profiles that name the reference adapters) and adds the `polyglot` and
+`polyglot-local` profiles, which run the agent on Pydantic AI over A2A. A generated project has the same commands as
+scripts: `npm run check`, `npm run dev`, `npm test`, `npm run eval` and `npm run deploy`.
 
 ## Layout
 
@@ -207,49 +235,7 @@ The family: four projects, each usable alone.
   the host.
 - **[Lorebase](https://github.com/aantenore/lorebase)**: the governed, versioned knowledge graph agents read over MCP.
 
-## Licenses of the reference technologies
-
-This repository is MIT. Reference technologies are used as separate processes or services through adapters, never vendored.
-
-| Component | License | Layer (id) |
-|---|---|---|
-| reinloop | MIT | harness |
-| Ollama | MIT | llm |
-| Qdrant | Apache-2.0 | knowledge |
-| Apache Jena Fuseki | Apache-2.0 | knowledge (next) |
-| MCP Toolbox for Databases | Apache-2.0 | knowledge (next) |
-| mcp-server-qdrant | Apache-2.0 | knowledge |
-| Docling | MIT | knowledge (docs) |
-| Graphiti | Apache-2.0 | knowledge (optional) |
-| LightRAG | MIT | knowledge (optional) |
-| go-httpbin | MIT | tool |
-| Keycloak | Apache-2.0 | identity |
-| OPA | Apache-2.0 | identity |
-| Presidio | MIT | guardrail |
-| LLM Guard | MIT | guardrail |
-| LiteLLM | MIT core (the `enterprise/` directory is under a separate commercial license and is not used) | cache |
-| Valkey | BSD-3-Clause | cache |
-| OpenTelemetry Collector | Apache-2.0 | telemetry |
-| Langfuse | MIT core (the `ee/` directories are under a separate commercial license and are not used) | telemetry |
-| Jaeger | Apache-2.0 | telemetry |
-| promptfoo | MIT | eval (reference runner; EvaluatorPort adapter planned) |
-| Docker Compose | Apache-2.0 | infra |
-| Traefik | MIT | infra (docs) |
-| Argo CD | Apache-2.0 | infra (docs) |
-| OpenTofu | MPL-2.0 | infra (docs) |
-| OpenBao | MPL-2.0 | infra (docs) |
-| LibreChat | MIT | interface (planned) |
-| A2A | Apache-2.0 | interface, harness (`a2a` adapter: channel and runtime) |
-| AG-UI | MIT | interface (planned) |
-
-All of the above are OSI-approved licenses (for the split-licensed projects, only the open-source parts are used).
-Phoenix (Elastic License 2.0) and Llama Guard (Llama Community License) are deliberately excluded because their
-licenses are not OSI-approved.
-
-Model weights are licensed separately from the tools that serve them. The default `qwen3:4b` is Apache-2.0
-(`qwen2.5:3b`, for comparison, is under the Qwen Research License, which is not OSI-approved). Check the license of
-the model you ship. `LLM_MODEL` can point to any model Ollama serves.
-
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The reference technologies are used as separate processes or services through adapters,
+never vendored; their licences, and the note on model weights, are in [docs/licenses.md](docs/licenses.md).
