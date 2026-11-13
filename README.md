@@ -100,6 +100,8 @@ adapter plus its conformance test, never a core change.
 
 Ports per layer, reference adapters and the request flow are in [docs/stack.md](docs/stack.md).
 
+Four ports (`SecretPort`, `MemoryPort`, `IngestionPort`, `FeedbackPort`) are drafts with no reference adapter yet; see [docs/adapters.md](docs/adapters.md).
+
 ## Request through the stack
 
 A channel starts a run, identity verifies the caller, the runtime loops over knowledge and tools, and model calls pass

@@ -2,6 +2,8 @@
 
 Layer: `eval` (L10 Evaluation & improvement) · Version: 1.0.0 · Conformance: `checkFeedback`
 
+Status: draft. The port has a slot and a conformance suite but no reference adapter yet.
+
 ## Purpose
 
 Collect ratings and comments from people and apps about specific runs, so real usage becomes evaluation data. Feedback is tied to a run id and can be listed later to build or refresh a dataset.

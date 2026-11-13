@@ -119,5 +119,8 @@ Generated from each adapter's descriptor by `npm run docs:adapters`; `npm run do
 | `sql`, `sparql` | outbound | KnowledgePort | knowledge | standard: SQL, SPARQL 1.1 | |
 | `promptfoo` | outbound | EvaluatorPort | eval | technology: promptfoo | |
 
+Draft ports: `SecretPort`, `MemoryPort`, `IngestionPort` and `FeedbackPort` have a spec, a slot and a conformance suite
+but no reference adapter yet; the slots `secrets`, `memory`, `ingestion` and `feedback` stay empty until one ships.
+
 Technologies that speak a standard need no adapter of their own: Keycloak through `oidc`; Ollama, vLLM, LiteLLM and
 hosted APIs through `openai-compatible`; Langfuse and Jaeger through `otlp`.

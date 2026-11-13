@@ -2,6 +2,8 @@
 
 Layer: `knowledge` (L4 Knowledge & memory) · Version: 1.0.0 · Conformance: `checkMemory`
 
+Status: draft. The port has a slot and a conformance suite but no reference adapter yet.
+
 ## Purpose
 
 Let an agent keep facts across sessions and bring back the relevant ones later, scoped to a person, an agent or a session. Recall returns the same passages as [KnowledgePort](KnowledgePort.md), so memory can feed the same injection path.

@@ -2,6 +2,8 @@
 
 Layer: `infra` (L0 Infrastructure & delivery) · Version: 1.0.0 · Conformance: `checkSecrets`
 
+Status: draft. The port has a slot and a conformance suite but no reference adapter yet.
+
 ## Purpose
 
 Keep secret values out of configuration. Configuration holds references; this port turns a reference into its value at the moment it is needed.

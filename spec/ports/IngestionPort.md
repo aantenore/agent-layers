@@ -2,6 +2,8 @@
 
 Layer: `knowledge` (L4 Knowledge & memory) · Version: 1.0.0 · Conformance: `checkIngestion`
 
+Status: draft. The port has a slot and a conformance suite but no reference adapter yet.
+
 ## Purpose
 
 Fill and maintain a knowledge backend: load documents, refresh them when they change, remove them when they are obsolete. It is the write side that [KnowledgePort](KnowledgePort.md) reads from.
