@@ -1177,6 +1177,10 @@
           },
           "description": "Origins accepted besides the gateway's own; other Origin headers get 403."
         },
+        "allowInsecureBind": {
+          "type": "boolean",
+          "description": "Allow a non-loopback bind on the prototype tier or with static-identity (well-known tokens); default false: the gateway refuses to start."
+        },
         "allowedHosts": {
           "type": "array",
           "items": {

@@ -143,6 +143,14 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     : mountableInbound(stack, stack.config.gateway.inbound);
   const triggers = new Set<unknown>(stack.ports.triggers);
   const warnings = unmountedTriggers(stack);
+  const bindHost = opts.host ?? DEFAULTS.host;
+  if (!LOOPBACK.includes(bindHost.toLowerCase())) {
+    const weak = tier === 'prototype' ? 'the prototype tier' : stack.config.layers.identity?.adapter === 'static-identity' ? 'the static-identity adapter' : undefined;
+    if (weak && opts.allowInsecureBind !== true) {
+      throw new ConfigError([`gateway: refusing to listen on ${bindHost}: ${weak} accepts well-known tokens. Bind to loopback (127.0.0.1), use a production identity adapter (for example oidc), or opt in with gateway.allowInsecureBind (--allow-insecure-bind) and set gateway.allowedHosts`]);
+    }
+    if (!opts.allowedHosts) warnings.push(`gateway listens on ${bindHost} without gateway.allowedHosts: the Host header is not checked; set allowedHosts to the names clients use`);
+  }
   for (const w of warnings) telemetry.event(EVENT.configWarning, { [ATTR.layer]: 'interface', [ATTR.error]: w });
 
   let draining = false;

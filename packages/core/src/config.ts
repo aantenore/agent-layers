@@ -95,6 +95,8 @@ export interface GatewayConfig {
   allowedOrigins?: string[];
   /** Accepted `Host` names (`name` or `name:port`); default: the loopback names when bound to loopback, any otherwise. */
   allowedHosts?: string[];
+  /** Allow a non-loopback bind on the prototype tier or with a static identity adapter (well-known tokens). Default false: the gateway refuses to start. */
+  allowInsecureBind?: boolean;
   /**
    * Where a request carries its credential: `Authorization: Bearer <credential>` (`bearer`, default), or the raw value
    * of the header named by `header` (`header`, for API keys). The identity adapter verifies it either way.

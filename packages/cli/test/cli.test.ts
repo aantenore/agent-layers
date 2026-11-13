@@ -323,6 +323,15 @@ test('gateway hosts the profile on the network until stopped; production needs t
   assert.match(prod.errors(), /fails the readiness gate[\s\S]*prototype-only/);
 });
 
+test('gateway refuses --host 0.0.0.0 on the prototype profile unless --allow-insecure-bind is given', async () => {
+  const refused = captureIo(dir);
+  assert.equal(await main(['gateway', '--port', '0', '--host', '0.0.0.0'], refused.io), 1);
+  assert.match(refused.errors(), /refusing to listen on 0\.0\.0\.0[\s\S]*--allow-insecure-bind/);
+  const { io, errors } = captureIo(dir);
+  assert.equal(await gateway(io, { port: '0', host: '0.0.0.0', 'allow-insecure-bind': true }, async () => {}), 0);
+  assert.match(errors(), /warning: gateway listens on 0\.0\.0\.0 without gateway\.allowedHosts/);
+});
+
 test('gateway on a busy port fails with one line naming the address and the fix', async () => {
   const busy = createServer();
   await new Promise<void>((resolve) => busy.listen(0, '127.0.0.1', resolve));

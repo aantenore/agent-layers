@@ -78,6 +78,9 @@ Every request goes through the same steps before any route runs (details in the
    `gateway.allowedOrigins` or from `gateway.cors.origins`: 403 otherwise. Bound to loopback, the gateway answers only
    loopback `Host` names; `gateway.allowedHosts` sets the names elsewhere. This closes cross-site calls and DNS
    rebinding against a local gateway.
+   A non-loopback bind without `allowedHosts` skips the Host check and prints a warning. On the prototype tier, or with the
+   `static-identity` adapter (well-known tokens such as `dev-token`), the gateway refuses to listen on a non-loopback
+   host unless `gateway.allowInsecureBind` (`--allow-insecure-bind`) is set.
 2. **Identity.** `Authorization: Bearer <credential>` is verified through the IdentityPort into a `Caller`; the caller is
    passed to the route and to every model call, tool call and run. A credential that does not verify is a 401 with
    `WWW-Authenticate`, and the adapter's error text is never returned. A request without a credential is a 401 unless
@@ -233,7 +236,7 @@ are kept in the gateway's memory, lost on restart and not shared by replicas.
 `gateway` takes `port`, `host`, `inbound` (instance names to mount; every mountable channel and trigger by default),
 `anonymous`, `auth` (`scheme`: `bearer` by default or `header`, with `header` the header name), `approvals`
 (`enabled`, `path`; see [Approvals](#approvals)), `runs` (`enabled`, `path`; see [Runs](#runs)), `publicOrigin`, `cors`,
-`allowedOrigins`, `allowedHosts` and the limits `maxBodyBytes`, `requestTimeoutMs`,
+`allowedOrigins`, `allowedHosts`, `allowInsecureBind` and the limits `maxBodyBytes`, `requestTimeoutMs`,
 `headersTimeoutMs`, `bodyTimeoutMs`, `closeGraceMs`, `corsMaxAgeS`, `maxRequestIdChars` and `maxTraceChars`, and a profile can override
 any of them. `agent-layers gateway --profile production [--port n] [--host h]` composes the
 profile, refuses to start a production-tier profile that fails the readiness gate, prints the mounted routes, and

@@ -4,7 +4,7 @@ import { UsageError, type Io } from '../io.ts';
 import { openProject } from '../project.ts';
 import { traceTelemetry } from '../trace.ts';
 
-export interface GatewayArgs { config?: string; profile?: string; port?: string; host?: string }
+export interface GatewayArgs { config?: string; profile?: string; port?: string; host?: string; 'allow-insecure-bind'?: boolean }
 
 /** Resolves on SIGINT or SIGTERM. */
 export const untilSignal = (): Promise<void> => new Promise((resolve) => {
@@ -29,7 +29,7 @@ export async function gateway(io: Io, args: GatewayArgs, wait: () => Promise<voi
   const stack = await compose(p.config, { registry: p.registry, env: p.env, ...(trace ? { telemetry: [traceTelemetry(io.err)] } : {}) });
   try {
     const { inbound: _names, ...options } = p.config.gateway;
-    const gw = await serveStack(stack, { ...options, ...(port !== undefined ? { port } : {}), ...(args.host ? { host: args.host } : {}) })
+    const gw = await serveStack(stack, { ...options, ...(port !== undefined ? { port } : {}), ...(args.host ? { host: args.host } : {}), ...(args['allow-insecure-bind'] ? { allowInsecureBind: true } : {}) })
       .catch((err: unknown) => { throw listenError(err) ?? err; });
     io.err(`gateway ${gw.url} · profile ${p.config.profile ?? '(base)'} · tier ${p.config.tier}`);
     for (const r of gw.routes) io.err(`  ${r}`);

@@ -311,3 +311,27 @@ test('trigger runs are reported with the core attribute names', async () => {
     await stack.close();
   }
 });
+
+test('non-loopback bind: refused on the prototype tier or with static-identity unless opted in; warns without allowedHosts', async () => {
+  const proto = await stackFor('prototype');
+  const prod = await stackFor('production');
+  try {
+    await assert.rejects(serveStack(proto, { port: 0, host: '0.0.0.0' }), /refusing to listen on 0\.0\.0\.0[\s\S]*loopback[\s\S]*production identity adapter[\s\S]*allowInsecureBind/);
+    await assert.rejects(serveStack(prod, { port: 0, host: '0.0.0.0' }), /static-identity adapter/, 'a production tier with static-identity is just as open');
+    const open = await serveStack(proto, { port: 0, host: '0.0.0.0', allowInsecureBind: true });
+    const named = await serveStack(proto, { port: 0, host: '0.0.0.0', allowInsecureBind: true, allowedHosts: ['agents.internal'] });
+    const loop = await serveStack(proto, { port: 0 });
+    try {
+      assert.ok(open.warnings.some((w) => /without gateway\.allowedHosts/.test(w)));
+      assert.deepEqual(named.warnings, []);
+      assert.deepEqual(loop.warnings, []);
+    } finally {
+      await open.close();
+      await named.close();
+      await loop.close();
+    }
+  } finally {
+    await proto.close();
+    await prod.close();
+  }
+});

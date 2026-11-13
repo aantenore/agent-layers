@@ -132,6 +132,7 @@ const gateway: JsonSchema = {
     maxTraceChars: lim(GATEWAY_LIMITS.maxTraceChars, 'Longest trace context header values (parent, state) kept from the caller, each; longer or non-printable ones are dropped'),
     publicOrigin: { type: 'string', minLength: 1 },
     allowedOrigins: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Origins accepted besides the gateway\'s own; other Origin headers get 403.' },
+    allowInsecureBind: { type: 'boolean', description: 'Allow a non-loopback bind on the prototype tier or with static-identity (well-known tokens); default false: the gateway refuses to start.' },
     allowedHosts: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Accepted Host names (name or name:port); default: loopback names when bound to loopback.' },
     auth: {
       type: 'object',
