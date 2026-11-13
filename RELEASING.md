@@ -25,25 +25,25 @@ part of the npm release.
 ## Later releases
 
 1. **Version.** Set the new version in every package and in the internal dependency ranges, for example
-   `npm version 0.4.2 --workspaces --no-git-tag-version`, then update the `^0.4.1` ranges and the exact `0.4.1`
+   `npm version 0.5.0 --workspaces --no-git-tag-version`, then update the `^0.4.2` ranges and the exact `0.4.2`
    development pins on `@agent-layers/*` packages (and in `examples/minimal`) to the new version and run
    `npm install` to refresh the lockfile.
-2. **CHANGELOG.** Rename `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) to `## 0.4.2 - <date>`: what was added and
+2. **CHANGELOG.** Rename `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) to `## 0.5.0 - <date>`: what was added and
    fixed, and what was verified before release. Start a new empty `## Unreleased` above it on the next change.
-3. **Commit.** `git commit -am "release: 0.4.2"`.
-4. **Tag.** `git tag -a v0.4.2 -m 0.4.2`, then `git push origin main v0.4.2`. The tag must be annotated and at the
+3. **Commit.** `git commit -am "release: 0.5.0"`.
+4. **Tag.** `git tag -a v0.5.0 -m 0.5.0`, then `git push origin main v0.5.0`. The tag must be annotated and at the
    release commit: `scripts/publish-unpublished.mjs` refuses to publish a version whose tag `v<version>` is missing,
    lightweight or not at `HEAD` (`--allow-untagged` overrides it, for a deliberate exception only).
 5. **Publish.** From the tagged commit: `npm run release:dry`, then `npm run release` (or the workflow below). A
    version that is already on npm cannot be published again.
 6. **GitHub release.** From the CHANGELOG section of the version:
-   `gh release create v0.4.2 --title 0.4.2 --notes "$(awk '/^## 0\.4\.2 /{f=1;next} /^## /{f=0} f' CHANGELOG.md)"`.
+   `gh release create v0.5.0 --title 0.5.0 --notes "$(awk '/^## 0\.4\.2 /{f=1;next} /^## /{f=0} f' CHANGELOG.md)"`.
 
 ## From GitHub Actions
 
 `.github/workflows/release.yml` runs the same steps on manual dispatch only and publishes the missing packages with
 [provenance](https://docs.npmjs.com/generating-provenance-statements). Run it on the tag, first as a dry run:
-`gh workflow run release.yml --ref v0.4.2 -f dry_run=true`, then with `-f dry_run=false`. Releases are published from
+`gh workflow run release.yml --ref v0.5.0 -f dry_run=true`, then with `-f dry_run=false`. Releases are published from
 this workflow, with provenance, once the repository has an `NPM_TOKEN` secret or npm trusted publishing is set up for
 the `@agent-layers` packages; until then a release is published by hand as above, without provenance.
 

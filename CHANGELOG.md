@@ -4,6 +4,8 @@ Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released w
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-13
+
 ### Added
 
 - Gateway abuse protection, with Node built-ins only: `gateway.maxInflight` (503) and `gateway.maxInflightPerSubject`
@@ -12,12 +14,27 @@ Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released w
   keeps presenting credentials that fail, before the next one is verified. Every refusal carries `Retry-After`.
   `gateway.trustProxy` reads the client address from `X-Forwarded-For` behind trusted proxies. The prototype tier
   multiplies the defaults by 100. See [docs/limits.md](docs/limits.md#gateway).
+- `gateway.allowInsecureBind` (`--allow-insecure-bind`): explicit opt-in to listen on a non-loopback address with the
+  prototype tier or the `static-identity` adapter (see Changed).
+- [docs/licenses.md](docs/licenses.md): the licence table of the reference stack.
 
 ### Changed
 
+- **Behaviour change.** The gateway refuses to listen on a non-loopback address when the profile is on the prototype
+  tier or the identity adapter is `static-identity`, because both accept well-known tokens. Bind to loopback, use a
+  production identity adapter such as `oidc`, or set `gateway.allowInsecureBind` (`--allow-insecure-bind`).
+- **Behaviour change.** The `minimal` template's `production` profile has no localhost or placeholder fallback left:
+  `OIDC_ISSUER`, `GATEWAY_URL`, `GATEWAY_PUBLIC_ORIGIN`, `OIDC_AUDIENCE`, `OIDC_CLIENT_ID`, `OPA_URL`,
+  `PRESIDIO_ANALYZER_URL`, `PRESIDIO_ANONYMIZER_URL` and `LLM_GUARD_URL` are all required, so
+  `check --profile production` names each unset one instead of pointing at `localhost`. The other profiles still run
+  with no environment.
+- The `minimal` template (`init`) depends on `reinloop ^0.4.0`, and `@agent-layers/adapters` accepts `reinloop`
+  `^0.3.2 || ^0.4.0` as its optional peer.
 - The README leads with the claim it can show: the same agent on the `prototype` and `production` profiles, governance
   enforced in the gateway, and `check` and `diff` naming what production still needs. The layer table lives in
   [docs/stack.md](docs/stack.md) and the licence table moved to [docs/licenses.md](docs/licenses.md).
+- Ports without a reference adapter (`SecretPort`, `MemoryPort`, `IngestionPort`, `FeedbackPort`) are marked as draft
+  in the README, [docs/adapters.md](docs/adapters.md) and their specs.
 - One vocabulary for layers, slots and ports. `LAYERS` (`@agent-layers/core`) now lists the slots of each layer, and
   `slotsOf(layer)` returns them with their ports; a core test and `npm run docs:check` keep code and
   [docs/stack.md](docs/stack.md#layers-slots-and-ports) in step. The model is described everywhere as eleven layers,
@@ -28,10 +45,6 @@ Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released w
 
 ### Fixed
 
-- The `minimal` template's `production` profile has no localhost or placeholder fallback left: `OIDC_AUDIENCE`,
-  `OIDC_CLIENT_ID`, `OPA_URL`, `PRESIDIO_ANALYZER_URL`, `PRESIDIO_ANONYMIZER_URL` and `LLM_GUARD_URL` are required like
-  `OIDC_ISSUER`, `GATEWAY_URL` and `GATEWAY_PUBLIC_ORIGIN`, so `check --profile production` names each unset one
-  instead of pointing at `localhost`. The other profiles still run with no environment.
 - `agent-layers gateway` on a port that is taken, or that it may not bind, fails with one line naming the address and
   the fix (`cannot listen on 127.0.0.1:8787: address already in use; pick another port with --port <n> or
   gateway.port in agent-layers.json`) and exit code 1, instead of a Node.js stack trace.
