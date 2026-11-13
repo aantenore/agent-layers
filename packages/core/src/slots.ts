@@ -1,4 +1,4 @@
-import type { Layer } from './layers.ts';
+import { layerInfo, type Layer } from './layers.ts';
 import { PORTS, type PortName } from './ports/catalog.ts';
 
 export type SlotShape = 'single' | 'map' | 'list';
@@ -35,4 +35,9 @@ export type SlotName = (typeof DEFS)[number][0];
 
 export function slotInfo(slot: string): SlotInfo | undefined {
   return SLOTS.find((s) => s.slot === slot);
+}
+
+/** The slots of a layer, with the port each one fills, in the order the layer lists them. */
+export function slotsOf(layer: Layer): SlotInfo[] {
+  return layerInfo(layer).slots.map((slot) => slotInfo(slot)).filter((s): s is SlotInfo => s?.layer === layer);
 }

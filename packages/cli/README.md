@@ -24,7 +24,7 @@ Run `init` through the scoped name, and the other commands through the project's
 | `eval <dataset.jsonl>` | run and score a dataset |
 | `deploy`, `up`, `down` | plan, start or stop the services of a profile (`--dry-run` lists the variables it would need instead of failing) |
 | `diff <a> <b>` | what changes between two profiles, slot by slot |
-| `layers` | the eleven layers: ports, versions, adapters in use and installed (lists the unset variables a profile would need) |
+| `layers` | the eleven layers: slots, ports, versions, adapters in use and installed (lists the unset variables a profile would need) |
 | `gateway` | host the stack on the network, identity on every request |
 | `version` | the versions of the cli and of the `@agent-layers/core` it runs on (also `--version`, `-v`) |
 

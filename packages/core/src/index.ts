@@ -4,7 +4,7 @@ export * from './errors.ts';
 export { validate, type JsonSchema } from './schema.ts';
 export { ADAPTERS_PACKAGE, TIERS, AdapterRegistry, defineAdapter, descriptorsOf, importAdapters, isAdapterDescriptor, packageLoader } from './adapter.ts';
 export type { AdapterContext, AdapterContextInit, AdapterDescriptor, AdapterLoader, AdapterMaps, AnyAdapter, Direction, RegistryOptions, Tier } from './adapter.ts';
-export { SLOTS, slotInfo, type SlotInfo, type SlotName, type SlotShape } from './slots.ts';
+export { SLOTS, slotInfo, slotsOf, type SlotInfo, type SlotName, type SlotShape } from './slots.ts';
 export { configSchema } from './config-schema.ts';
 export {
   PRODUCTION_REQUIRES, PROFILE_ENV, agentSpec, configuredAdapters, interpolate, loadConfig, mergeLayers, parseAgentFile,

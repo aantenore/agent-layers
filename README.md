@@ -53,7 +53,7 @@ experimental unless [docs/adapters.md](docs/adapters.md) says otherwise. Deploy 
 ![The agent-layers stack: eleven layers in six planes, one question per layer](docs/assets/stack-overview.svg)
 
 agent-layers composes the eleven layers an agent needs, from a laptop prototype to production: infrastructure,
-models, model access, runtime, knowledge, tools, identity, guardrails, interfaces, telemetry and evaluation.
+models, model routing and cache, runtime, knowledge, tools, identity, guardrails, interfaces, telemetry and evaluation.
 
 It does not implement any of them. The core defines a port for each layer; adapters map an open standard, or a
 technology's native API, onto a port; a stack config picks one adapter per port, per profile. The agent runtime is
@@ -84,11 +84,14 @@ adapter plus its conformance test, never a core change.
 
 ## The eleven layers
 
+Eleven layers, each made of one or more slots (22 in total): a slot is a key under `layers` in the config and fills
+one port. The mapping from layer to slots to ports is in [docs/stack.md](docs/stack.md#layers-slots-and-ports).
+
 | Plane | L | Layer (id) | The question it answers |
 |---|---|---|---|
 | Foundation | L0 | Infrastructure & delivery (`infra`) | Where does it run and how does it get there? |
 | Model | L1 | Models (`llm`) | Who thinks? |
-| Model | L2 | Model access (`cache`) | Which model, at what cost and latency? |
+| Model | L2 | Model routing & cache (`cache`) | Which model, at what cost and latency? |
 | Agent | L3 | Agent runtime (`harness`) | How does the agent loop run and keep state? |
 | Agent | L4 | Knowledge & memory (`knowledge`) | What does it know? |
 | Agent | L5 | Tools (`tool`) | What can it do? |

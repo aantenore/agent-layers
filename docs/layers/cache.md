@@ -1,4 +1,4 @@
-# Model access
+# Model routing & cache
 
 Layer id `cache` (L2), Model plane. *Which model, at what cost and latency?*
 

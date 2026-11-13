@@ -12,7 +12,7 @@ Every agent framework ships its own integrations, and choosing the framework cho
 wrappers, its tracing, its way of calling tools. Moving to another runtime, or to the company's own systems, means
 rewriting the glue.
 
-Production needs more than a loop around a model. It needs eleven layers (infrastructure, models, model access,
+Production needs more than a loop around a model. It needs eleven layers (infrastructure, models, model routing and cache,
 runtime, knowledge, tools, identity, guardrails, interfaces, telemetry, evaluation), and nobody assembles them
 coherently: identity does not reach the tools, guardrails see the prompt but not the tool traffic, traces cannot say
 which layer failed.

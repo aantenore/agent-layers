@@ -5,7 +5,8 @@
 //
 // Checks
 //   links    relative Markdown links and #anchors resolve
-//   layers   layer ids, numbers, names, questions and planes in docs match LAYERS (packages/core)
+//   layers   layer ids, numbers, names, questions and planes in docs match LAYERS (packages/core); the layer, slot
+//            and port table of docs/stack.md equals LAYERS and SLOTS, and slot totals quoted in docs are right
 //   ports    every PORTS entry has a spec page with the same layer and version; every page is a port;
 //            port names used in docs exist
 //   env      .env.example, the environment table in docs/contracts.md and reference/*/compose.yml defaults agree
@@ -135,6 +136,32 @@ for (const file of markdown) {
       if (PORTS[port] && PORTS[port].layer !== id) fail('layers', ...where, `${port} belongs to \`${PORTS[port].layer}\`, not \`${id}\``);
     }
   });
+}
+
+// One vocabulary: docs/stack.md prints layer id, title, slots and ports exactly as packages/core declares them.
+{
+  const { SLOTS, slotsOf } = await importSource('packages/core/src/slots.ts');
+  const DOC = 'docs/stack.md';
+  const docLines = lines(join(ROOT, DOC));
+  const header = docLines.findIndex((l) => isRow(l) && splitRow(l)[0] === 'Layer id');
+  if (header < 0) fail('layers', DOC, null, 'no table with a "Layer id" column (layer id, title, slots, ports)');
+  else {
+    const rows = [];
+    for (let i = header + 2; i < docLines.length && isRow(docLines[i]); i++) rows.push({ text: docLines[i].trim(), line: i + 1 });
+    const want = LAYERS.map((l) => {
+      const slots = slotsOf(l.layer);
+      return `| \`${l.layer}\` | ${l.name} | ${slots.map((s) => `\`${s.slot}\``).join(', ')} | ${slots.map((s) => s.port).join(', ')} |`;
+    });
+    want.forEach((row, i) => { if (rows[i]?.text !== row) fail('layers', DOC, rows[i]?.line ?? header + 1, `row ${i + 1} of the layer, slot and port table should be: ${row}`); });
+    for (const extra of rows.slice(want.length)) fail('layers', DOC, extra.line, 'row is not a layer in packages/core LAYERS');
+  }
+  for (const file of markdown) {
+    lines(file).forEach((line, i) => {
+      for (const m of line.matchAll(/slots \((\d+) in total/g)) {
+        if (Number(m[1]) !== SLOTS.length) fail('layers', rel(file), i + 1, `${m[1]} slots in total, packages/core declares ${SLOTS.length}`);
+      }
+    });
+  }
 }
 
 // ---- ports ----------------------------------------------------------------------------------------------------

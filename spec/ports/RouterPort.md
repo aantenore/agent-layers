@@ -1,6 +1,6 @@
 # RouterPort
 
-Layer: `cache` (L2 Model access (routing, fallback, quotas, cache)) · Version: 1.1.0 · Conformance: `checkRouter`
+Layer: `cache` (L2 Model routing & cache (fallback, quotas)) · Version: 1.1.0 · Conformance: `checkRouter`
 
 ## Purpose
 

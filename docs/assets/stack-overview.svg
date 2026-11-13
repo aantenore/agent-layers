@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 724" width="960" height="724" role="img" aria-labelledby="t d" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
   <title id="t">The agent-layers stack: eleven layers in six planes</title>
-  <desc id="d">Infrastructure and delivery (L0) in the Foundation plane; Models (L1) and Model access (L2) in the Model plane; Agent runtime (L3), Knowledge and memory (L4) and Tools (L5) in the Agent plane; Identity and access (L6) and Guardrails (L7) in the Control plane; Interfaces, channels and triggers (L8) in the Experience plane; Telemetry (L9) and Evaluation (L10) in the Insight plane. Each layer is shown with the question it answers.</desc>
+  <desc id="d">Infrastructure and delivery (L0) in the Foundation plane; Models (L1) and Model routing and cache (L2) in the Model plane; Agent runtime (L3), Knowledge and memory (L4) and Tools (L5) in the Agent plane; Identity and access (L6) and Guardrails (L7) in the Control plane; Interfaces, channels and triggers (L8) in the Experience plane; Telemetry (L9) and Evaluation (L10) in the Insight plane. Each layer is shown with the question it answers.</desc>
   <rect width="960" height="724" rx="12" fill="#ffffff" stroke="#d0d7de"/>
   <text x="20" y="34" font-size="20" font-weight="700" fill="#1f2328">agent-layers: eleven layers, six planes</text>
   <text x="20" y="54" font-size="13" fill="#424a53">Each layer answers one question and has its own ports; adapters fill the ports from a stack config.</text>
@@ -27,7 +27,7 @@
   <rect x="190" y="190" width="738" height="40" rx="6" fill="#ffffff" stroke="#a85400"/>
   <rect x="198" y="198" width="40" height="24" rx="5" fill="#a85400"/>
   <text x="218" y="215" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">L2</text>
-  <text x="250" y="208" font-size="14" font-weight="700" fill="#1f2328">Model access (routing, fallback, quotas, cache)</text>
+  <text x="250" y="208" font-size="14" font-weight="700" fill="#1f2328">Model routing &amp; cache (fallback, quotas)</text>
   <text x="250" y="223" font-size="12.5" font-style="italic" fill="#424a53">Which model, at what cost and latency?</text>
   <text x="918" y="215" font-size="12.5" font-family="ui-monospace, Menlo, Consolas, monospace" fill="#424a53" text-anchor="end">cache</text>
 

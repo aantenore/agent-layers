@@ -183,6 +183,7 @@ test('layers shows all eleven layers by plane with the adapter in use', async ()
   for (const plane of ['Foundation', 'Model plane', 'Agent plane', 'Control plane', 'Experience plane', 'Insight plane']) assert.match(out, new RegExp(plane));
   for (const l of ['L0 infra', 'L1 llm', 'L2 cache', 'L3 harness', 'L4 knowledge', 'L5 tool', 'L6 identity', 'L7 guardrail', 'L8 interface', 'L9 telemetry', 'L10 eval']) assert.match(out, new RegExp(l));
   assert.match(out, /ModelPort 1\.1\.0\s+uses mock-model/);
+  assert.match(out, /L2 cache . Model routing & cache[^\n]*\n\s+router\s+RouterPort [\d.]+\s+uses static-router\n(?:\s+(?:standard|native):[^\n]*\n)*\s+cache\s+CachePort/, 'each layer lists its slots with their ports');
   assert.match(out, /KnowledgePort 1\.1\.0\s+uses docs=markdown-knowledge/);
   assert.match(out, /standard: openai-compatible/);
   assert.match(out, /native:\s+mock-model \(prototype\)/);

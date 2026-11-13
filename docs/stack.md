@@ -1,7 +1,7 @@
 # The stack on one page
 
-An agent in production needs eleven layers. agent-layers names them, gives each one a port, and composes adapters
-for them from a config. The core is technology neutral: every technology choice below is an adapter or a reference
+An agent in production needs eleven layers, each made of one or more slots (22 in total). agent-layers names them,
+gives each slot a port, and composes adapters for them from a config. The core is technology neutral: every technology choice below is an adapter or a reference
 setup, and each can be swapped by changing one line of config. The design is in [architecture.md](architecture.md).
 
 ![The agent-layers stack: eleven layers in six planes, one question per layer](assets/stack-overview.svg)
@@ -12,7 +12,7 @@ setup, and each can be swapped by changing one line of config. The design is in 
 |---|---|---|---|---|---|
 | Foundation | L0 | [Infrastructure & delivery](layers/infra.md) (`infra`) | Where does it run and how does it get there? | DeployPort, SecretPort | `compose-deploy` (Compose Spec); OpenBao, Kubernetes and OpenTofu planned |
 | Model | L1 | [Models](layers/llm.md) (`llm`) | Who thinks? | ModelPort | `openai-compatible` (Ollama, vLLM, LiteLLM, hosted APIs); `mock-model` for offline work |
-| Model | L2 | [Model access](layers/cache.md) (`cache`): routing, fallback, quotas, cache | Which model, at what cost and latency? | RouterPort, CachePort | `static-router`, `rule-router`, `memory-cache`; a model gateway behind `openai-compatible`; Valkey planned |
+| Model | L2 | [Model routing & cache](layers/cache.md) (`cache`): fallback, quotas | Which model, at what cost and latency? | RouterPort, CachePort | `static-router`, `rule-router`, `memory-cache`; a model gateway behind `openai-compatible`; Valkey planned |
 | Agent | L3 | [Agent runtime](layers/harness.md) (`harness`) | How does the agent loop run and keep state? | RuntimePort, StatePort, StorePort | `basic-runtime`, `reinloop`, `memory-state`, `sqlite-state`, `memory-store`, `sqlite-store`; remote runtimes over `a2a` |
 | Agent | L4 | [Knowledge & memory](layers/knowledge.md) (`knowledge`) | What does it know? | KnowledgePort, MemoryPort, IngestionPort | `markdown-knowledge`, `http-knowledge`, `mcp`; Qdrant, SQL, SPARQL planned |
 | Agent | L5 | [Tools](layers/tool.md) (`tool`) | What can it do? | ToolPort | `functions`, `http-tools`, `mcp`, `openapi` |
@@ -27,6 +27,39 @@ for reading only. Reference setups (compose files and live tests) live in `refer
 
 Boundary rules: read-only context retrieval is `knowledge`, anything with side effects is `tool`; who may do what is
 `identity`, whether the content is acceptable is `guardrail`.
+
+## Layers, slots and ports
+
+Three kinds of names appear in configs, code and docs. They are one model, and this table is its reference:
+
+- A **layer** is a responsibility: eleven of them, each with a stable id and a display title. The id is what
+  telemetry (`layer`), adapter descriptors, the docs and `reference/<layer id>/` use.
+- A **slot** is what you write: a key under `layers` in `agent-layers.json` that takes one adapter, a keyed set or a
+  list. There are 22, and each belongs to exactly one layer. The config block is called `layers`; its keys are slots.
+- A **port** is the contract a slot fills: the interface an adapter implements, versioned with semver. One port per
+  slot.
+
+So `layers.model` is the slot `model` of the layer `llm` and takes a ModelPort adapter; `layers.runtime` is a slot of
+`harness`; `layers.router` and `layers.cache` are the two slots of the layer `cache`; and the layer `identity` has
+four slots, one per question it answers (who, with which credentials, allowed or not, approved or not).
+
+| Layer id | Title | Slots (keys under `layers`) | Ports |
+|---|---|---|---|
+| `infra` | Infrastructure & delivery | `deploy`, `secrets` | DeployPort, SecretPort |
+| `llm` | Models | `model` | ModelPort |
+| `cache` | Model routing & cache (fallback, quotas) | `router`, `cache` | RouterPort, CachePort |
+| `harness` | Agent runtime | `runtime`, `state`, `store` | RuntimePort, StatePort, StorePort |
+| `knowledge` | Knowledge & memory | `knowledge`, `memory`, `ingestion` | KnowledgePort, MemoryPort, IngestionPort |
+| `tool` | Tools | `tools` | ToolPort |
+| `identity` | Identity & access | `identity`, `credentials`, `authorization`, `approval` | IdentityPort, CredentialPort, AuthorizationPort, ApprovalPort |
+| `guardrail` | Guardrails | `guardrails` | GuardPort |
+| `interface` | Interfaces, channels & triggers | `channels`, `triggers` | ChannelPort, TriggerPort |
+| `telemetry` | Telemetry & observability | `telemetry` | TelemetryPort |
+| `eval` | Evaluation & improvement | `eval`, `feedback` | EvaluatorPort, FeedbackPort |
+
+The table mirrors `LAYERS` and `SLOTS` in `packages/core` (`src/layers.ts`, `src/slots.ts`); a core test
+keeps the two lists consistent and `npm run docs:check` fails when this table differs from them.
+`agent-layers layers` prints the same mapping with the adapter each slot uses.
 
 ## Planes at a glance
 

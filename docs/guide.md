@@ -32,7 +32,8 @@ project, where it runs the local binary. Inside this repository, use
 
 ## Concepts in one paragraph each
 
-- **Layer**: one of eleven concerns, with a stable id (`knowledge`). Each answers one question.
+- **Layer**: one of eleven concerns, with a stable id (`knowledge`). Each answers one question and is made of one or
+  more slots (22 in total; the full mapping is in [stack.md](stack.md#layers-slots-and-ports)).
 - **Port**: the interface for a layer's job (`KnowledgePort.search → Passage[]`), versioned with semver.
 - **Adapter**: maps a standard or a technology's native API onto a port. A descriptor declares layer, port,
   direction, what it maps, port version, tiers and an options schema.
@@ -315,7 +316,7 @@ corporate model gateway through an OpenAI-compatible URL. Then `agent-layers dep
 | `eval <dataset> [--agent X]` | Run and score a JSON Lines dataset (`--agent` defaults to the first agent; `--out <file>`; `--min <0..1>` exits 1 when the pass rate is below it, otherwise the exit code is 0 and a hint says so) |
 | `deploy` / `up` / `down` | Plan, start and stop services through the deploy slot (`--dry-run`). The plan says how many steps it runs, or `nothing to deploy` when the deploy adapter has nothing to start (with `compose-deploy`: no compose file for any layer and no image service in `layers.services`). A dry run needs no secret: a variable without a default that is not set is listed as `would need: ...` instead of failing |
 | `diff <a> <b>` | Per slot: same, changed, added, removed |
-| `layers` | The eleven layers by plane: ports and versions, adapter in use, installed adapters (standard and native); like a dry run, it lists the unset variables the profile would need instead of failing |
+| `layers` | The eleven layers by plane: slots, ports and versions, adapter in use, installed adapters (standard and native); like a dry run, it lists the unset variables the profile would need instead of failing |
 | `gateway` | Host the profile on the network ([gateway.md](gateway.md)): mounted channels and triggers on one address, every request authenticated through the identity slot; `--port`, `--host`; a production-tier profile must pass the readiness gate |
 | `version` | The versions of the cli and of the `@agent-layers/core` it resolves (also `--version`, `-v`); they differ when a project has more than one copy installed |
 

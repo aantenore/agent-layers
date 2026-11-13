@@ -13,6 +13,16 @@ Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released w
   `gateway.trustProxy` reads the client address from `X-Forwarded-For` behind trusted proxies. The prototype tier
   multiplies the defaults by 100. See [docs/limits.md](docs/limits.md#gateway).
 
+### Changed
+
+- One vocabulary for layers, slots and ports. `LAYERS` (`@agent-layers/core`) now lists the slots of each layer, and
+  `slotsOf(layer)` returns them with their ports; a core test and `npm run docs:check` keep code and
+  [docs/stack.md](docs/stack.md#layers-slots-and-ports) in step. The model is described everywhere as eleven layers,
+  each made of one or more slots (22 in total). `agent-layers layers` prints the slot name next to each port.
+- The display title of the layer `cache` (L2) is now "Model routing & cache (fallback, quotas)" instead of "Model
+  access (routing, fallback, quotas, cache)", so the title names the two slots of the layer (`router`, `cache`). The
+  id `cache`, every config key and every port are unchanged.
+
 ### Fixed
 
 - The `minimal` template's `production` profile has no localhost or placeholder fallback left: `OIDC_AUDIENCE`,

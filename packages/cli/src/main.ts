@@ -24,7 +24,7 @@ const HELP = `agent-layers <command> [options]
   deploy                     plan and start the services through the deploy slot (--dry-run lists unset variables instead of failing)
   up | down                  start or stop the services of a profile
   diff <profileA> <profileB> what changes between two profiles, slot by slot
-  layers                     the eleven layers: ports, versions, adapters in use and installed
+  layers                     the eleven layers: slots, ports, versions, adapters in use and installed
   gateway                    host the stack on the network: mounted channels and triggers, identity on every request (--port, --host, --allow-insecure-bind)
   version                    the versions of this cli and of the @agent-layers/core it runs on (also --version, -v)
 

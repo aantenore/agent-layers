@@ -1,6 +1,7 @@
 # Architecture
 
-agent-layers composes the eleven layers of an agent stack. It does not implement any of them. The core defines
+agent-layers composes the eleven layers of an agent stack, each made of one or more slots (22 in total; the mapping
+is in [stack.md](stack.md#layers-slots-and-ports)). It does not implement any of them. The core defines
 **ports**, the interfaces a developer needs to build and ship an agent; **adapters** map a standard or a
 technology's native API onto a port; **pipelines** glue the ports together; a **stack config** says which adapter
 fills each port, per **profile**. The agent runtime is one adapter among others, never the container.
@@ -15,7 +16,7 @@ Each layer answers one question. Layers have stable ids (`infra`, `llm`, ...); t
 |---|---|---|---|---|
 | Foundation | L0 | Infrastructure & delivery (`infra`) | Where does it run and how does it get there? | DeployPort, SecretPort |
 | Model | L1 | Models (`llm`) | Who thinks? | ModelPort |
-| Model | L2 | Model access: routing, fallback, quotas, cache (`cache`) | Which model, at what cost and latency? | RouterPort, CachePort |
+| Model | L2 | Model routing & cache: fallback, quotas (`cache`) | Which model, at what cost and latency? | RouterPort, CachePort |
 | Agent | L3 | Agent runtime (`harness`) | How does the agent loop run and keep state? | RuntimePort, StatePort, StorePort |
 | Agent | L4 | Knowledge & memory (`knowledge`) | What does it know? | KnowledgePort, MemoryPort, IngestionPort |
 | Agent | L5 | Tools (`tool`) | What can it do? | ToolPort |
