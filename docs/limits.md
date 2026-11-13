@@ -54,6 +54,19 @@ described in Why. **Accepted** is the validated range. **Safe range** is what pr
 | `gateway.corsMaxAgeS` | `600` s | 0–86400 | — | — | How long a browser may cache a CORS preflight answer. |
 | `gateway.maxRequestIdChars` | `64` chars | 1–256 | — | — | Longest `X-Request-Id` kept from the caller; longer ones are replaced, so logs stay small. |
 | `gateway.maxTraceChars` | `512` chars | 1–8192 | — | — | Longest `traceparent` and `tracestate` copied into a run, each; longer or non-printable ones are dropped, so a caller cannot grow every span and outbound header. |
+| `gateway.maxInflight` | `256` | 1–∞ or unbounded | 1–4096 | warn if unbounded; warn outside safe range | Most requests in flight at once, streams included; more get 503 with `Retry-After`, so a flood cannot hold every model and tool connection. |
+| `gateway.maxInflightPerSubject` | `32` | 1–∞ or unbounded | 1–256 | warn if unbounded; warn outside safe range | Most requests in flight for one authenticated subject; more get 429 with `Retry-After`, so one caller cannot take the whole capacity. |
+| `gateway.rateLimitRequests` | `600` | 1–∞ or unbounded | 1–6000 | warn if unbounded; warn outside safe range | Requests one client may send per `rateLimitWindowMs`, counted by subject when authenticated and by client address otherwise; more get 429 with `Retry-After`, which bounds the model cost one client can run up. |
+| `gateway.rateLimitAuthFailures` | `10` | 1–∞ or unbounded | 1–100 | fail if unbounded; warn outside safe range | Credentials that fail verification one client address may present per `rateLimitWindowMs`; after that every credential from the address gets 429 before it is verified, which slows credential guessing. |
+| `gateway.rateLimitWindowMs` | `60000` ms | 100–3600000 | — | — | Length of the fixed window both rate limits count in. |
+
+The four caps above are enforced per gateway process, in memory: several instances each count on their own, and a
+restart clears the counters. On the prototype tier their defaults are multiplied by 100 (a value set in the config
+applies as written), so local work never meets them. The client address is the socket address; behind a reverse proxy
+that is the proxy, so every unauthenticated client shares one window and one failed-credential lock. Set
+`gateway.trustProxy` to the number of proxies in front of the gateway to count by the `X-Forwarded-For` entry the
+outermost trusted proxy appended instead; leave it at `0` when clients can reach the gateway directly, because the
+header is then theirs to forge. Health endpoints and CORS preflights are not counted.
 
 ### `pipeline`
 

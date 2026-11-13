@@ -10,6 +10,7 @@ import { approvalRoutes } from './approvals.ts';
 import { runRoutes } from './runs.ts';
 import { BoundsHeaderError, delegationOf } from './bounds.ts';
 import { BodyTooLarge, errorResponse, readBody, toRequest, writeResponse } from './http.ts';
+import { clientAddress, Concurrency, FixedWindow } from './throttle.ts';
 
 export { BodyTooLarge, errorResponse } from './http.ts';
 export { DEFAULT_APPROVALS_PATH, approvalRoutes, approvalView, decidedBy } from './approvals.ts';
@@ -41,6 +42,13 @@ const RESERVED = ['/healthz', '/readyz'];
 const REQUEST_ID_CHARS = /^[A-Za-z0-9._-]+$/;
 const REALM = 'agent-layers';
 const LOOPBACK = ['127.0.0.1', 'localhost', '::1'];
+/**
+ * The prototype tier multiplies the default concurrency caps and rate limits by this when they are not set, so local
+ * work and scripted checks never meet them; a value set in the config applies as written on every tier.
+ */
+const PROTOTYPE_DEFAULT_FACTOR = 100;
+/** `Retry-After` (seconds) of an answer refused by a concurrency cap: capacity frees as soon as a request ends. */
+const BUSY_RETRY_AFTER_S = 1;
 /**
  * Response headers exposed to cross-origin clients whatever is mounted, joined by each mount's `exposeHeaders`.
  * `mcp-session-id` stays here until every MCP channel declares it on its mount.
@@ -106,7 +114,7 @@ export function unmountedTriggers(stack: Stack): string[] {
 
 /**
  * Hosts a composed stack on the network: mounts its inbound adapters on one node:http server, authenticates every
- * request through the identity port, enforces body and time limits, logs each request through the telemetry port
+ * request through the identity port, enforces body, time, concurrency and rate limits, logs each request through the telemetry port
  * (layer `interface`) and serves `/healthz` and `/readyz`. Closing the gateway does not close the stack.
  */
 export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promise<GatewayHandle> {
@@ -131,6 +139,16 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
   const corsMaxAgeS = limitValue(L.corsMaxAgeS, limits.corsMaxAgeS);
   const maxRequestIdChars = limitValue(L.maxRequestIdChars, limits.maxRequestIdChars);
   const maxTraceChars = limitValue(L.maxTraceChars, limits.maxTraceChars);
+  const abuseLimit = (key: 'maxInflight' | 'maxInflightPerSubject' | 'rateLimitRequests' | 'rateLimitAuthFailures'): number =>
+    limitValue(L[key], limits[key]) * (limits[key] === undefined && tier === 'prototype' ? PROTOTYPE_DEFAULT_FACTOR : 1);
+  const rateLimitWindowMs = limitValue(L.rateLimitWindowMs, limits.rateLimitWindowMs);
+  const trustProxy = opts.trustProxy ?? 0;
+  if (!Number.isInteger(trustProxy) || trustProxy < 0) throw new ConfigError(['gateway.trustProxy: must be an integer >= 0']);
+  const inflightAll = new Concurrency(abuseLimit('maxInflight'));
+  const inflightBySubject = new Concurrency(abuseLimit('maxInflightPerSubject'));
+  const requestWindow = new FixedWindow(abuseLimit('rateLimitRequests'), rateLimitWindowMs);
+  const authFailureWindow = new FixedWindow(abuseLimit('rateLimitAuthFailures'), rateLimitWindowMs);
+  const tooMany = (retryAfterS: number): Response => errorResponse(429, 'too many requests', 'rate_limit_error', { 'retry-after': String(retryAfterS) });
   const telemetry: TelemetryPort = stack.telemetry;
   if (tier === 'production' && anonymous) throw new ConfigError(['gateway: anonymous requests are not allowed on the production tier (remove gateway.anonymous)']);
   if (tier === 'production' && !stack.ports.identity) throw new ConfigError(['gateway: the production tier needs an identity adapter (layers.identity) to authenticate requests']);
@@ -264,7 +282,7 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     return undefined;
   }
 
-  async function exchange(req: IncomingMessage, requestId: string, signal: AbortSignal, attrs: Record<string, string | number | boolean>, trace: TraceContext | undefined): Promise<Response> {
+  async function exchange(req: IncomingMessage, requestId: string, signal: AbortSignal, attrs: Record<string, string | number | boolean>, trace: TraceContext | undefined, held: (() => void)[]): Promise<Response> {
     const path = new URL(req.url ?? '/', 'http://gateway').pathname;
     const method = (req.method ?? 'GET').toUpperCase();
     const corsHeaders = cors(req);
@@ -296,13 +314,32 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     const entry = mounted.find((m) => m.route === route)!;
     attrs['http.route'] = route.path;
     attrs['gateway.inbound'] = entry.instance;
+    // Abuse protection, before any credential is verified or any body is read (docs/limits.md#gateway).
+    const slot = inflightAll.enter();
+    if (!slot) return errorResponse(503, 'the gateway is at capacity', 'unavailable', { 'retry-after': String(BUSY_RETRY_AFTER_S) });
+    held.push(slot);
+    const address = clientAddress(req.socket.remoteAddress, req.headers['x-forwarded-for'], trustProxy);
     let caller: Caller | undefined;
     if (!route.public) {
+      // An address that keeps presenting credentials that fail is refused before the next one is verified.
+      const presented = req.headers[authHeader ?? 'authorization'] !== undefined;
+      const locked = presented ? authFailureWindow.blocked(address) : undefined;
+      if (locked !== undefined) return tooMany(locked);
       const auth = await authenticate(req);
-      if (auth instanceof Response) return auth;
+      if (auth instanceof Response) {
+        if (presented) authFailureWindow.take(address);
+        return auth;
+      }
       caller = auth.caller;
     }
     attrs['gateway.authenticated'] = !!caller;
+    const wait = requestWindow.take(caller ? `subject:${caller.id}` : `address:${address}`);
+    if (wait !== undefined) return tooMany(wait);
+    if (caller) {
+      const own = inflightBySubject.enter(caller.id);
+      if (!own) return tooMany(BUSY_RETRY_AFTER_S);
+      held.push(own);
+    }
     // Bounds the caller sent: a malformed header is refused before the route runs (fail closed).
     let delegation: InboundContext['delegation'];
     try {
@@ -339,10 +376,12 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
     const trace = traceOf(req.headers.traceparent, req.headers.tracestate, maxTraceChars);
     await telemetry.span('gateway.request', { [ATTR.layer]: 'interface', ...attrs }, async (span) => {
       let response: Response;
+      // Concurrency slots taken by this request; released once the answer, stream included, is written.
+      const held: (() => void)[] = [];
       if (draining) response = errorResponse(503, 'the gateway is shutting down', 'unavailable', { connection: 'close' });
       else {
         try {
-          response = await exchange(req, requestId, signal, attrs, trace);
+          response = await exchange(req, requestId, signal, attrs, trace, held);
         } catch {
           // Never the error text: it can carry upstream bodies or credentials.
           response = signal.aborted && !client.signal.aborted
@@ -350,7 +389,11 @@ export async function serveStack(stack: Stack, opts: GatewayOptions = {}): Promi
             : errorResponse(500, 'internal error', 'server_error');
         }
       }
-      await writeResponse(res, response, { 'x-request-id': requestId, ...cors(req) });
+      try {
+        await writeResponse(res, response, { 'x-request-id': requestId, ...cors(req) });
+      } finally {
+        for (const release of held) release();
+      }
       span.setAttributes({ ...attrs, 'http.response.status_code': response.status, 'gateway.duration_ms': Date.now() - started });
       telemetry.metric('gateway.requests', 1, { [ATTR.layer]: 'interface', 'http.response.status_code': response.status, ...(attrs['gateway.inbound'] ? { 'gateway.inbound': String(attrs['gateway.inbound']) } : {}) });
     }, trace ? { parent: trace } : undefined).catch(() => { if (!res.headersSent) { res.writeHead(500); } if (!res.writableEnded) res.end(); });

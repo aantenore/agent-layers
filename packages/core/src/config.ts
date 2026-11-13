@@ -87,6 +87,21 @@ export interface GatewayConfig {
   maxRequestIdChars?: number;
   /** Longest trace context header values (parent, state) kept from the caller, each; longer or non-printable ones are dropped (default 512). */
   maxTraceChars?: number;
+  /** Most requests in flight at once, streams included; more get 503 with `Retry-After` (default 256). */
+  maxInflight?: LimitValue;
+  /** Most requests in flight for one authenticated subject; more get 429 with `Retry-After` (default 32). */
+  maxInflightPerSubject?: LimitValue;
+  /** Requests one client (the subject when authenticated, the client address otherwise) may send per window; more get 429 (default 600). */
+  rateLimitRequests?: LimitValue;
+  /** Credentials that fail verification one client address may present per window; more get 429 before verification (default 10). */
+  rateLimitAuthFailures?: LimitValue;
+  /** Length of the rate limit window (default 60000). */
+  rateLimitWindowMs?: number;
+  /**
+   * Proxies in front of the gateway whose `X-Forwarded-For` entry is trusted: the client address is the n-th entry from
+   * the right. Default 0: the socket address, which behind a proxy is the proxy.
+   */
+  trustProxy?: number;
   /** Public origin used in absolute URLs (agent cards), when the gateway sits behind a proxy. */
   publicOrigin?: string;
   /** Cross-origin access; off when omitted. */

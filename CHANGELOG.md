@@ -4,6 +4,15 @@ Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released w
 
 ## Unreleased
 
+### Added
+
+- Gateway abuse protection, with Node built-ins only: `gateway.maxInflight` (503) and `gateway.maxInflightPerSubject`
+  (429) cap requests in flight; `gateway.rateLimitRequests` per `gateway.rateLimitWindowMs` limits each client (the
+  subject when authenticated, the client address otherwise); `gateway.rateLimitAuthFailures` refuses an address that
+  keeps presenting credentials that fail, before the next one is verified. Every refusal carries `Retry-After`.
+  `gateway.trustProxy` reads the client address from `X-Forwarded-For` behind trusted proxies. The prototype tier
+  multiplies the defaults by 100. See [docs/limits.md](docs/limits.md#gateway).
+
 ### Fixed
 
 - `agent-layers gateway` on a port that is taken, or that it may not bind, fails with one line naming the address and

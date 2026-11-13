@@ -1165,6 +1165,95 @@
           "default": 512,
           "description": "Longest trace context header values (parent, state) kept from the caller, each; longer or non-printable ones are dropped (chars); default 512."
         },
+        "maxInflight": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "const": "unbounded"
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 256,
+          "description": "Most requests in flight at once, streams included (503 with Retry-After above); default 256; \"unbounded\" disables it."
+        },
+        "maxInflightPerSubject": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "const": "unbounded"
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 32,
+          "description": "Most requests in flight for one authenticated subject (429 with Retry-After above); default 32; \"unbounded\" disables it."
+        },
+        "rateLimitRequests": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "const": "unbounded"
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 600,
+          "description": "Requests one client (subject when authenticated, client address otherwise) may send per rateLimitWindowMs (429 above); default 600; \"unbounded\" disables it."
+        },
+        "rateLimitAuthFailures": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "const": "unbounded"
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 10,
+          "description": "Credentials failing verification one client address may present per rateLimitWindowMs (429 above, before verification); default 10; \"unbounded\" disables it."
+        },
+        "rateLimitWindowMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 3600000
+            },
+            {
+              "type": "string",
+              "pattern": "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\\}$"
+            }
+          ],
+          "default": 60000,
+          "description": "Length of the rate limit window (ms); default 60000."
+        },
+        "trustProxy": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16,
+          "description": "Trusted proxies in front of the gateway: the client address is the n-th X-Forwarded-For entry from the right; default 0: the socket address."
+        },
         "publicOrigin": {
           "type": "string",
           "minLength": 1

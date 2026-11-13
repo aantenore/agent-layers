@@ -10,6 +10,11 @@ export const GATEWAY_LIMITS = defineLimits({
   corsMaxAgeS: { path: 'gateway.corsMaxAgeS', default: 600, unit: 's', min: 0, max: 86_400 },
   maxRequestIdChars: { path: 'gateway.maxRequestIdChars', default: 64, unit: 'chars', min: 1, max: 256 },
   maxTraceChars: { path: 'gateway.maxTraceChars', default: 512, unit: 'chars', min: 1, max: 8192 },
+  maxInflight: { path: 'gateway.maxInflight', default: 256, unit: 'count', min: 1, unbounded: 'warn', safe: { max: 4096 } },
+  maxInflightPerSubject: { path: 'gateway.maxInflightPerSubject', default: 32, unit: 'count', min: 1, unbounded: 'warn', safe: { max: 256 } },
+  rateLimitRequests: { path: 'gateway.rateLimitRequests', default: 600, unit: 'count', min: 1, unbounded: 'warn', safe: { max: 6000 } },
+  rateLimitAuthFailures: { path: 'gateway.rateLimitAuthFailures', default: 10, unit: 'count', min: 1, unbounded: 'fail', safe: { max: 100 } },
+  rateLimitWindowMs: { path: 'gateway.rateLimitWindowMs', default: 60_000, unit: 'ms', min: 100, max: 3_600_000 },
 });
 
 /** Limits of the composition pipelines (`pipeline` block). */

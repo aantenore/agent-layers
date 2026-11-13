@@ -76,6 +76,12 @@ The `gateway` block of the stack config, overridable per profile; `serveStack` t
 | `corsMaxAgeS` | integer | `600` | How long browsers may cache a CORS preflight answer |
 | `maxRequestIdChars` | integer | `64` | Longest `X-Request-Id` kept from the caller; longer ones are replaced |
 | `maxTraceChars` | integer | `512` | Longest `traceparent` and `tracestate` kept from the caller, each; longer or non-printable ones are dropped |
+| `maxInflight` | integer | `256` | Most requests in flight at once (503 with `Retry-After` above) |
+| `maxInflightPerSubject` | integer | `32` | Most requests in flight for one authenticated subject (429 above) |
+| `rateLimitRequests` | integer | `600` | Requests per `rateLimitWindowMs` for one client: the subject when authenticated, the client address otherwise (429 above) |
+| `rateLimitAuthFailures` | integer | `10` | Credentials failing verification per `rateLimitWindowMs` from one client address; then 429 before verification |
+| `rateLimitWindowMs` | integer | `60000` | Length of the rate limit window |
+| `trustProxy` | integer | `0` | Proxies in front of the gateway whose `X-Forwarded-For` entry is trusted as the client address; `0` uses the socket address |
 | `publicOrigin` | string | the listen address | Origin used in absolute URLs, behind a proxy |
 | `cors` | `{ origins }` | off | Origins allowed to call from a browser (`*` for any) |
 | `allowedOrigins` | string[] | `[]` | Origins accepted besides the gateway's own, without CORS headers (desktop clients) |
