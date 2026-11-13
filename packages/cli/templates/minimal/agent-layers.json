@@ -119,16 +119,16 @@
         "cache": null,
         "runtime": { "adapter": "reinloop", "options": { "tools": { "timeoutMs": "${env:TOOL_TIMEOUT_MS:-60000}" } } },
         "state": { "adapter": "sqlite-state", "options": { "path": ".agent-layers/state.db" } },
-        "identity": { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER}", "audience": "${env:OIDC_AUDIENCE:-agent-runtime}" } },
+        "identity": { "adapter": "oidc", "options": { "issuer": "${env:OIDC_ISSUER}", "audience": "${env:OIDC_AUDIENCE}" } },
         "credentials": {
           "adapter": "oidc",
-          "options": { "issuer": "${env:OIDC_ISSUER}", "clientId": "${env:OIDC_CLIENT_ID:-agent-runtime}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
+          "options": { "issuer": "${env:OIDC_ISSUER}", "clientId": "${env:OIDC_CLIENT_ID}", "clientSecret": "${env:OIDC_CLIENT_SECRET}", "mode": "on-behalf-of" }
         },
-        "authorization": { "adapter": "opa", "options": { "url": "${env:OPA_URL:-http://localhost:8181}" } },
+        "authorization": { "adapter": "opa", "options": { "url": "${env:OPA_URL}" } },
         "approval": null,
         "guardrails": [
-          { "adapter": "presidio", "options": { "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL:-http://localhost:5002}", "anonymizerUrl": "${env:PRESIDIO_ANONYMIZER_URL:-http://localhost:5001}", "entities": ["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "IP_ADDRESS"] } },
-          { "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL:-http://localhost:8000}", "token": "${env:LLM_GUARD_TOKEN:-}" } }
+          { "adapter": "presidio", "options": { "analyzerUrl": "${env:PRESIDIO_ANALYZER_URL}", "anonymizerUrl": "${env:PRESIDIO_ANONYMIZER_URL}", "entities": ["EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "IP_ADDRESS"] } },
+          { "adapter": "llm-guard", "options": { "url": "${env:LLM_GUARD_URL}", "token": "${env:LLM_GUARD_TOKEN:-}" } }
         ],
         "channels": [
           { "adapter": "openai-compatible", "options": { "models": { "default": "default" } } },

@@ -15,6 +15,10 @@ Every package under `packages/*` (and, before 0.4.0, `adapters/*`) is released w
 
 ### Fixed
 
+- The `minimal` template's `production` profile has no localhost or placeholder fallback left: `OIDC_AUDIENCE`,
+  `OIDC_CLIENT_ID`, `OPA_URL`, `PRESIDIO_ANALYZER_URL`, `PRESIDIO_ANONYMIZER_URL` and `LLM_GUARD_URL` are required like
+  `OIDC_ISSUER`, `GATEWAY_URL` and `GATEWAY_PUBLIC_ORIGIN`, so `check --profile production` names each unset one
+  instead of pointing at `localhost`. The other profiles still run with no environment.
 - `agent-layers gateway` on a port that is taken, or that it may not bind, fails with one line naming the address and
   the fix (`cannot listen on 127.0.0.1:8787: address already in use; pick another port with --port <n> or
   gateway.port in agent-layers.json`) and exit code 1, instead of a Node.js stack trace.

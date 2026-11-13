@@ -66,8 +66,8 @@ test('check --profile production finds every adapter installed; only secrets and
   assert.equal(await main(['check', '--profile', 'production', '--skip-conformance'], missing.io), 1);
   assert.match(missing.errors(), /OIDC_CLIENT_SECRET is not set \(profile production\)/);
   assert.match(missing.errors(), /SESSION_SECRET is not set \(profile production\)/);
-  for (const name of ['OIDC_ISSUER', 'GATEWAY_URL', 'GATEWAY_PUBLIC_ORIGIN']) assert.match(missing.errors(), new RegExp(`${name} is not set \\(profile production\\)`), 'no localhost fallback');
-  const { io, text } = captureIo(dir, { OIDC_CLIENT_SECRET: 'test-secret', SESSION_SECRET: 'test-session-key', OIDC_ISSUER: 'https://idp.example.com/realms/agents', GATEWAY_URL: 'https://llm.example.com/v1', GATEWAY_PUBLIC_ORIGIN: 'https://agents.example.com' });
+  for (const name of ['OIDC_ISSUER', 'OIDC_AUDIENCE', 'OIDC_CLIENT_ID', 'OPA_URL', 'PRESIDIO_ANALYZER_URL', 'PRESIDIO_ANONYMIZER_URL', 'LLM_GUARD_URL', 'GATEWAY_URL', 'GATEWAY_PUBLIC_ORIGIN']) assert.match(missing.errors(), new RegExp(`${name} is not set \\(profile production\\)`), 'no localhost fallback');
+  const { io, text } = captureIo(dir, { OIDC_CLIENT_SECRET: 'test-secret', SESSION_SECRET: 'test-session-key', OIDC_ISSUER: 'https://idp.example.com/realms/agents', OIDC_AUDIENCE: 'agent-runtime', OIDC_CLIENT_ID: 'agent-runtime', OPA_URL: 'https://opa.example.com', PRESIDIO_ANALYZER_URL: 'https://presidio.example.com/analyzer', PRESIDIO_ANONYMIZER_URL: 'https://presidio.example.com/anonymizer', LLM_GUARD_URL: 'https://llm-guard.example.com', GATEWAY_URL: 'https://llm.example.com/v1', GATEWAY_PUBLIC_ORIGIN: 'https://agents.example.com' });
   assert.equal(await main(['check', '--profile', 'production', '--skip-conformance'], io), 0, text());
   assert.match(text(), /tier production/);
   assert.match(text(), /requires: identity, authorization, guardrails, telemetry, state/);
@@ -258,13 +258,13 @@ test('deploy --dry-run says when there is nothing to deploy and needs no secret'
   assert.doesNotMatch(empty.text(), /would need/);
   const production = captureIo(dir);
   assert.equal(await main(['deploy', '--profile', 'production', '--dry-run'], production.io), 0, production.errors());
-  assert.match(production.text(), /would need: GATEWAY_PUBLIC_ORIGIN, GATEWAY_URL, OIDC_CLIENT_SECRET, OIDC_ISSUER, SESSION_SECRET \(not set\)/);
+  assert.match(production.text(), /would need: GATEWAY_PUBLIC_ORIGIN, GATEWAY_URL, LLM_GUARD_URL, OIDC_AUDIENCE, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_ISSUER, OPA_URL, PRESIDIO_ANALYZER_URL, PRESIDIO_ANONYMIZER_URL, SESSION_SECRET \(not set\)/);
   const layersOut = captureIo(dir);
   assert.equal(await main(['layers', '--profile', 'production'], layersOut.io), 0, layersOut.errors());
-  assert.match(layersOut.text(), /would need: GATEWAY_PUBLIC_ORIGIN, GATEWAY_URL, OIDC_CLIENT_SECRET, OIDC_ISSUER, SESSION_SECRET \(not set\)/);
+  assert.match(layersOut.text(), /would need: GATEWAY_PUBLIC_ORIGIN, GATEWAY_URL, LLM_GUARD_URL, OIDC_AUDIENCE, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_ISSUER, OPA_URL, PRESIDIO_ANALYZER_URL, PRESIDIO_ANONYMIZER_URL, SESSION_SECRET \(not set\)/);
   const diffOut = captureIo(dir);
   assert.equal(await main(['diff', 'pilot', 'production'], diffOut.io), 0, diffOut.errors());
-  assert.match(diffOut.text(), /would need: GATEWAY_PUBLIC_ORIGIN, GATEWAY_URL, OIDC_CLIENT_SECRET, OIDC_ISSUER, SESSION_SECRET \(not set\)/);
+  assert.match(diffOut.text(), /would need: GATEWAY_PUBLIC_ORIGIN, GATEWAY_URL, LLM_GUARD_URL, OIDC_AUDIENCE, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_ISSUER, OPA_URL, PRESIDIO_ANALYZER_URL, PRESIDIO_ANONYMIZER_URL, SESSION_SECRET \(not set\)/);
   // A real deploy still needs every secret.
   const real = captureIo(dir);
   assert.equal(await main(['deploy', '--profile', 'production'], real.io), 1);

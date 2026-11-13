@@ -11,16 +11,19 @@ QDRANT_URL=http://localhost:6333
 
 # production: identity, authorization, guardrails, model access. State is a SQLite file
 # (.agent-layers/state.db); response caching happens in the model gateway, not here.
-# OIDC_ISSUER, GATEWAY_URL and GATEWAY_PUBLIC_ORIGIN have no default: check --profile production fails until you set
-# them to your company values (for a local stack: http://localhost:8080/realms/agents, http://localhost:4000/v1, http://localhost:8787).
+# The addresses and OIDC names below have no default: check --profile production fails until you set each one to your
+# company value. For a local stack: OIDC_ISSUER=http://localhost:8080/realms/agents, OIDC_AUDIENCE=agent-runtime,
+# OIDC_CLIENT_ID=agent-runtime, OPA_URL=http://localhost:8181, PRESIDIO_ANALYZER_URL=http://localhost:5002,
+# PRESIDIO_ANONYMIZER_URL=http://localhost:5001, LLM_GUARD_URL=http://localhost:8000,
+# GATEWAY_URL=http://localhost:4000/v1, GATEWAY_PUBLIC_ORIGIN=http://localhost:8787.
 OIDC_ISSUER=
-OIDC_AUDIENCE=agent-runtime
-OIDC_CLIENT_ID=agent-runtime
+OIDC_AUDIENCE=
+OIDC_CLIENT_ID=
 OIDC_CLIENT_SECRET=change-me
-OPA_URL=http://localhost:8181
-PRESIDIO_ANALYZER_URL=http://localhost:5002
-PRESIDIO_ANONYMIZER_URL=http://localhost:5001
-LLM_GUARD_URL=http://localhost:8000
+OPA_URL=
+PRESIDIO_ANALYZER_URL=
+PRESIDIO_ANONYMIZER_URL=
+LLM_GUARD_URL=
 LLM_GUARD_TOKEN=change-me
 GATEWAY_URL=
 GATEWAY_KEY=change-me

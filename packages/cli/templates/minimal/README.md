@@ -65,9 +65,11 @@ with the same embedding model (`sentence-transformers/all-MiniLM-L6-v2`), for ex
 and the run goes on without passages.
 
 Production also sets, each from an environment variable (`.env.example`): `sessions.secret`
-(`SESSION_SECRET`, no default: generate one), the OIDC issuer (`OIDC_ISSUER`), the model gateway (`GATEWAY_URL`) and
-`gateway.publicOrigin` (`GATEWAY_PUBLIC_ORIGIN`), which have no default either, so `check --profile production` fails
-until they are set; the run budget `limits.run.maxTokens` (`RUN_MAX_TOKENS`, 200000) and
+(`SESSION_SECRET`, no default: generate one), the OIDC issuer, audience and client (`OIDC_ISSUER`, `OIDC_AUDIENCE`,
+`OIDC_CLIENT_ID`), the policy engine (`OPA_URL`), the guardrail services (`PRESIDIO_ANALYZER_URL`,
+`PRESIDIO_ANONYMIZER_URL`, `LLM_GUARD_URL`), the model gateway (`GATEWAY_URL`) and `gateway.publicOrigin`
+(`GATEWAY_PUBLIC_ORIGIN`), which have no default either, so `check --profile production` fails until they are set
+and never falls back to a localhost address; the run budget `limits.run.maxTokens` (`RUN_MAX_TOKENS`, 200000) and
 `limits.run.maxCostUsd` (`RUN_MAX_COST_USD`, 5), priced with `pipeline.pricing` for the model `default` (replace the
 prices with those of your model gateway), the tool time limit of the `reinloop` runtime (`TOOL_TIMEOUT_MS`, 60000).
 `gateway.publicOrigin` is advertised by the A2A agent card and must be the address
