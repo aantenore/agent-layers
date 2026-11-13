@@ -249,7 +249,7 @@ the Host check accepts its host next to `allowedHosts` (a gateway on a non-loopb
 every interface (`0.0.0.0` or `::`) advertises `http://localhost:<port>`, which no remote client can call. Set it
 whenever the host is not a loopback address and an `a2a` channel is mounted, and whenever a proxy, a load balancer or
 a TLS terminator stands in front of the gateway. The production profile of the `init` template reads it from
-`GATEWAY_PUBLIC_ORIGIN` (default `http://localhost:8787`).
+`GATEWAY_PUBLIC_ORIGIN`, which has no default.
 
 ## A runtime in another language
 

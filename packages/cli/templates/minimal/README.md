@@ -64,12 +64,14 @@ with the same embedding model (`sentence-transformers/all-MiniLM-L6-v2`), for ex
 `qdrant-store` tool. When the source or the collector is down, `npm run dev -- --profile pilot` says so on stderr
 and the run goes on without passages.
 
-Production also sets, each from an environment variable with a default (`.env.example`): `sessions.secret`
-(`SESSION_SECRET`, no default: generate one), the run budget `limits.run.maxTokens` (`RUN_MAX_TOKENS`, 200000) and
+Production also sets, each from an environment variable (`.env.example`): `sessions.secret`
+(`SESSION_SECRET`, no default: generate one), the OIDC issuer (`OIDC_ISSUER`), the model gateway (`GATEWAY_URL`) and
+`gateway.publicOrigin` (`GATEWAY_PUBLIC_ORIGIN`), which have no default either, so `check --profile production` fails
+until they are set; the run budget `limits.run.maxTokens` (`RUN_MAX_TOKENS`, 200000) and
 `limits.run.maxCostUsd` (`RUN_MAX_COST_USD`, 5), priced with `pipeline.pricing` for the model `default` (replace the
-prices with those of your model gateway), the tool time limit of the `reinloop` runtime (`TOOL_TIMEOUT_MS`, 60000)
-and the gateway's public address `gateway.publicOrigin` (`GATEWAY_PUBLIC_ORIGIN`, http://localhost:8787), which the
-A2A agent card advertises and which must be the address clients reach once the gateway listens on `0.0.0.0`.
+prices with those of your model gateway), the tool time limit of the `reinloop` runtime (`TOOL_TIMEOUT_MS`, 60000).
+`gateway.publicOrigin` is advertised by the A2A agent card and must be the address
+clients reach once the gateway listens on `0.0.0.0`.
 
 ## Swap a technology
 
